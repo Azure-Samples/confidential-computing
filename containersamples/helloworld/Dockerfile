@@ -17,7 +17,6 @@ RUN apt-get update && apt-get install -y \
     libsgx-quote-ex \
     az-dcap-client \
     open-enclave
-WORKDIR /opt/openenclave/share/openenclave/samples/helloworld
 RUN apt-get update && apt-get install -y git
 ## Copy over the samples, Source openenclaverc, Set up environment variables, Make the helloworld sample
 RUN cp -R /opt/openenclave/share/openenclave/samples . \
