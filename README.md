@@ -1,57 +1,55 @@
-# Project Name
+---
+page_type: sample
+languages:
+- yaml
+- python
+- shell
+- C++
+products:
+- azure-confidential-computing
+- azure-kubernetes-service
+- azure attestation-service
+description: "Azure Confidential Computing Intel SGX based Samples"
+urlFragment: confidential-computing-samples
+---
 
-(short, 1-3 sentenced, description of the project)
+# Confidential Containers Samples
 
-## Features
+![MIT license badge](https://img.shields.io/badge/license-MIT-green.svg)
 
-This project framework provides the following features:
+Security is a key driver accelerating the adoption of cloud computing, but it’s also a major concern when you’re moving extremely sensitive IP and data scenarios to the cloud.
 
-* Feature 1
-* Feature 2
-* ...
+Confidential computing is the protection of data-in-use through isolating computations to a hardware-based trusted execution environment (TEE). While data is traditionally encrypted at rest and in transit, confidential computing protects your data while it’s being processed. A TEE provides a protected container by securing a portion of the hardware’s processor and memory. You can run software on top of the protected environment to shield portions of your code and data from view or modification from outside of the TEE. [read more](https://azure.microsoft.com/en-us/solutions/confidential-compute/)
 
-## Getting Started
+![SGX execution method](./hardware-backed-enclave.png)
 
-### Prerequisites
+**Scope:** This repo is aggregated samples based for the solutions that are specifically developed to run on Intel SGX hardware (Enclave Aware) and may encompass references to non Azure software and Open Source Solutions (OSS). The deployments are split into VM Compute and Container Compute to Specifically focus on the packaging and deployment preferences.
 
-(ideally very short, if any)
+## Prerequisites
 
-- OS
-- Library version
-- ...
+## VM Deployments
 
-### Installation
+[Azure subscription](https://azure.microsoft.com/free/)
+[Intel SGX based ACC Virtual Machine (DCSv2)](https://docs.microsoft.com/en-us/azure/confidential-computing/quick-create-portal)
+[Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest)
 
-(ideally very short)
+## How to use this template repository
 
-- npm install [package name]
-- mvn install
-- ...
+This repo is organized by folders that states the sample name followed in the respective packaging and deployment methods.
 
-### Quickstart
-(Add steps to get up and running quickly)
+- [Container Samples](/containersamples/readme.md)
+- [VM Samples](/vmsamples/readme.md)
 
-1. git clone [repository clone url]
-2. cd [respository name]
-3. ...
+## Contributing
 
+This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
+the rights to use your contribution. For details, visit <https://cla.opensource.microsoft.com.>
 
-## Demo
+When you submit a pull request, a CLA bot will automatically determine whether you need to provide
+a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
+provided by the bot. You will only need to do this once across all repos using our CLA.
 
-A demo app is included to show how to use the project.
-
-To run the demo, follow these steps:
-
-(Add steps to start up the demo)
-
-1.
-2.
-3.
-
-## Resources
-
-(Any additional resources or related projects)
-
-- Link to supporting information
-- Link to similar sample
-- ...
+This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
+For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
+contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.

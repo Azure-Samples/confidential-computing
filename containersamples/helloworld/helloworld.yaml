@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oe-helloworld
+spec:
+  template:
+    metadata:
+      labels:
+        app: oe-helloworld
+    spec:
+      containers:
+      - name: oe-helloworld
+        image: oeciteam/oe-helloworld:1.0
+        env:
+        - name: SGX_AESM_ADDR
+          value: 1
+        resources:
+          limits:
+            kubernetes.azure.com/sgx_epc_mem_in_MiB: 10
+      restartPolicy: "Never"
+  backoffLimit: 0
