@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: attested-tls-service
+spec:
+  ports:
+  - name: client1
+    port: 12341
+    targetPort: 12341
+  selector:
+    app: attested-tls-server
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: attested-tls-server-demo
+  labels:
+    app: attested-tls-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: attested-tls-server
+  template:
+    metadata:
+      labels:
+        app: attested-tls-server
+    spec:
+      containers:
+      - name: attested-tls-server-demo
+        image: oeciteam/attested_tls:1.0
+        command: ["./server/host/tls_server_host", "./server/enc/tls_server_enc.signed", "-port:12341"]
+        env:
+          - name: SGX_AESM_ADDR
+            value: 1
+        ports:
+        - name: client1
+          containerPort: 12341
+        imagePullPolicy: Always
+        resources:
+          limits:
+            kubernetes.azure.com/sgx_epc_mem_in_MiB: 10
