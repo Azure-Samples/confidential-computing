@@ -2,6 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: attested-tls-client
+  namespace: default
 spec:
   template:
     metadata:
@@ -10,7 +11,7 @@ spec:
     spec:
       containers:
       - name: attested-tls-client
-        image: oeciteam/attested_tls:1.0
+        image: oeciteam/oe-attested-tls:1.0
         command: ["./non_enc_client/tls_non_enc_client"]
         resources:
           limits:
@@ -18,7 +19,7 @@ spec:
           requests:
             kubernetes.azure.com/sgx_epc_mem_in_MiB: "5"
         args:
-        - -server:<server IP here>
-        - -port:12341
-      restartPolicy: "Never"
+          - -server:<server IP here>
+          - -port:12341
+      restartPolicy: Never
   backoffLimit: 0
