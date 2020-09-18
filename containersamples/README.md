@@ -8,4 +8,4 @@ The samples include respective Dockerfile and yaml files. You can use the Docker
 
 ## [Attested-TLS](attested-tls/README.md)
 
-- This sample showcases two applications in respective enclaves to establish attested tls channel communications between them.
+- This sample showcases two applications with one in an enclave that establishes an attested tls channel for communication between them.

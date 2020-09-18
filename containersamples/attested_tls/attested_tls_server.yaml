@@ -29,15 +29,14 @@ spec:
     spec:
       containers:
       - name: attested-tls-server-demo
-        image: oeciteam/attested_tls:1.0
+        image: oeciteam/oe-attested-tls:1.0
         command: ["./server/host/tls_server_host", "./server/enc/tls_server_enc.signed", "-port:12341"]
-        env:
-          - name: SGX_AESM_ADDR
-            value: 1
         ports:
         - name: client1
           containerPort: 12341
         imagePullPolicy: Always
         resources:
           limits:
-            kubernetes.azure.com/sgx_epc_mem_in_MiB: 10
+            kubernetes.azure.com/sgx_epc_mem_in_MiB: "10"
+          requests:
+            kubernetes.azure.com/sgx_epc_mem_in_MiB: "10"
