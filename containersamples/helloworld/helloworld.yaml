@@ -13,7 +13,7 @@ spec:
         image: oeciteam/oe-helloworld:1.0
         env:
         - name: SGX_AESM_ADDR
-          value: 1
+          value: "1"
         resources:
           limits:
             kubernetes.azure.com/sgx_epc_mem_in_MiB: 10
