@@ -2,6 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: oe-helloworld
+  namespace: default
 spec:
   template:
     metadata:
@@ -11,11 +12,17 @@ spec:
       containers:
       - name: oe-helloworld
         image: oeciteam/oe-helloworld:1.0
-        env:
-        - name: SGX_AESM_ADDR
-          value: 1
         resources:
           limits:
-            kubernetes.azure.com/sgx_epc_mem_in_MiB: 10
+            kubernetes.azure.com/sgx_epc_mem_in_MiB: "10"
+          requests:
+            kubernetes.azure.com/sgx_epc_mem_in_MiB: "10"
+        volumeMounts:
+        - name: var-run-aesmd
+          mountPath: /var/run/aesmd
       restartPolicy: "Never"
+      volumes:
+      - name: var-run-aesmd
+        hostPath:
+          path: /var/run/aesmd
   backoffLimit: 0
