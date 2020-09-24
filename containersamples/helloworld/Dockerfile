@@ -32,7 +32,8 @@ RUN cp -R /opt/openenclave/share/openenclave/samples . \
 && . /opt/openenclave/share/openenclave/openenclaverc \
 && cd samples/helloworld && export CC=gcc && export CXX=g++ && export PKG_CONFIG_PATH=/opt/openenclave/share/pkgconfig/ \
 && make
-## The following sets the flag for out of proc attestation mode. Alternatively you can set this flag on the deployment files
+## The following sets the flags for out of proc attestation mode. Alternatively you can set these flags on the deployment files
 ENV SGX_AESM_ADDR=1 
+ENV OUT_OF_PROC=false
 ## Set the command as the helloworld entry point binaries
 CMD /samples/helloworld/host/helloworldhost /samples/helloworld/enclave/helloworldenc.signed
