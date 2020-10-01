@@ -10,4 +10,4 @@ You can also use helm to deploy the TLS server, and then TLS client by running t
 *helm install tls-server ./helm/server/* \
 *helm install tls-client ./helm/client/ --set server.ip=$(./helm/utils/get_server_ip.sh)* \
 \
-(get_server_ip.sh is a utility script which helps you to get external TLS server IP).
+(get_server_ip.sh is an utility script which helps you to get external TLS server IP).
