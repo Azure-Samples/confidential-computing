@@ -4,4 +4,4 @@ The sample source codes are from [the helloworld sample of the Open Enclave SDK]
 
 The corresponding docker image was published in Docker Hub. Please see [helloworld/Dockerfile](Dockerfile) for details of the docker image.
 
-You can use this yaml file for your Azure Kubernetes Service deployment. There is one pod, oe-helloworld, which can be deployed by using [test1](helm/helloworld/templates/helloworld.yaml).
+You can use this [helloworld.yaml](helm/helloworld/templates/helloworld.yaml) file for your Azure Kubernetes Service deployment. There is one pod, oe-helloworld.
