@@ -19,7 +19,7 @@ spec:
           requests:
             kubernetes.azure.com/sgx_epc_mem_in_MiB: "5"
         args:
-          - -server:<server IP here>
+          - -server:{{ .Values.server.ip }}
           - -port:12341
       restartPolicy: Never
   backoffLimit: 0
