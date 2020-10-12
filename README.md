@@ -13,7 +13,7 @@ description: "Azure Confidential Computing Intel SGX based Samples"
 urlFragment: confidential-computing-samples
 ---
 
-# Confidential Containers Samples
+# Confidential Computing Samples
 
 ![MIT license badge](https://img.shields.io/badge/license-MIT-green.svg)
 
