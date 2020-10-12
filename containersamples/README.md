@@ -1,6 +1,6 @@
 # Enclave Aware Container Samples
 
-The samples include respective Dockerfile and yaml files. You can use the Dockerfile to build sample application docker image, and push to Microsoft container registry or docker hub. You can use yaml file for your [Azure Kubernetes Service (AKS) deployments with confidential computing nodes](https://docs.microsoft.com/en-us/azure/confidential-computing/confidential-nodes-aks-getstarted) .
+The samples include respective Dockerfile and yaml files. You can use the Dockerfile to build sample application docker image, and push to Microsoft container registry or docker hub. You can use yaml file for your [Azure Kubernetes Service (AKS) deployments with confidential computing nodes](https://docs.microsoft.com/en-us/azure/confidential-computing/confidential-nodes-aks-get-started) .
 
 ## [HelloWorld](helloworld/README.md)
 
