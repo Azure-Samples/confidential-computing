@@ -37,19 +37,14 @@ RUN apt-get update && apt-get install -y \
     open-enclave \
     git
 
-
-## Clone openenclave repo from github # Specify target folder
-RUN git clone https://github.com/microsoft/openenclave.git
-
-## Set working directory & variables, make the sample
-WORKDIR /openenclave/samples/attested_tls
-RUN git checkout 200a01e94b1a5f7c6ab8d8228333461cde60bf44
-
 ## The following sets the flag for out of proc attestation mode. Alternatively you can set this flag on the kubernetes deployment files
 ENV SGX_AESM_ADDR=1
 
-
-RUN . /opt/openenclave/share/openenclave/openenclaverc \
+## Copy over the samples, source openenclaverc, set up environment variables
+RUN cp -R /opt/openenclave/share/openenclave/samples . \
+    && . /opt/openenclave/share/openenclave/openenclaverc \
+    && cd /samples/attested_tls \
     && export CC=gcc && export CXX=g++ && export PKG_CONFIG_PATH=/opt/openenclave/share/pkgconfig/ \
-    && make
+    && make 
+
 CMD make run-server-in-loop
