@@ -11,7 +11,7 @@ spec:
     spec:
       containers:
       - name: attested-tls-client
-        image: oeciteam/oe-attested-tls:1.0
+        image: oeciteam/oe-attested-tls:1.1
         command: ["./non_enc_client/tls_non_enc_client"]
         resources:
           limits:
