@@ -29,7 +29,7 @@ spec:
     spec:
       containers:
       - name: attested-tls-server-demo
-        image: oeciteam/oe-attested-tls:1.0
+        image: oeciteam/oe-attested-tls:1.1
         command: ["./server/host/tls_server_host", "./server/enc/tls_server_enc.signed", "-port:12341"]
         volumeMounts:
         - name: var-run-aesmd
