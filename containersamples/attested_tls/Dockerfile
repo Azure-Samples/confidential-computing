@@ -2,7 +2,7 @@ FROM ubuntu:18.04 as oe-attested-tls
 
 # This is the latest PSW version we are currently supporting. This may change in the future and you may require to update it
 # In that case, refer: https://01.org/intel-software-guard-extensions/downloads
-ENV PSW_VERSION=2.12
+ENV PSW_VERSION=2.13.100
 RUN if [ -z "$PSW_VERSION" ]; then echo "Please set PSW_VERSION (e.g. 2.11)." >&2; exit 1; fi
 RUN apt-get update && apt-get install -y \
     wget \
