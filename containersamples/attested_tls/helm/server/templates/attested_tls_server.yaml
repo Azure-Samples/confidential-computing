@@ -40,9 +40,9 @@ spec:
         imagePullPolicy: Always
         resources:
           limits:
-            kubernetes.azure.com/sgx_epc_mem_in_MiB:  "10"
+            sgx.intel.com/epc: "10Mi"
           requests:
-            kubernetes.azure.com/sgx_epc_mem_in_MiB: "10"
+            sgx.intel.com/epc: "10Mi"
       # restartPolicy: "Never"
       volumes:
       - name: var-run-aesmd
