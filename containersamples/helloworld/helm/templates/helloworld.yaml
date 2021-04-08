@@ -14,9 +14,9 @@ spec:
         image: oeciteam/oe-helloworld:1.0
         resources:
           limits:
-            kubernetes.azure.com/sgx_epc_mem_in_MiB: "10"
+            sgx.intel.com/epc: "10Mi"
           requests:
-            kubernetes.azure.com/sgx_epc_mem_in_MiB: "10"
+            sgx.intel.com/epc: "10Mi"
         volumeMounts:
         - name: var-run-aesmd
           mountPath: /var/run/aesmd
