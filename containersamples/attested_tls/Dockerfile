@@ -31,11 +31,11 @@ RUN echo "deb [arch=amd64] https://packages.microsoft.com/ubuntu/18.04/prod bion
     && wget -qO - https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
 
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     clang-7 libssl-dev gdb libprotobuf10 libsgx-dcap-ql \
     libsgx-quote-ex az-dcap-client open-enclave git libsgx-enclave-common \
     libsgx-enclave-common-dev libsgx-dcap-ql-dev gcc g++ python-pip \
-    sgx-aesm-service libsgx-aesm-quote-ex-plugin libsgx-urts libsgx-headers \
+    libsgx-aesm-quote-ex-plugin libsgx-urts libsgx-headers \
     linux-base-sgx
 
 RUN pip install cmake
