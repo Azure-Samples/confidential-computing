@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ gdb git python-pip linux-base-sgx libssl-dev \
     libsgx-dcap-ql-dev libsgx-enclave-common-dev
 
-RUN pip install cmake
+RUN pip install cmake==3.22.5
 
 ## The following sets the flag for out of proc attestation mode. Alternatively you can set this flag on the kubernetes deployment files
 ENV SGX_AESM_ADDR=1
