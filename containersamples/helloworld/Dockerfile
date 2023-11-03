@@ -1,5 +1,5 @@
 FROM ubuntu:20.04 as oe-helloworld
-ENV PSW_VERSION=2.15.100
+ENV PSW_VERSION=2.21.100
 
 RUN if [ -z "$PSW_VERSION" ]; then echo "Please set PSW_VERSION (e.g. 2.11)." >&2; exit 1; fi
 RUN apt-get update && apt-get install -y \
