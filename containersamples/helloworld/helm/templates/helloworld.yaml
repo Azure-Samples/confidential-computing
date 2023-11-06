@@ -11,7 +11,7 @@ spec:
     spec:
       containers:
       - name: oe-helloworld
-        image: accsamplesmcr.azurecr.io/public/acc/samples/oe-helloworld:1.1
+        image: mcr.microsoft.com/acc/samples/oe-helloworld:1.1
         resources:
           limits:
             sgx.intel.com/epc: "10Mi"
