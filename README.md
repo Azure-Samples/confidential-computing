@@ -5,11 +5,15 @@ languages:
 - python
 - shell
 - C++
+- PowerShell
+- AzureCLI
 products:
 - azure-confidential-computing
 - azure-kubernetes-service
 - azure attestation-service
-description: "Azure Confidential Computing Intel SGX based Samples"
+- azure-container-instances
+- azure-virtual-machines
+description: "Azure Confidential Computing Samples"
 urlFragment: confidential-computing-samples
 ---
 
@@ -21,25 +25,22 @@ Security is a key driver accelerating the adoption of cloud computing, but it’
 
 Confidential computing is the protection of data-in-use through isolating computations to a hardware-based trusted execution environment (TEE). While data is traditionally encrypted at rest and in transit, confidential computing protects your data while it’s being processed. A TEE provides a protected container by securing a portion of the hardware’s processor and memory. You can run software on top of the protected environment to shield portions of your code and data from view or modification from outside of the TEE. [read more](https://azure.microsoft.com/en-us/solutions/confidential-compute/)
 
-![SGX execution method](./hardware-backed-enclave.png)
-
-**Scope:** This repo is aggregated samples based for the solutions that are specifically developed to run on Intel SGX hardware (Enclave Aware) and may encompass references to non Azure software and Open Source Solutions (OSS). The deployments are split into VM Compute and Container Compute to Specifically focus on the packaging and deployment preferences.
-
 ## Prerequisites
 
-## VM Deployments
-
-[Azure subscription](https://azure.microsoft.com/free/)
-[Intel SGX based ACC Virtual Machine (DCSv2)](https://docs.microsoft.com/en-us/azure/confidential-computing/quick-create-portal)
-[Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest)
+[Azure subscription](https://azure.microsoft.com/free/) \
+[Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest) \
+[PowerShell](https://learn.microsoft.com/en-us/powershell/azure/install-azure-powershell?view=azps-latest)
 
 ## How to use this template repository
 
 This repo is organized by folders that states the sample name followed in the respective packaging and deployment methods.
 
 - [Container Samples](/containersamples/readme.md)
-- [VM Samples](/vmsamples/readme.md)
-
+- [VM Samples](/vm-samples/readme)
+- [ACI Samples](/aci-samples/)
+- [AKS Samples](/aks-samples/)
+- Snippet-* files with useful snippets of code to include in your own scripts
+ 
 ## Contributing
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a
