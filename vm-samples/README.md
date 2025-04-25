@@ -33,11 +33,6 @@ There is a similar concept to build an AKS cluster with CMK enabled on the worke
 The BuildRandomSQLCVM.ps1 script builds on the CVM script but deploys the specific SQL image to give you a SQL 2022 build running on Windows Server 2022 [official docs](https://learn.microsoft.com/en-gb/azure/azure-sql/virtual-machines/windows/sql-vm-create-confidential-vm-how-to?view=azuresql)
 
 
-# Azure Container Instances (ACI) Simple Example
-
-The BuildRandomACI.ps1 script builds a simple ACI instance with the 'confidential' SKU with a basic 'hello-world' container.
-
-
 # ARM Template
 Create a simple CVM with CMK enabled (work-in-progress)
 

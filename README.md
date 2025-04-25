@@ -35,10 +35,10 @@ Confidential computing is the protection of data-in-use through isolating comput
 
 This repo is organized by folders that states the sample name followed in the respective packaging and deployment methods.
 
-- [Container Samples](/containersamples/readme.md)
-- [VM Samples](/vm-samples/readme)
-- [ACI Samples](/aci-samples/)
-- [AKS Samples](/aks-samples/)
+- [Container Samples](/containersamples/README.md)
+- [VM Samples](/vm-samples/README.md)
+- [ACI Samples](/aci-samples/README.md)
+- [AKS Samples](/aks-samples/README.md)
 - Snippet-* files with useful snippets of code to include in your own scripts
  
 ## Contributing
