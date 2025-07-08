@@ -39,6 +39,8 @@ if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
     exit
 }# exit if any of the parameters are empty
 
+# mark the start time of the script execution
+$startTime = Get-Date
 # get the name of the script so we can tag the resource group with it
 $scriptName = $MyInvocation.MyCommand.Name
 
@@ -285,4 +287,6 @@ if ($smoketest) {
     write-host "To clean up manually, run: Remove-AzResourceGroup -Name $resgrp -Force"
 }
 
-
+# determine the execution time of the script
+$myTimeSpan = New-TimeSpan -Start $startTime -End (Get-Date)
+Write-Output ("Execution time was {0} minutes and {1} seconds." -f $myTimeSpan.Minutes, $myTimeSpan.Seconds)

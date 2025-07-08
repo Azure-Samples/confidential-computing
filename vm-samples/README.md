@@ -84,8 +84,8 @@ There is a similar concept to build an AKS cluster with CMK enabled on the worke
 The BuildRandomSQLCVM.ps1 script builds on the CVM script but deploys the specific SQL image to give you a SQL 2022 build running on Windows Server 2022 [official docs](https://learn.microsoft.com/en-gb/azure/azure-sql/virtual-machines/windows/sql-vm-create-confidential-vm-how-to?view=azuresql)
 
 
-# ARM Template
-Create a simple CVM with CMK enabled (work-in-progress)
+# ARM Template (currently a work-in-progress)
+Create a simple CVM with CMK enabled using an Azure Resource Manager (ARM) template
 
 You'll need to pre-create a disk encryption set and encryption key (use Azure Keyvault Premium) and replace the relevant values in the parameter file, see 'snippet-createDES.ps1' for an automated way to do this in an existing Azure Key Vault _Premium_ instance - in future will try to do this in the ARM template itself, seems complex to get the resource ID for the DES and pass it in the same ARM template (or, at-least I haven't figured out how to do it yet)
 
