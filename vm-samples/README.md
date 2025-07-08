@@ -5,22 +5,73 @@ Read more [here](https://learn.microsoft.com/en-gb/azure/confidential-computing/
 
 # PowerShell Build Scripts
 
-These scripts will build a sample CVM using PowerShell in a resource group with a 5-digit unique suffix (basename-abcde) and tag that resource group with owner:<YOUR_UPN>
+These scripts will build a sample CVM using PowerShell in a resource group with a 5-digit unique suffix (basename-abcde) and tag that resource group with comprehensive metadata including owner, OS type, and source repository information.
 
-BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for RDP access over the Internet. It will then kick off an attestation inside the CVM and present back the output (see WindowsAttest.ps1 for details) via Invoke-AzVMRunCommand
+BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Ubuntu 20.04, and RHEL 9.4 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand
 
 Use at your own risk, no warranties implied
 
 Based on https://learn.microsoft.com/en-us/azure/confidential-computing/quick-create-confidential-vm-azure-cli and https://aka.ms/accdocs resources
 
 Usage: 
-Git clone this repo locally (subsequent script depends on WindowsAttest.ps1)
+Git clone this repo locally (Windows deployments depend on WindowsAttest.ps1)
 Basename is a prefix assigned to all resources created by the script and will be given a 5 char suffix - for example : myCVM-sdfrw
 The script will generate a random complex password and output it to the terminal once, make sure you copy it if you want to login to the CVM
 
 ```
-./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME>
+./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest]
 ```
+
+## Parameters:
+- **subsID**: Your Azure subscription ID (required)
+- **basename**: A prefix for all resources created by the script (required)
+- **osType**: The operating system to deploy (required)
+- **description**: Optional description that will be added as a tag to the resource group
+- **smoketest**: Optional switch that automatically removes all resources after completion (useful for testing)
+
+## OS Type Options:
+- **Windows**: Windows Server 2022 Datacenter (supports RDP via Bastion)
+- **Ubuntu**: Ubuntu 20.04 CVM (supports SSH via Bastion)  
+- **RHEL**: Red Hat Enterprise Linux 9.4 CVM (supports SSH via Bastion)
+
+## Examples:
+```powershell
+# Deploy Windows CVM (resources remain)
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows"
+
+# Deploy Ubuntu CVM with description
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Ubuntu" -description "Development testing environment"
+
+# Deploy RHEL CVM for testing (automatically cleaned up)
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "test" -osType "RHEL" -smoketest
+
+# Smoketest with description for CI/CD pipeline
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "ci" -osType "Windows" -description "Automated testing pipeline" -smoketest
+```
+
+The script automatically tags the resource group with:
+- **owner**: Your Azure user principal name
+- **BuiltBy**: The script name that created the resources
+- **OSType**: The operating system type deployed
+- **GitRepo**: The GitHub repository URL where the script was cloned from
+- **description**: Optional description if provided
+- **smoketest**: Set to "true" when running in smoketest mode
+
+## Smoketest Mode:
+The `-smoketest` parameter is perfect for:
+- **Automated testing**: CI/CD pipelines that need to validate deployments
+- **Quick validation**: Testing that the script works without leaving resources behind
+- **Demonstrations**: Show functionality without manual cleanup
+- **Cost management**: Ensures test resources are automatically removed
+
+When using `-smoketest`, the script will:
+1. Deploy and configure the CVM as normal
+2. Run attestation checks
+3. Display a 10-second countdown with option to cancel deletion
+4. Automatically remove all created resources (VM, Key Vault, Bastion, VNet, etc.)
+5. Provide confirmation of successful cleanup
+
+## Important Notes:
 Note this will deploy an Azure Keyvault *Premium* SKU [pricing](https://azure.microsoft.com/en-gb/pricing/details/key-vault/#pricing) & enables purge protection for 10 days (you can adjust the purge protection period but AKV Premium is required for CVMs with confidential disk encryption
 
 By default the script will create a resource in North Europe - adjust the $region parameter in the parameter block at the start for alternative regions - check availability of CVMs in that region 1st
@@ -47,11 +98,12 @@ New-AzResourceGroupDeployment -Name DeployLocalTemplate -ResourceGroupName "<YOU
 
 [Attestation](https://learn.microsoft.com/en-us/azure/confidential-computing/attestation-solutions) is how you prove you are running on a confidential computing VM based on evidence provided and signed by the CPU and validated by an attestation service.
 
-Once you've deployed you can install the [simple attestation client](https://github.com/Azure/confidential-computing-cvm-guest-attestation/blob/main/cvm-platform-checker-exe/README.md) install the VC runtime 1st! to see true/false if your VM is protected by Azure Confidential Computing
+## Windows CVMs
+Once you've deployed a Windows CVM, you can install the [simple attestation client](https://github.com/Azure/confidential-computing-cvm-guest-attestation/blob/main/cvm-platform-checker-exe/README.md) install the VC runtime 1st! to see true/false if your VM is protected by Azure Confidential Computing
 
-The WindowsAttest.ps1 script can manually be invoked inside a CVM to do an automated attestation check against the West Europe shared attestation endpoint
+The WindowsAttest.ps1 script can manually be invoked inside a Windows CVM to do an automated attestation check against the West Europe shared attestation endpoint
 
-Expected output:
+Expected output for Windows CVMs:
 
 Running on a CVM (DCa / ECa Series SKU using AMD SEV-SNP hardware)
 >    This  Windows  OS is running on  sevsnpvm VM hardware
@@ -61,6 +113,10 @@ NOT running on a CVM (any other Azure SKU)
 >    This VM is NOT an Azure compliant CVM
 
 ![Screenshot of output from attestation script](./AttestationClientScreenshot.png)
+
+## Linux CVMs
+For Ubuntu and RHEL CVMs, the script performs a basic attestation check by looking for TPM devices and CVM indicators. For production use, you should implement proper Linux attestation tools 
+and libraries.
 
 You can download the script to a CVM or execute directly from GitHub >inside< your CVM by pasting the following single line Command in a PowerShell session that is running with Administrative permissions (review the script 1st to ensure you are happy with the binaries and packages it installs or download & customize)
 

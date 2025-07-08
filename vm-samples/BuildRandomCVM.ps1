@@ -10,9 +10,12 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME>
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
+# osType specifies which OS to deploy: Windows (Server 2022), Ubuntu (20.04), or RHEL (9.4)
+# description is an optional parameter that will be added as a tag to the resource group
+# smoketest is an optional switch that automatically removes all resources after completion (useful for testing)
 #
 # You'll need to have the latest Azure PowerShell module installed as older versions don't have the parameters for AKV & ACC (update-module -force)
 #
@@ -21,12 +24,34 @@
 # - look at the credential handling, it's not optimal
 
 # handle command line parameters, mandatory, will force you to enter them
-param ([Parameter(Mandatory)]$subsID,[Parameter(Mandatory)]$basename)
+param (
+    [Parameter(Mandatory)]$subsID,
+    [Parameter(Mandatory)]$basename,
+    [Parameter(Mandatory)]
+    [ValidateSet("Windows", "Ubuntu", "RHEL")]
+    $osType,
+    [Parameter(Mandatory=$false)]$description = "",
+    [Parameter(Mandatory=$false)][switch]$smoketest
+)
 
-if ($subsID -eq "" -or $basename -eq "") {
-    write-host "You must enter a subscription ID and a basename"
+if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
+    write-host "You must enter a subscription ID, basename, and OS type (Windows, Ubuntu, or RHEL)"
     exit
-}# exit if either of the parameters are empty
+}# exit if any of the parameters are empty
+
+# get the name of the script so we can tag the resource group with it
+$scriptName = $MyInvocation.MyCommand.Name
+
+# Get GitHub repository URL from git remote - we use this to tag the resource group with the repo URL
+$gitRemoteUrl = ""  
+    $gitRemoteUrl = git remote get-url origin
+    # Remove .git suffix if present
+    $gitRemoteUrl = $gitRemoteUrl -replace "\.git$", ""
+  
+# If git remote didn't work, use fallback
+if (-not $gitRemoteUrl) {
+    $gitRemoteUrl = "[Originally from] https://github.com/Microsoft/confidential-computing"
+}
 
 
 # Set PowerShell variables to use in the script
@@ -52,10 +77,16 @@ $vmSecurityType = "ConfidentialVM";
 $KeySize = 3072
 $diskEncryptionType = "ConfidentialVmEncryptedWithCustomerKey";
 write-host "----------------------------------------------------------------------------------------------------------------"
-write-host "Building a Confidential Virtual Machine in " $basename " in " $region
+write-host "Building a Confidential Virtual Machine ($osType) in " $basename " in " $region
+if ($smoketest) {
+    write-host "SMOKETEST MODE: Resources will be automatically deleted after completion" -ForegroundColor Yellow
+}
 write-host "IMPORTANT"
 write-host "VM admin username is " $vmusername
 write-host "randomly generated passsword for the VM is " $vmadminpassword " - save this now as you CANNOT retrieve it later"
+write-host ""
+write-host "Script: $scriptName"
+write-host "Repository URL: $gitRemoteUrl"
 write-host "----------------------------------------------------------------------------------------------------------------"
 
 #Interactive login for PowerShell - uncomment if you want the script to prompt you
@@ -73,8 +104,24 @@ $tmp = Get-AzContext
 $ownername = $tmp.Account.Id
 
 # Create Resource Group
+$resourceGroupTags = @{
+    owner = $ownername
+    BuiltBy = $scriptName
+    OSType = $osType
+    GitRepo = $gitRemoteUrl
+}
 
-New-AzResourceGroup -Name $resgrp -Location $region -Tag @{owner=$ownername} -force
+# Add description tag if provided
+if ($description -ne "") {
+    $resourceGroupTags.Add("description", $description)
+}
+
+# Add smoketest tag if running in smoketest mode
+if ($smoketest) {
+    $resourceGroupTags.Add("smoketest", "true")
+}
+
+New-AzResourceGroup -Name $resgrp -Location $region -Tag $resourceGroupTags -force
 
 #create a credential object
 $securePassword = ConvertTo-SecureString -String $vmadminpassword -AsPlainText -Force # this could probably be done better inline rather than via a variable
@@ -109,8 +156,25 @@ $desIdentity = (Get-AzDiskEncryptionSet -Name $desName -ResourceGroupName $resgr
 Set-AzKeyVaultAccessPolicy -VaultName $akvname -ResourceGroupName $resgrp -ObjectId $desIdentity -PermissionsToKeys wrapKey,unwrapKey,get -BypassObjectIdValidation;
         
 $VirtualMachine = New-AzVMConfig -VMName $VMName -VMSize $vmSize;
-$VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Windows -ComputerName $vmname -Credential $cred -ProvisionVMAgent -EnableAutoUpdate;
-$VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'MicrosoftWindowsServer' -Offer 'windowsserver' -Skus '2022-datacenter-smalldisk-g2' -Version "latest";
+
+# Configure OS based on the selected type
+switch ($osType) {
+    "Windows" {
+        $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Windows -ComputerName $vmname -Credential $cred -ProvisionVMAgent -EnableAutoUpdate;
+        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'MicrosoftWindowsServer' -Offer 'windowsserver' -Skus '2022-datacenter-smalldisk-g2' -Version "latest";
+        $VMIsLinux = $false
+    }
+    "Ubuntu" {
+        $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Linux -ComputerName $vmname -Credential $cred;
+        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer '0001-com-ubuntu-confidential-vm-focal' -Skus '20_04-lts-cvm' -Version "latest";
+        $VMIsLinux = $true
+    }
+    "RHEL" {
+        $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Linux -ComputerName $vmname -Credential $cred;
+        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'redhat' -Offer 'rhel-cvm' -Skus '9_4_cvm' -Version "latest";
+        $VMIsLinux = $true
+    }
+}
         
 $subnet = New-AzVirtualNetworkSubnetConfig -Name ($vmsubnetName) -AddressPrefix "10.0.0.0/24";
 $vnet = New-AzVirtualNetwork -Force -Name ($vnetname) -ResourceGroupName $resgrp -Location $region -AddressPrefix "10.0.0.0/16" -Subnet $subnet;
@@ -128,7 +192,11 @@ $nicId = $nic.Id;
 $VirtualMachine = Add-AzVMNetworkInterface -VM $VirtualMachine -Id $nicId;
 
 # Set VM SecurityType and connect to DES
-$VirtualMachine = Set-AzVMOSDisk -VM $VirtualMachine -StorageAccountType "StandardSSD_LRS" -CreateOption "FromImage" -SecurityEncryptionType $secureEncryptGuestState -SecureVMDiskEncryptionSet $diskencset.Id;
+if ($VMisLinux) {
+    $VirtualMachine = Set-AzVMOSDisk -VM $VirtualMachine -StorageAccountType "StandardSSD_LRS" -CreateOption "FromImage" -SecurityEncryptionType $secureEncryptGuestState -SecureVMDiskEncryptionSet $diskencset.Id -Linux;
+} else {
+    $VirtualMachine = Set-AzVMOSDisk -VM $VirtualMachine -StorageAccountType "StandardSSD_LRS" -CreateOption "FromImage" -SecurityEncryptionType $secureEncryptGuestState -SecureVMDiskEncryptionSet $diskencset.Id;
+}
 $VirtualMachine = Set-AzVmSecurityProfile -VM $VirtualMachine -SecurityType $vmSecurityType;
 $VirtualMachine = Set-AzVmUefi -VM $VirtualMachine -EnableVtpm $true -EnableSecureBoot $true;
 $VirtualMachine = Set-AzVMBootDiagnostic -VM $VirtualMachine -disable #disable boot diagnostics, you can re-enable if required
@@ -143,15 +211,78 @@ Add-AzVirtualNetworkSubnetConfig -Name "AzureBastionSubnet" -VirtualNetwork $vne
 $publicip = New-AzPublicIpAddress -ResourceGroupName $resgrp -name "VNet1-ip" -location $region -AllocationMethod Static -Sku Standard
 New-AzBastion -ResourceGroupName $resgrp -Name $bastionname -PublicIpAddressRgName $resgrp -PublicIpAddressName $publicIp.Name -VirtualNetworkRgName $resgrp -VirtualNetworkName $vnetname -Sku "Basic"
 
-#---------Do attestation check, kick off a script inside the VM to do the attestation check, note script is pulled from directory where this script is executed from---------
-# Invoke the command on the VM, using the local file
-write-host "Running an attestation check inside the VM, please wait for output..."
-$output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunPowerShellScript' -ScriptPath .\WindowsAttest.ps1
+#---------Do attestation check, kick off a script inside the VM to do the attestation check---------
+# Run attestation based on OS type
+write-host "Running an attestation check inside the $osType VM, please wait for output..."
+
+if ($osType -eq "Windows") {
+    # Windows VM - use PowerShell script
+    $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunPowerShellScript' -ScriptPath .\WindowsAttest.ps1
+} else {
+    # Linux VMs (Ubuntu/RHEL) - use shell script
+    $attestScript = @"
+#!/bin/bash
+echo "Linux $osType CVM attestation check"
+echo "Checking if running in a Confidential VM..."
+if [ -d "/sys/kernel/security/tpm0" ]; then
+    echo "TPM device detected"
+else
+    echo "No TPM device found"
+fi
+echo "For full attestation on Linux, additional tools and configuration may be required"
+echo "This is a basic check - implement proper attestation logic for production use"
+"@
+    $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunShellScript' -ScriptString $attestScript
+}
 write-host "--------------Output from the script that ran inside the VM--------------"
 write-host $output.Value.message # repeat the output from the script that ran inside the VM
 write-host "----------------------------------------------------------------------------------------------------------------"
 write-host "Build and validation complete, check the output above for the attestation status."
 
-#optional - uncomment the following if you want to automatically remove the VM after the attestation check
-#get-azresourceGroup -name $resgrp | Remove-AzResourceGroup   
+# Smoketest cleanup - automatically remove all resources if smoketest flag is used
+if ($smoketest) {
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "SMOKETEST MODE: Automatically removing all created resources..."
+    write-host "Removing resource group: $resgrp"
+    write-host "This will delete all resources including VM, Key Vault, Bastion, VNet, etc."
+    write-host "WARNING: RESOURCES ARE NOT RECOVERABLE."  -ForegroundColor Red
+    write-host "Press ANY KEY to cancel deletion, or wait 10 seconds to proceed..."  -ForegroundColor Yellow
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    
+    # Wait for 10 seconds or until a key is pressed
+    $timeout = 10
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $cancelled = $false
+    
+    while ($timer.Elapsed.TotalSeconds -lt $timeout) {
+        if ([Console]::KeyAvailable) {
+            [Console]::ReadKey($true) | Out-Null
+            $cancelled = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+        $remaining = [math]::Ceiling($timeout - $timer.Elapsed.TotalSeconds)
+        Write-Host "`rDeletion in $remaining seconds... (Press any key to cancel)" -NoNewline -ForegroundColor Yellow
+    }
+    $timer.Stop()
+    
+    if ($cancelled) {
+        write-host "`nDeletion cancelled by user. Resources remain in resource group: $resgrp" -ForegroundColor Green
+        write-host "To clean up manually later, run: Remove-AzResourceGroup -Name $resgrp -Force"
+    } else {
+        write-host "`nProceeding with resource deletion..."
+        try {
+            Remove-AzResourceGroup -Name $resgrp -Force -AsJob
+            write-host "Resource group deletion initiated successfully (running in background)"
+            write-host "All resources in resource group '$resgrp' are being removed"
+        } catch {
+            write-host "Error removing resource group: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+} else {
+    write-host ""
+    write-host "Resources created in resource group: $resgrp"
+    write-host "To clean up manually, run: Remove-AzResourceGroup -Name $resgrp -Force"
+}
+
 
