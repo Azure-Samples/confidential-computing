@@ -10,12 +10,13 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest]
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
 # osType specifies which OS to deploy: Windows (Server 2022), Ubuntu (24.04), or RHEL (9.5)
 # description is an optional parameter that will be added as a tag to the resource group
 # smoketest is an optional switch that automatically removes all resources after completion (useful for testing)
+# region is an optional parameter that specifies the Azure region (defaults to northeurope)
 #
 # You'll need to have the latest Azure PowerShell module installed as older versions don't have the parameters for AKV & ACC (update-module -force)
 #
@@ -31,7 +32,8 @@ param (
     [ValidateSet("Windows", "Ubuntu", "RHEL")]
     $osType,
     [Parameter(Mandatory=$false)]$description = "",
-    [Parameter(Mandatory=$false)][switch]$smoketest
+    [Parameter(Mandatory=$false)][switch]$smoketest,
+    [Parameter(Mandatory=$false)]$region = "northeurope"
 )
 
 if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
@@ -71,13 +73,23 @@ $vnetipname = $vnetname + "-pip"     #Name of the VNET IP
 $nicPrefix = $basename + "-nic"    #Name of the NIC
 $bastionsubnetName = "AzureBastionSubnet" # don't change this
 $vmsubnetname = $basename + "vmsubnet" # don't change this
-$region = "northeurope" #Makesure the region is supported for ACC
+# region is now a command line parameter with default value of northeurope
 $vmSize = "Standard_DC2as_v5"; #Note AMD SEV-SNP based SKUs are DCa and ECa series VMs (Big 'C' for Confidential, small 'a' for AMD)
 $identityType = "SystemAssigned";
 $secureEncryptGuestState = "DiskWithVMGuestState";
 $vmSecurityType = "ConfidentialVM";
 $KeySize = 3072
 $diskEncryptionType = "ConfidentialVmEncryptedWithCustomerKey";
+
+# Display region information
+if ($region -eq "northeurope") {
+    write-host "Using default region: $region (North Europe)" -ForegroundColor Cyan
+    write-host "To use a different region, specify -region parameter. Ensure the region supports Confidential VMs." -ForegroundColor Cyan
+} else {
+    write-host "Using specified region: $region" -ForegroundColor Cyan
+    write-host "Please ensure this region supports Confidential VMs and the selected VM SKU." -ForegroundColor Cyan
+}
+
 write-host "----------------------------------------------------------------------------------------------------------------"
 write-host "Building a Confidential Virtual Machine ($osType) in " $basename " in " $region
 if ($smoketest) {

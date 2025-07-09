@@ -7,7 +7,7 @@ Read more [here](https://learn.microsoft.com/en-gb/azure/confidential-computing/
 
 These scripts will build a sample CVM using PowerShell in a resource group with a 5-digit unique suffix (basename-abcde) and tag that resource group with comprehensive metadata including owner, OS type, and source repository information.
 
-BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Ubuntu 20.04 LTS, and RHEL 9.5 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand
+BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Ubuntu 24.04 LTS, and RHEL 9.5 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand
 
 Use at your own risk, no warranties implied
 
@@ -19,7 +19,7 @@ Basename is a prefix assigned to all resources created by the script and will be
 The script will generate a random complex password and output it to the terminal once, make sure you copy it if you want to login to the CVM
 
 ```powershell
-./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest]
+./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>]
 ```
 
 ## Parameters:
@@ -28,10 +28,11 @@ The script will generate a random complex password and output it to the terminal
 - **osType**: The operating system to deploy (required)
 - **description**: Optional description that will be added as a tag to the resource group
 - **smoketest**: Optional switch that automatically removes all resources after completion (useful for testing)
+- **region**: Optional Azure region to deploy resources (defaults to "northeurope")
 
 ## OS Type Options:
 - **Windows**: Windows Server 2022 Datacenter (supports RDP via Bastion)
-- **Ubuntu**: Ubuntu 20.04 LTS CVM (supports SSH via Bastion)  
+- **Ubuntu**: Ubuntu 24.04 LTS CVM (supports SSH via Bastion)  
 - **RHEL**: Red Hat Enterprise Linux 9.5 CVM (supports SSH via Bastion)
 
 ## Examples:
@@ -44,6 +45,9 @@ The script will generate a random complex password and output it to the terminal
 
 # Deploy RHEL CVM for testing (automatically cleaned up)
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "test" -osType "RHEL" -smoketest
+
+# Deploy Windows CVM in a specific region
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows" -region "eastus"
 
 # Smoketest with description for CI/CD pipeline
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "ci" -osType "Windows" -description "Automated testing pipeline" -smoketest
@@ -81,7 +85,7 @@ When using `-smoketest`, the script will:
 ## Important Notes:
 Note this will deploy an Azure Keyvault *Premium* SKU [pricing](https://azure.microsoft.com/en-gb/pricing/details/key-vault/#pricing) & enables purge protection for 10 days (you can adjust the purge protection period but AKV Premium is required for CVMs with confidential disk encryption
 
-By default the script will create a resource in North Europe - adjust the $region parameter in the parameter block at the start for alternative regions - check availability of CVMs in that region 1st
+By default the script will create resources in North Europe - you can specify a different region using the `-region` parameter. Make sure to check availability of CVMs in your chosen region first.
 
 There is a similar concept to build an AKS cluster with CMK enabled on the worker nodes.
 
