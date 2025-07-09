@@ -13,7 +13,7 @@
 # Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
-# osType specifies which OS to deploy: Windows (Server 2022), Ubuntu (20.04), or RHEL (9.4)
+# osType specifies which OS to deploy: Windows (Server 2022), Ubuntu (24.04), or RHEL (9.5)
 # description is an optional parameter that will be added as a tag to the resource group
 # smoketest is an optional switch that automatically removes all resources after completion (useful for testing)
 #
@@ -166,14 +166,14 @@ switch ($osType) {
         $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'MicrosoftWindowsServer' -Offer 'windowsserver' -Skus '2022-datacenter-smalldisk-g2' -Version "latest";
         $VMIsLinux = $false
     }
-    "Ubuntu" {
+    "Ubuntu" { # updated to use Ubuntu 24.04 LTS
         $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Linux -ComputerName $vmname -Credential $cred;
-        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer '0001-com-ubuntu-confidential-vm-focal' -Skus '20_04-lts-cvm' -Version "latest";
+        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer 'ubuntu-24_04-lts' -Skus 'cvm' -Version "latest";
         $VMIsLinux = $true
     }
     "RHEL" {
         $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Linux -ComputerName $vmname -Credential $cred;
-        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'redhat' -Offer 'rhel-cvm' -Skus '9_4_cvm' -Version "latest";
+        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'redhat' -Offer 'rhel-cvm' -Skus '9_5_cvm' -Version "latest";
         $VMIsLinux = $true
     }
 }

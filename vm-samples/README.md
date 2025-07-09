@@ -7,7 +7,7 @@ Read more [here](https://learn.microsoft.com/en-gb/azure/confidential-computing/
 
 These scripts will build a sample CVM using PowerShell in a resource group with a 5-digit unique suffix (basename-abcde) and tag that resource group with comprehensive metadata including owner, OS type, and source repository information.
 
-BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Ubuntu 20.04, and RHEL 9.4 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand
+BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Ubuntu 20.04 LTS, and RHEL 9.5 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand
 
 Use at your own risk, no warranties implied
 
@@ -18,7 +18,7 @@ Git clone this repo locally (Windows deployments depend on WindowsAttest.ps1)
 Basename is a prefix assigned to all resources created by the script and will be given a 5 char suffix - for example : myCVM-sdfrw
 The script will generate a random complex password and output it to the terminal once, make sure you copy it if you want to login to the CVM
 
-```
+```powershell
 ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest]
 ```
 
@@ -31,8 +31,8 @@ The script will generate a random complex password and output it to the terminal
 
 ## OS Type Options:
 - **Windows**: Windows Server 2022 Datacenter (supports RDP via Bastion)
-- **Ubuntu**: Ubuntu 20.04 CVM (supports SSH via Bastion)  
-- **RHEL**: Red Hat Enterprise Linux 9.4 CVM (supports SSH via Bastion)
+- **Ubuntu**: Ubuntu 20.04 LTS CVM (supports SSH via Bastion)  
+- **RHEL**: Red Hat Enterprise Linux 9.5 CVM (supports SSH via Bastion)
 
 ## Examples:
 ```powershell
@@ -64,12 +64,19 @@ The `-smoketest` parameter is perfect for:
 - **Demonstrations**: Show functionality without manual cleanup
 - **Cost management**: Ensures test resources are automatically removed
 
+### Interactive Safety Features:
+- **Real-time countdown**: Shows exactly how many seconds remain before deletion
+- **Easy cancellation**: Press any key during the 10-second countdown to cancel deletion
+- **Clear warnings**: Bold red warnings that resources cannot be recovered
+- **Flexible operation**: Works in both interactive and automated environments
+
 When using `-smoketest`, the script will:
 1. Deploy and configure the CVM as normal
 2. Run attestation checks
-3. Display a 10-second countdown with option to cancel deletion
-4. Automatically remove all created resources (VM, Key Vault, Bastion, VNet, etc.)
-5. Provide confirmation of successful cleanup
+3. Display a 10-second interactive countdown with real-time timer
+4. Allow cancellation by pressing any key during the countdown
+5. Automatically remove all created resources (VM, Key Vault, Bastion, VNet, etc.) if not cancelled
+6. Provide confirmation of successful cleanup or cancellation status
 
 ## Important Notes:
 Note this will deploy an Azure Keyvault *Premium* SKU [pricing](https://azure.microsoft.com/en-gb/pricing/details/key-vault/#pricing) & enables purge protection for 10 days (you can adjust the purge protection period but AKV Premium is required for CVMs with confidential disk encryption
@@ -120,13 +127,13 @@ and libraries.
 
 You can download the script to a CVM or execute directly from GitHub >inside< your CVM by pasting the following single line Command in a PowerShell session that is running with Administrative permissions (review the script 1st to ensure you are happy with the binaries and packages it installs or download & customize)
 
-```
+```powershell
 $ScriptFromGitHub = Invoke-WebRequest -uri https://raw.githubusercontent.com/vinfnet/simple-cvm-cmk-demo/refs/heads/main/WindowsAttest.ps1 ; Invoke-Expression $($ScriptFromGitHub.Content)
 ```
 
 If you want to run this command against your CVM >from< your own workstation over the Internet you can use the following 1-line command, edit the <VARIABLES> to match the VM you're targetting and paste it into a PowerShell session that is authenticated to your Azure subscription (in this case output will not be colour-coded)
 
-```
+```powershell
 $ScriptContent = Invoke-WebRequest -Uri https://raw.githubusercontent.com/vinfnet/simple-cvm-cmk-demo/main/WindowsAttest.ps1 -UseBasicParsing | Select-Object -ExpandProperty Content ; Invoke-AzVMRunCommand -ResourceGroupName <YOUR_RESOURCE_GROUP> -VMName <YOUR_VM_NAME> -CommandId "RunPowerShellScript" -ScriptString $ScriptContent
 ```
 
