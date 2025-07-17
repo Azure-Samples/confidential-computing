@@ -7,7 +7,7 @@ Read more [here](https://learn.microsoft.com/en-gb/azure/confidential-computing/
 
 These scripts will build a sample CVM using PowerShell in a resource group with a 5-digit unique suffix (basename-abcde) and tag that resource group with comprehensive metadata including owner, OS type, and source repository information.
 
-BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Ubuntu 24.04 LTS, and RHEL 9.5 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand
+BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Windows 11 Enterprise, Ubuntu 24.04 LTS, and RHEL 9.5 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand
 
 Use at your own risk, no warranties implied
 
@@ -19,7 +19,7 @@ Basename is a prefix assigned to all resources created by the script and will be
 The script will generate a random complex password and output it to the terminal once, make sure you copy it if you want to login to the CVM
 
 ```powershell
-./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>]
+./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>]
 ```
 
 ## Parameters:
@@ -32,13 +32,17 @@ The script will generate a random complex password and output it to the terminal
 
 ## OS Type Options:
 - **Windows**: Windows Server 2022 Datacenter (supports RDP via Bastion)
+- **Windows11**: Windows 11 Enterprise 23H2 (supports RDP via Bastion)
 - **Ubuntu**: Ubuntu 24.04 LTS CVM (supports SSH via Bastion)  
 - **RHEL**: Red Hat Enterprise Linux 9.5 CVM (supports SSH via Bastion)
 
 ## Examples:
 ```powershell
-# Deploy Windows CVM (resources remain)
+# Deploy Windows Server CVM (resources remain)
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows"
+
+# Deploy Windows 11 Enterprise CVM
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "mywin11" -osType "Windows11"
 
 # Deploy Ubuntu CVM with description
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Ubuntu" -description "Development testing environment"
@@ -46,11 +50,11 @@ The script will generate a random complex password and output it to the terminal
 # Deploy RHEL CVM for testing (automatically cleaned up)
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "test" -osType "RHEL" -smoketest
 
-# Deploy Windows CVM in a specific region
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows" -region "eastus"
+# Deploy Windows 11 CVM in a specific region
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows11" -region "eastus"
 
-# Smoketest with description for CI/CD pipeline
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "ci" -osType "Windows" -description "Automated testing pipeline" -smoketest
+# Smoketest with Windows 11 for CI/CD pipeline
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "ci" -osType "Windows11" -description "Automated testing pipeline" -smoketest
 ```
 
 The script automatically tags the resource group with:
@@ -110,9 +114,9 @@ New-AzResourceGroupDeployment -Name DeployLocalTemplate -ResourceGroupName "<YOU
 [Attestation](https://learn.microsoft.com/en-us/azure/confidential-computing/attestation-solutions) is how you prove you are running on a confidential computing VM based on evidence provided and signed by the CPU and validated by an attestation service.
 
 ## Windows CVMs
-Once you've deployed a Windows CVM, you can install the [simple attestation client](https://github.com/Azure/confidential-computing-cvm-guest-attestation/blob/main/cvm-platform-checker-exe/README.md) install the VC runtime 1st! to see true/false if your VM is protected by Azure Confidential Computing
+Once you've deployed a Windows CVM (Windows Server 2022 or Windows 11 Enterprise), you can install the [simple attestation client](https://github.com/Azure/confidential-computing-cvm-guest-attestation/blob/main/cvm-platform-checker-exe/README.md) install the VC runtime 1st! to see true/false if your VM is protected by Azure Confidential Computing
 
-The WindowsAttest.ps1 script can manually be invoked inside a Windows CVM to do an automated attestation check against the West Europe shared attestation endpoint
+The WindowsAttest.ps1 script can manually be invoked inside a Windows CVM to do an automated attestation check against the West Europe shared attestation endpoint. This script works with both Windows Server 2022 and Windows 11 Enterprise CVMs.
 
 Expected output for Windows CVMs:
 
