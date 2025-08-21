@@ -33,7 +33,8 @@ param (
     $osType,
     [Parameter(Mandatory=$false)]$description = "",
     [Parameter(Mandatory=$false)][switch]$smoketest,
-    [Parameter(Mandatory=$false)]$region = "northeurope"
+    [Parameter(Mandatory=$false)]$region = "northeurope",
+    [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v5"
 )
 
 if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
@@ -74,7 +75,7 @@ $nicPrefix = $basename + "-nic"    #Name of the NIC
 $bastionsubnetName = "AzureBastionSubnet" # don't change this
 $vmsubnetname = $basename + "vmsubnet" # don't change this
 # region is now a command line parameter with default value of northeurope
-$vmSize = "Standard_DC2as_v5"; #Note AMD SEV-SNP based SKUs are DCa and ECa series VMs (Big 'C' for Confidential, small 'a' for AMD)
+$vmSize = $vmsize # Use the value from the command line parameter
 $identityType = "SystemAssigned";
 $secureEncryptGuestState = "DiskWithVMGuestState";
 $vmSecurityType = "ConfidentialVM";

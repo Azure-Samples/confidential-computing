@@ -1,25 +1,17 @@
 # Confidential Virtual Machines
 
-Read more [here](https://learn.microsoft.com/en-gb/azure/confidential-computing/confidential-vm-overview) about these virtual machines that are able to protect data in use using hardware backed encryption from AMD and Intel.
+BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Windows 11 Enterprise, Ubuntu 24.04 LTS, and RHEL 9.5 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand.
 
+Use at your own risk, no warranties implied.
 
-# PowerShell Build Scripts
+## Usage
 
-These scripts will build a sample CVM using PowerShell in a resource group with a 5-digit unique suffix (basename-abcde) and tag that resource group with comprehensive metadata including owner, OS type, and source repository information.
-
-BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Windows 11 Enterprise, Ubuntu 24.04 LTS, and RHEL 9.5 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand
-
-Use at your own risk, no warranties implied
-
-Based on https://learn.microsoft.com/en-us/azure/confidential-computing/quick-create-confidential-vm-azure-cli and https://aka.ms/accdocs resources
-
-Usage: 
-Git clone this repo locally (Windows deployments depend on WindowsAttest.ps1)
-Basename is a prefix assigned to all resources created by the script and will be given a 5 char suffix - for example : myCVM-sdfrw
-The script will generate a random complex password and output it to the terminal once, make sure you copy it if you want to login to the CVM
+Clone this repo locally (Windows deployments depend on WindowsAttest.ps1).  
+Basename is a prefix assigned to all resources created by the script and will be given a 5 char suffix - for example: myCVM-sdfrw.  
+The script will generate a random complex password and output it to the terminal once; make sure you copy it if you want to login to the CVM.
 
 ```powershell
-./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>]
+./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-vmsize <VM SIZE SKU>]
 ```
 
 ## Parameters:
@@ -29,12 +21,19 @@ The script will generate a random complex password and output it to the terminal
 - **description**: Optional description that will be added as a tag to the resource group
 - **smoketest**: Optional switch that automatically removes all resources after completion (useful for testing)
 - **region**: Optional Azure region to deploy resources (defaults to "northeurope")
+- **vmsize**: Optional VM size SKU (defaults to "Standard_DC2as_v5"). Use this to select a different Confidential VM SKU, e.g. "Standard_DC4as_v5".
 
 ## OS Type Options:
 - **Windows**: Windows Server 2022 Datacenter (supports RDP via Bastion)
 - **Windows11**: Windows 11 Enterprise 23H2 (supports RDP via Bastion)
 - **Ubuntu**: Ubuntu 24.04 LTS CVM (supports SSH via Bastion)  
 - **RHEL**: Red Hat Enterprise Linux 9.5 CVM (supports SSH via Bastion)
+
+## Example:
+```powershell
+# Deploy Ubuntu CVM with a larger VM size
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myubuntu" -osType "Ubuntu" -vmsize "Standard_DC4as_v5"
+```
 
 ## Examples:
 ```powershell
