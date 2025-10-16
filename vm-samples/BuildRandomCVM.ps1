@@ -10,7 +10,7 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>]
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
 # osType specifies which OS to deploy: Windows (Server 2022), Windows11 (Windows 11 Enterprise), Ubuntu (24.04), or RHEL (9.5)
@@ -29,7 +29,7 @@ param (
     [Parameter(Mandatory)]$subsID,
     [Parameter(Mandatory)]$basename,
     [Parameter(Mandatory)]
-    [ValidateSet("Windows", "Windows11", "Ubuntu", "RHEL")]
+    [ValidateSet("Windows", "Windows11", "Windows2019", "Ubuntu", "RHEL")]
     $osType,
     [Parameter(Mandatory=$false)]$description = "",
     [Parameter(Mandatory=$false)][switch]$smoketest,
@@ -108,9 +108,9 @@ write-host "--------------------------------------------------------------------
 #If you are not logged in, or dont have the correct subscription selected you will need to do so 1st
 #Connect-AzAccount -SubscriptionId $subsid -Tenant <ADD TENANT ID>
 
-Set-AzContext -SubscriptionId $subsid
+Set-AzContext -SubscriptionId $subsID
 if (!$?) {
-    write-host "Failed to connect to the Azure subscription " $subsid " extiting"
+    write-host "Failed to connect to the Azure subscription " $subsID " extiting"
     exit
 }
 
@@ -184,6 +184,12 @@ switch ($osType) {
         $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'MicrosoftWindowsDesktop' -Offer 'Windows-11' -Skus 'win11-23h2-ent' -Version "latest";
         $VMIsLinux = $false
     }
+    "Windows2019" {
+        # Windows Server 2019 Confidential VM image (G2)
+        $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Windows -ComputerName $vmname -Credential $cred -ProvisionVMAgent -EnableAutoUpdate;
+        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'MicrosoftWindowsServer' -Offer 'windowsserver' -Skus '2019-datacenter-smalldisk-g2' -Version "latest";
+        $VMIsLinux = $false
+    }
     "Ubuntu" { # updated to use Ubuntu 24.04 LTS
         $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Linux -ComputerName $vmname -Credential $cred;
         $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer 'ubuntu-24_04-lts' -Skus 'cvm' -Version "latest";
@@ -235,8 +241,8 @@ New-AzBastion -ResourceGroupName $resgrp -Name $bastionname -PublicIpAddressRgNa
 # Run attestation based on OS type
 write-host "Running an attestation check inside the $osType VM, please wait for output..."
 
-if ($osType -eq "Windows") {
-    # Windows VM - use PowerShell script
+if ($osType -like 'Windows*' -and $osType -ne 'Windows11') {
+    # Windows family (Server and other Windows SKUs except Windows11) - use PowerShell script
     $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunPowerShellScript' -ScriptPath .\WindowsAttest.ps1
 } elseif ($osType -eq "Windows11") {
     # Windows 11 VM - use PowerShell script
