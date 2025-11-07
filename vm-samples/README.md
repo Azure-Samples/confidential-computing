@@ -85,6 +85,35 @@ When using `-smoketest`, the script will:
 5. Automatically remove all created resources (VM, Key Vault, Bastion, VNet, etc.) if not cancelled
 6. Provide confirmation of successful cleanup or cancellation status
 
+## Key Release Policy Template
+
+The [`releasePolicyTemplate.json`](releasePolicyTemplate.json) file is a template for configuring a key release policy that can be assigned to a CVM. This policy defines the conditions under which a key can be released from Azure Key Vault to a Confidential VM.
+
+### Key Features:
+- **Attestation validation**: Ensures the VM is running in a compliant confidential computing environment
+- **Custom MAA endpoint support**: Can be configured to point to a custom Microsoft Azure Attestation (MAA) endpoint
+- **SEV-SNP validation**: Validates that the VM is running on AMD SEV-SNP hardware
+
+### Default Behavior:
+If the `-policyFilePath` parameter is not specified when running `BuildRandomCVM.ps1`, the script will automatically use the default CVM policy that points to the shared attestation endpoint serving the region where your CVM has been created. This provides out-of-the-box attestation functionality without requiring custom configuration.
+
+### Usage with Custom MAA:
+The template can be customized to work with a private MAA endpoint created using the [`createPrivateMAA.ps1`](../attestation-samples/createPrivateMAA.ps1) script from the attestation-samples directory:
+
+1. Create a private MAA endpoint using the attestation samples
+2. Update the `authority` field in `releasePolicyTemplate.json` with your MAA endpoint URL
+3. Use the `-policyFilePath` parameter with `BuildRandomCVM.ps1` to apply the custom policy
+
+```powershell
+# Deploy CVM with default shared attestation endpoint (regional)
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows"
+
+# Deploy CVM with custom key release policy
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows" -policyFilePath "./releasePolicyTemplate.json"
+```
+
+This ensures that the CVM's customer-managed key can only be released when the attestation validation passes through your specified MAA endpoint (custom) or the regional shared endpoint (default).
+
 ## Important Notes:
 Note this will deploy an Azure Keyvault *Premium* SKU [pricing](https://azure.microsoft.com/en-gb/pricing/details/key-vault/#pricing) & enables purge protection for 10 days (you can adjust the purge protection period but AKV Premium is required for CVMs with confidential disk encryption
 
@@ -113,7 +142,7 @@ New-AzResourceGroupDeployment -Name DeployLocalTemplate -ResourceGroupName "<YOU
 [Attestation](https://learn.microsoft.com/en-us/azure/confidential-computing/attestation-solutions) is how you prove you are running on a confidential computing VM based on evidence provided and signed by the CPU and validated by an attestation service.
 
 ## Windows CVMs
-Once you've deployed a Windows CVM (Windows Server 2022 or Windows 11 Enterprise), you can install the [simple attestation client](https://github.com/Azure/confidential-computing-cvm-guest-attestation/blob/main/cvm-platform-checker-exe/README.md) install the VC runtime 1st! to see true/false if your VM is protected by Azure Confidential Computing
+Once you've deployed a Windows CVM (Windows Server 2022 or Windows 11 Enterprise), you can install the [simple attestation client](https://github.com/Azure/confidential-computing-cvm-guest-attestation/blob/main/cvm-platform-checker-exe/README.md) install the VC runtime 1st!to see true/false if your VM is protected by Azure Confidential Computing
 
 The WindowsAttest.ps1 script can manually be invoked inside a Windows CVM to do an automated attestation check against the West Europe shared attestation endpoint. This script works with both Windows Server 2022 and Windows 11 Enterprise CVMs.
 

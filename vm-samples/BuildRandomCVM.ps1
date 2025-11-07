@@ -10,13 +10,14 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>]
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
 # osType specifies which OS to deploy: Windows (Server 2022), Windows11 (Windows 11 Enterprise), Ubuntu (24.04), or RHEL (9.5)
 # description is an optional parameter that will be added as a tag to the resource group
 # smoketest is an optional switch that automatically removes all resources after completion (useful for testing)
 # region is an optional parameter that specifies the Azure region (defaults to northeurope)
+# policyFilePath is an optional parameter that specifies the path to a custom policy file for key vault key creation
 #
 # You'll need to have the latest Azure PowerShell module installed as older versions don't have the parameters for AKV & ACC (update-module -force)
 #
@@ -34,7 +35,8 @@ param (
     [Parameter(Mandatory=$false)]$description = "",
     [Parameter(Mandatory=$false)][switch]$smoketest,
     [Parameter(Mandatory=$false)]$region = "northeurope",
-    [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v5"
+    [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v5",
+    [Parameter(Mandatory=$false)]$policyFilePath = ""
 )
 
 if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
@@ -153,7 +155,14 @@ $cvmAgent = Get-AzADServicePrincipal -ApplicationId 'bf7b6499-ff71-4aa2-97a4-f37
 Set-AzKeyVaultAccessPolicy -VaultName $akvname -ResourceGroupName $resgrp -ObjectId $cvmAgent.id -PermissionsToKeys get,release;
 
 # Add Key vault Key
-Add-AzKeyVaultKey -VaultName $akvname -Name $KeyName -Size $KeySize -KeyOps wrapKey,unwrapKey -KeyType RSA -Destination HSM -Exportable -UseDefaultCVMPolicy;
+if ($policyFilePath -ne "" -and (Test-Path $policyFilePath)) {
+    Add-AzKeyVaultKey -VaultName $akvname -Name $KeyName -Size $KeySize -KeyOps wrapKey,unwrapKey -KeyType RSA -Destination HSM -Exportable -ReleasePolicyPath $policyFilePath;
+} else {
+    if ($policyFilePath -ne "" -and !(Test-Path $policyFilePath)) {
+        Write-Host "Warning: Policy file path '$policyFilePath' does not exist. Using default CVM policy instead." -ForegroundColor Yellow
+    }
+    Add-AzKeyVaultKey -VaultName $akvname -Name $KeyName -Size $KeySize -KeyOps wrapKey,unwrapKey -KeyType RSA -Destination HSM -Exportable -UseDefaultCVMPolicy;
+}
         
 # Capture Key Vault and Key details
 $encryptionKeyVaultId = (Get-AzKeyVault -VaultName $akvname -ResourceGroupName $resgrp).ResourceId;
@@ -237,8 +246,10 @@ Add-AzVirtualNetworkSubnetConfig -Name "AzureBastionSubnet" -VirtualNetwork $vne
 $publicip = New-AzPublicIpAddress -ResourceGroupName $resgrp -name "VNet1-ip" -location $region -AllocationMethod Static -Sku Standard
 New-AzBastion -ResourceGroupName $resgrp -Name $bastionname -PublicIpAddressRgName $resgrp -PublicIpAddressName $publicIp.Name -VirtualNetworkRgName $resgrp -VirtualNetworkName $vnetname -Sku "Basic"
 
+# COMMENTED OUT FOR NOW, will be re-factored to use latest attestation code from https://github.com/Azure/cvm-attestation-tools 
 #---------Do attestation check, kick off a script inside the VM to do the attestation check---------
 # Run attestation based on OS type
+<#
 write-host "Running an attestation check inside the $osType VM, please wait for output..."
 
 if ($osType -like 'Windows*' -and $osType -ne 'Windows11') {
@@ -267,6 +278,8 @@ write-host "--------------Output from the script that ran inside the VM---------
 write-host $output.Value.message # repeat the output from the script that ran inside the VM
 write-host "----------------------------------------------------------------------------------------------------------------"
 write-host "Build and validation complete, check the output above for the attestation status."
+#>
+
 
 # Smoketest cleanup - automatically remove all resources if smoketest flag is used
 if ($smoketest) {
