@@ -10,7 +10,7 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>]
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
 # osType specifies which OS to deploy: Windows (Server 2022), Windows11 (Windows 11 Enterprise), Ubuntu (24.04), or RHEL (9.5)
@@ -18,6 +18,7 @@
 # smoketest is an optional switch that automatically removes all resources after completion (useful for testing)
 # region is an optional parameter that specifies the Azure region (defaults to northeurope)
 # policyFilePath is an optional parameter that specifies the path to a custom policy file for key vault key creation
+# DisableBastion is an optional switch that skips the creation of Azure Bastion (VM will only be accessible via private network)
 #
 # You'll need to have the latest Azure PowerShell module installed as older versions don't have the parameters for AKV & ACC (update-module -force)
 #
@@ -36,7 +37,8 @@ param (
     [Parameter(Mandatory=$false)][switch]$smoketest,
     [Parameter(Mandatory=$false)]$region = "northeurope",
     [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v5",
-    [Parameter(Mandatory=$false)]$policyFilePath = ""
+    [Parameter(Mandatory=$false)]$policyFilePath = "",
+    [Parameter(Mandatory=$false)][switch]$DisableBastion
 )
 
 if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
@@ -98,6 +100,9 @@ write-host "Building a Confidential Virtual Machine ($osType) in " $basename " i
 if ($smoketest) {
     write-host "SMOKETEST MODE: Resources will be automatically deleted after completion" -ForegroundColor Yellow
 }
+if ($DisableBastion) {
+    write-host "BASTION DISABLED: VM will only be accessible via private network connectivity" -ForegroundColor Yellow
+}
 write-host "IMPORTANT"
 write-host "VM admin username is " $vmusername
 write-host "randomly generated passsword for the VM is " $vmadminpassword " - save this now as you CANNOT retrieve it later"
@@ -136,6 +141,11 @@ if ($description -ne "") {
 # Add smoketest tag if running in smoketest mode
 if ($smoketest) {
     $resourceGroupTags.Add("smoketest", "true")
+}
+
+# Add DisableBastion tag if running without Bastion
+if ($DisableBastion) {
+    $resourceGroupTags.Add("BastionDisabled", "true")
 }
 
 New-AzResourceGroup -Name $resgrp -Location $region -Tag $resourceGroupTags -force
@@ -239,12 +249,17 @@ $VirtualMachine = Set-AzVMBootDiagnostic -VM $VirtualMachine -disable #disable b
 New-AzVM -ResourceGroupName $resgrp -Location $region -Vm $VirtualMachine;
 $vm = Get-AzVm -ResourceGroupName $resgrp -Name $vmname;
 
-# Create the Bastion to allow accesing the VM via the Azure portal
-write-host "VM created, now enabling Bastion for the VM"
-$vnet = Get-AzVirtualNetwork -Name $vnetname -ResourceGroupName $resgrp
-Add-AzVirtualNetworkSubnetConfig -Name "AzureBastionSubnet" -VirtualNetwork $vnet -AddressPrefix "10.0.99.0/26" | Set-AzVirtualNetwork # you can make this subnet anything you like as long as it fits into the vnet address space
-$publicip = New-AzPublicIpAddress -ResourceGroupName $resgrp -name "VNet1-ip" -location $region -AllocationMethod Static -Sku Standard
-New-AzBastion -ResourceGroupName $resgrp -Name $bastionname -PublicIpAddressRgName $resgrp -PublicIpAddressName $publicIp.Name -VirtualNetworkRgName $resgrp -VirtualNetworkName $vnetname -Sku "Basic"
+# Create the Bastion to allow accessing the VM via the Azure portal (unless disabled)
+if (-not $DisableBastion) {
+    write-host "VM created, now enabling Bastion for the VM"
+    $vnet = Get-AzVirtualNetwork -Name $vnetname -ResourceGroupName $resgrp
+    Add-AzVirtualNetworkSubnetConfig -Name "AzureBastionSubnet" -VirtualNetwork $vnet -AddressPrefix "10.0.99.0/26" | Set-AzVirtualNetwork # you can make this subnet anything you like as long as it fits into the vnet address space
+    $publicip = New-AzPublicIpAddress -ResourceGroupName $resgrp -name "VNet1-ip" -location $region -AllocationMethod Static -Sku Standard
+    New-AzBastion -ResourceGroupName $resgrp -Name $bastionname -PublicIpAddressRgName $resgrp -PublicIpAddressName $publicIp.Name -VirtualNetworkRgName $resgrp -VirtualNetworkName $vnetname -Sku "Basic"
+} else {
+    write-host "VM created, Bastion creation skipped due to -DisableBastion parameter"
+    write-host "VM is only accessible via private network connectivity (VPN, ExpressRoute, or peered networks)"
+}
 
 # COMMENTED OUT FOR NOW, will be re-factored to use latest attestation code from https://github.com/Azure/cvm-attestation-tools 
 #---------Do attestation check, kick off a script inside the VM to do the attestation check---------
@@ -286,7 +301,11 @@ if ($smoketest) {
     write-host "----------------------------------------------------------------------------------------------------------------"
     write-host "SMOKETEST MODE: Automatically removing all created resources..."
     write-host "Removing resource group: $resgrp"
-    write-host "This will delete all resources including VM, Key Vault, Bastion, VNet, etc."
+    if (-not $DisableBastion) {
+        write-host "This will delete all resources including VM, Key Vault, Bastion, VNet, etc."
+    } else {
+        write-host "This will delete all resources including VM, Key Vault, VNet, etc."
+    }
     write-host "WARNING: RESOURCES ARE NOT RECOVERABLE."  -ForegroundColor Red
     write-host "Press ANY KEY to cancel deletion, or wait 10 seconds to proceed..."  -ForegroundColor Yellow
     write-host "----------------------------------------------------------------------------------------------------------------"
