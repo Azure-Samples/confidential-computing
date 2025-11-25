@@ -30,7 +30,7 @@ param (
     [Parameter(Mandatory=$false)][switch]$smoketest,
     [Parameter(Mandatory=$false)]$region = "northeurope",
     [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v5",
-    [Parameter(Mandatory=$false)][switch]$DisableBastion,
+    [Parameter(Mandatory=$false)][switch]$DisableBastion, # Disable Bastion creation, this can speed up deployment for quick tests
     [Parameter(Mandatory=$false)]$vnetName = ""
 )
 
@@ -304,7 +304,11 @@ $peSubnetObj = $vnet.Subnets | Where-Object { $_.Name -eq $privateEndpointSubnet
 
 # Configure private endpoint subnet (disable network policies)
 write-host "Configuring private endpoint subnet..."
-$peSubnetObj.PrivateEndpointNetworkPolicies = "Disabled"
+
+# SIMONDEBUG - try without this disabled
+write-host "SIMONDEBUG - NOT disabling private endpoint network policies..."
+#$peSubnetObj.PrivateEndpointNetworkPolicies = "Disabled"
+$peSubnetObj.PrivateEndpointNetworkPolicies = "Enabled" # SIMONDEBUG - try with this enabled
 $vnet | Set-AzVirtualNetwork
 
 # Refresh VNet reference after update
