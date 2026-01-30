@@ -19,6 +19,8 @@ This project deploys a Python Flask web application to Azure Container Instances
 - **Multi-Stage Docker Build** - Extracts SKR binary from `mcr.microsoft.com/aci/skr:2.7`
 - **Key Vault Integration** - Secure credential storage using Azure Key Vault
 - **Live Diagnostics** - Real-time attestation status and error reporting
+- **Service Logs Display** - When attestation fails, view SKR, Flask, and Supervisord logs directly in the UI
+- **TEE Hardware Detection** - Automatic detection and display of AMD SEV-SNP device (`/dev/sev-guest`) availability
 
 ## Attestation Results Comparison
 
@@ -35,6 +37,7 @@ The screenshot below shows the attestation demo running side-by-side: with AMD S
 - Same container image deployed with Standard SKU (`-NoAcc` flag)
 - Attestation fails with detailed error diagnostics
 - Security features show as unavailable (no TEE hardware)
+- Service logs panel auto-expands showing SKR logs and `/dev/sev-guest` status
 - Demonstrates what happens when the same workload runs without AMD SEV-SNP
 
 ## Prerequisites
@@ -246,12 +249,85 @@ When attestation succeeds, the JWT token includes claims such as:
 | `x-ms-sevsnpvm-hostdata` | Security policy hash |
 | `x-ms-sevsnpvm-vmpl` | Virtual Machine Privilege Level |
 
+## Understanding CCE Policy
+
+The Confidential Computing Enforcement (CCE) policy is often misunderstood. Here's what it actually does:
+
+### What CCE Policy Controls
+
+| CCE Policy DOES Control | CCE Policy Does NOT Control |
+|-------------------------|-----------------------------|
+| Which container images can run in the TEE | Whether you deploy to Confidential SKU |
+| Allowed environment variables | Hardware selection |
+| Permitted mount points | Deployment target |
+| Command/entrypoint restrictions | Routing to ACC hardware |
+| Layer hash validation | |
+
+### The Enforcement Model
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Azure Resource Manager                                 │
+│  ├─ "sku": "Confidential" → Routes to SEV-SNP host     │
+│  └─ "sku": "Standard" → Routes to regular host         │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│  AMD SEV-SNP Hardware (Confidential SKU only)           │
+│  ├─ CCE Policy embedded in ARM template                 │
+│  ├─ Hardware validates container matches policy         │
+│  └─ Blocks execution if policy is violated              │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Key Insight
+
+**The CCE policy doesn't enforce WHERE the container runs — it enforces WHAT can run on ACC hardware.**
+
+To guarantee AMD SEV-SNP hardware, you must:
+1. Use `"sku": "Confidential"` in your ARM template (this routes to ACC hardware)
+2. The CCE policy then ensures only your approved container can run within that TEE
+
+This prevents an attacker from deploying a different (malicious) container to your confidential environment, even if they have deployment permissions.
+
 ## Security
 
 - **No secrets in code** - ACR credentials stored in Azure Key Vault
 - **Hardware isolation** - AMD SEV-SNP encrypts memory
 - **Policy enforcement** - Container configuration cryptographically verified
 - **Attestation** - Prove workload integrity to remote parties
+
+## Diagnostic Features
+
+When attestation fails, the UI provides detailed diagnostics to help identify the issue:
+
+### Service Logs Panel
+
+The logs panel auto-expands on attestation failure and shows:
+
+| Log | Description |
+|-----|-------------|
+| **AMD SEV-SNP Device Status** | Shows if `/dev/sev-guest` is available (required for attestation) |
+| **SKR Service Log** | Output from the Secure Key Release service |
+| **SKR Error Log** | Any errors from the SKR attestation process |
+| **Flask App Log** | Web application logs |
+| **Flask Error Log** | Application errors |
+| **Supervisord Log** | Process manager status |
+
+### SEV-SNP Device Detection
+
+The diagnostic panel checks for:
+- `/dev/sev-guest` - Primary AMD SEV-SNP guest device
+- `/dev/sev` - Alternative SEV device
+- `/dev/sev0` - Legacy device path
+
+If no device is found, it means:
+- Container is NOT running in a TEE
+- Hardware attestation is not possible
+- The container was deployed with Standard SKU (not Confidential)
+
+**Solution:** Redeploy without the `-NoAcc` flag to use Confidential SKU.
 
 ## Troubleshooting
 
