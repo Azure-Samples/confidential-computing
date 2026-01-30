@@ -371,24 +371,24 @@ function Invoke-Deploy {
     Write-Host ""
     Write-Success "Container is responding!"
     
-    # In NoAcc mode, fetch and display sidecar logs to show attestation failure details
+    # In NoAcc mode, show diagnostics
     if ($NoAcc) {
         Write-Host ""
-        Write-Header "Attestation Sidecar Diagnostics (NoAcc Mode)"
+        Write-Header "Attestation Diagnostics (NoAcc Mode)"
         Write-Warning "Running in Standard SKU - Attestation WILL fail (no TEE hardware)"
         Write-Host ""
         
-        Write-Host "Fetching attestation sidecar container logs..."
+        Write-Host "Fetching container logs..."
         Write-Host "" 
-        $sidecar_logs = az container logs --resource-group $resource_group --name $container_name --container-name attestation-sidecar 2>&1
+        $container_logs = az container logs --resource-group $resource_group --name $container_name --container-name attestation-demo 2>&1
         
-        if ($LASTEXITCODE -eq 0 -and $sidecar_logs) {
-            Write-Host "=== Attestation Sidecar Logs ===" -ForegroundColor Yellow
+        if ($LASTEXITCODE -eq 0 -and $container_logs) {
+            Write-Host "=== Container Logs ===" -ForegroundColor Yellow
             # Show last 30 lines of logs
-            $sidecar_logs | Select-Object -Last 30 | ForEach-Object { Write-Host $_ }
-            Write-Host "=== End Sidecar Logs ===" -ForegroundColor Yellow
+            $container_logs | Select-Object -Last 30 | ForEach-Object { Write-Host $_ }
+            Write-Host "=== End Container Logs ===" -ForegroundColor Yellow
         } else {
-            Write-Host "No sidecar logs available yet (container may still be starting)"
+            Write-Host "No logs available yet (container may still be starting)"
         }
         
         Write-Host ""
@@ -398,7 +398,7 @@ function Invoke-Deploy {
             Write-Host ""
             Write-Host "=== Live Attestation Status ===" -ForegroundColor Yellow
             Write-Host "Platform Status: $($info_response.status.platform_status)"
-            Write-Host "Sidecar Available: $($info_response.status.sidecar_available)"
+            Write-Host "SKR Available: $($info_response.status.sidecar_available)"
             Write-Host "Attestation Works: $($info_response.status.attestation_works)"
             
             if ($info_response.status.attestation_error) {
@@ -409,7 +409,7 @@ function Invoke-Deploy {
             
             if ($info_response.status.sidecar_error) {
                 Write-Host ""
-                Write-Host "Sidecar Error:" -ForegroundColor Red  
+                Write-Host "SKR Error:" -ForegroundColor Red  
                 Write-Host $info_response.status.sidecar_error
             }
             
@@ -422,8 +422,7 @@ function Invoke-Deploy {
         
         Write-Host ""
         Write-Host "To view full container logs anytime:"
-        Write-Host "  az container logs -g $resource_group -n $container_name --container-name attestation-sidecar"
-        Write-Host "  az container logs -g $resource_group -n $container_name --container-name attestation-demo-app"
+        Write-Host "  az container logs -g $resource_group -n $container_name --container-name attestation-demo"
         Write-Host ""
     }
     
@@ -433,7 +432,7 @@ function Invoke-Deploy {
         if ($NoAcc) {
             Write-Host "Running in Standard mode - attestation will fail (no TEE)."
         } else {
-            Write-Host "The attestation demo includes a sidecar container for remote attestation."
+            Write-Host "The container includes the SKR attestation service for remote attestation."
         }
         Write-Host "Close the browser window when done."
         Write-Host ""

@@ -547,6 +547,74 @@
                         errorHtml += '<p style="margin: 15px 0; padding: 10px; background: #e2e3e5; border-radius: 5px; color: #383d41;"><em>ℹ️ ' + escapeHtml(data.note) + '</em></p>';
                     }
                     
+                    // Show service logs if available
+                    if (data.logs) {
+                        errorHtml += '<details open style="margin: 20px 0; border: 1px solid #6c757d; border-radius: 8px; overflow: hidden;">';
+                        errorHtml += '<summary style="padding: 15px; background: #343a40; color: #fff; cursor: pointer; font-weight: bold;">📋 Service Logs</summary>';
+                        errorHtml += '<div style="padding: 15px; background: #1e1e1e;">';
+                        
+                        // SEV-SNP Device Status - FIRST (most important for diagnosing failures)
+                        if (data.logs.sev_device) {
+                            const sevDevice = data.logs.sev_device;
+                            const sevAvailable = sevDevice.available;
+                            const sevColor = sevAvailable ? '#28a745' : '#dc3545';
+                            const sevIcon = sevAvailable ? '✅' : '❌';
+                            
+                            errorHtml += '<div style="margin-bottom: 15px; padding: 15px; border-radius: 8px; background: ' + (sevAvailable ? '#d4edda' : '#f8d7da') + '; border-left: 4px solid ' + sevColor + ';">';
+                            errorHtml += '<h4 style="color: ' + sevColor + '; margin-bottom: 10px;">' + sevIcon + ' AMD SEV-SNP Device Status</h4>';
+                            
+                            if (sevAvailable) {
+                                errorHtml += '<p style="color: #155724;"><strong>Device Found:</strong> ' + escapeHtml(sevDevice.device_path) + '</p>';
+                                if (sevDevice.device_info && typeof sevDevice.device_info === 'object') {
+                                    errorHtml += '<p style="color: #155724;"><strong>Type:</strong> ' + escapeHtml(sevDevice.device_info.type) + '</p>';
+                                    errorHtml += '<p style="color: #155724;"><strong>Accessible:</strong> ' + (sevDevice.device_info.accessible ? 'Yes' : 'No') + '</p>';
+                                }
+                            } else {
+                                errorHtml += '<p style="color: #721c24;"><strong>Device Not Found</strong></p>';
+                                if (sevDevice.dev_listing && sevDevice.dev_listing.length > 0) {
+                                    errorHtml += '<p style="color: #721c24;"><strong>Related devices in /dev:</strong> ' + escapeHtml(sevDevice.dev_listing.join(', ')) + '</p>';
+                                } else {
+                                    errorHtml += '<p style="color: #721c24;"><strong>Related devices in /dev:</strong> None found (no sev, tpm, or sgx devices)</p>';
+                                }
+                            }
+                            
+                            errorHtml += '<p style="margin-top: 10px; color: ' + (sevAvailable ? '#155724' : '#721c24') + ';"><em>' + escapeHtml(sevDevice.explanation) + '</em></p>';
+                            errorHtml += '</div>';
+                        }
+                        
+                        // SKR logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #17a2b8; margin-bottom: 10px;">🔐 SKR Service Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto;"><pre>' + escapeHtml(data.logs.skr || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // SKR error logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #dc3545; margin-bottom: 10px;">❌ SKR Error Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + escapeHtml(data.logs.skr_error || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // Flask logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #28a745; margin-bottom: 10px;">🌐 Flask App Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto;"><pre>' + escapeHtml(data.logs.flask || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // Flask error logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #dc3545; margin-bottom: 10px;">❌ Flask Error Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + escapeHtml(data.logs.flask_error || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // Supervisord log
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #ffc107; margin-bottom: 10px;">⚙️ Supervisord Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto;"><pre>' + escapeHtml(data.logs.supervisord || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        errorHtml += '</div></details>';
+                    }
+                    
                     errorHtml += '</div>';
                     resultDiv.innerHTML = errorHtml;
                 }

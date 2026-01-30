@@ -11,13 +11,16 @@ This project deploys a Python Flask web application to Azure Container Instances
 
 ### Features
 
+- **Single Container Architecture** - Combined Flask app and SKR attestation service in one container
 - **Interactive Web UI** - Modern interface demonstrating attestation capabilities with real-time status indicators
 - **Remote Attestation** - Request JWT tokens from Microsoft Azure Attestation (MAA)
 - **Hardware Security** - AMD SEV-SNP memory encryption and isolation
 - **Security Policy Enforcement** - Cryptographic verification of container configuration with layer hash validation
-- **Sidecar Pattern** - Uses Azure's attestation sidecar container (`mcr.microsoft.com/aci/skr:2.7`)
+- **Multi-Stage Docker Build** - Extracts SKR binary from `mcr.microsoft.com/aci/skr:2.7`
 - **Key Vault Integration** - Secure credential storage using Azure Key Vault
 - **Live Diagnostics** - Real-time attestation status and error reporting
+- **Service Logs Display** - When attestation fails, view SKR, Flask, and Supervisord logs directly in the UI
+- **TEE Hardware Detection** - Automatic detection and display of AMD SEV-SNP device (`/dev/sev-guest`) availability
 
 ## Attestation Results Comparison
 
@@ -34,6 +37,7 @@ The screenshot below shows the attestation demo running side-by-side: with AMD S
 - Same container image deployed with Standard SKU (`-NoAcc` flag)
 - Attestation fails with detailed error diagnostics
 - Security features show as unavailable (no TEE hardware)
+- Service logs panel auto-expands showing SKR logs and `/dev/sev-guest` status
 - Demonstrates what happens when the same workload runs without AMD SEV-SNP
 
 ## Prerequisites
@@ -81,8 +85,8 @@ This creates:
 ```
 
 Deploys with:
+- **Single Container** - Combined Flask app and SKR attestation service
 - **Confidential SKU** - AMD SEV-SNP hardware protection with encrypted memory
-- **Attestation Sidecar** - `mcr.microsoft.com/aci/skr:2.7` provides attestation endpoints
 - **Security Policy** - Generated via `az confcom` with `--disable-stdio` (blocks shell access)
 - **Hardened Configuration** - No elevated privileges, no stack dumps, encrypted scratch storage
 - **Layer Hash Validation** - Each container layer hash is verified against the policy
@@ -96,13 +100,13 @@ Deploys with:
 ```
 
 Deploys with:
+- **Same Container Image** - Identical combined container (Flask + SKR)
 - **Standard SKU** - No hardware TEE protection
-- **No Attestation Sidecar** - Sidecar container is not included in the deployment
 - **No Security Policy** - No confidential compute enforcement policy applied
 - **Faster Deployment** - No Docker or policy generation required
-- **Simplified Architecture** - Only the Flask web application container is deployed
+- **SKR Fails Gracefully** - Attestation endpoints return detailed error diagnostics
 
-> ℹ️ **Use this mode for testing the UI layout and basic functionality.** Attestation endpoints will return errors since there is no sidecar or TEE hardware.
+> ℹ️ **Use this mode for testing the UI layout and basic functionality.** The SKR service will fail to generate attestation reports since there is no TEE hardware available.
 
 ### Combined Build and Deploy
 
@@ -152,30 +156,35 @@ Deploys with:
 
 ## Architecture
 
+The demo uses a **single combined container** that includes both the Flask web application and the SKR (Secure Key Release) attestation service. This is achieved using a multi-stage Docker build that extracts the SKR binary from Microsoft's sidecar image and runs both services via supervisord.
+
 ### Confidential Mode
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                Azure Container Instance                  │
 │                   (Confidential SKU)                     │
-│  ┌─────────────────────┐  ┌─────────────────────────┐   │
-│  │   Flask Web App     │  │   Attestation Sidecar   │   │
-│  │     (Port 80)       │  │      (Port 8080)        │   │
-│  │                     │  │                         │   │
-│  │  /attest/maa ──────────► /attest/maa             │   │
-│  │  /attest/raw ──────────► /attest/raw             │   │
-│  └─────────────────────┘  └───────────┬─────────────┘   │
-│                                       │                  │
-│              AMD SEV-SNP TEE          │                  │
-└───────────────────────────────────────┼─────────────────┘
-                                        │
-                                        ▼
-                          ┌─────────────────────────┐
-                          │  Microsoft Azure        │
-                          │  Attestation (MAA)      │
-                          │  sharedeus.eus.attest.  │
-                          │  azure.net              │
-                          └─────────────────────────┘
+│  ┌───────────────────────────────────────────────────┐  │
+│  │           Combined Container (supervisord)         │  │
+│  │  ┌─────────────────────┐  ┌────────────────────┐  │  │
+│  │  │   Flask Web App     │  │   SKR Service      │  │  │
+│  │  │     (Port 80)       │  │   (Port 8080)      │  │  │
+│  │  │                     │  │                    │  │  │
+│  │  │  /attest/maa ──────────► /attest/maa        │  │  │
+│  │  │  /attest/raw ──────────► /attest/raw        │  │  │
+│  │  └─────────────────────┘  └─────────┬──────────┘  │  │
+│  └─────────────────────────────────────┼─────────────┘  │
+│                                        │                 │
+│               AMD SEV-SNP TEE          │                 │
+└────────────────────────────────────────┼─────────────────┘
+                                         │
+                                         ▼
+                           ┌─────────────────────────┐
+                           │  Microsoft Azure        │
+                           │  Attestation (MAA)      │
+                           │  sharedeus.eus.attest.  │
+                           │  azure.net              │
+                           └─────────────────────────┘
 ```
 
 ### Standard Mode
@@ -184,21 +193,22 @@ Deploys with:
 ┌─────────────────────────────────────────────────────────┐
 │                Azure Container Instance                  │
 │                    (Standard SKU)                        │
-│  ┌─────────────────────┐  ┌─────────────────────────┐   │
-│  │   Flask Web App     │  │   Attestation Sidecar   │   │
-│  │     (Port 80)       │  │      (Port 8080)        │   │
-│  │                     │  │                         │   │
-│  │  /attest/maa ──────────► /attest/maa             │   │
-│  └─────────────────────┘  └───────────┬─────────────┘   │
-│                                       │                  │
-│              No TEE (Standard)        │                  │
-└───────────────────────────────────────┼─────────────────┘
-                                        │
-                                        ▼
-                          ┌─────────────────────────┐
-                          │  Attestation Fails      │
-                          │  (No SNP hardware)      │
-                          └─────────────────────────┘
+│  ┌───────────────────────────────────────────────────┐  │
+│  │           Combined Container (supervisord)         │  │
+│  │  ┌─────────────────────┐  ┌────────────────────┐  │  │
+│  │  │   Flask Web App     │  │   SKR Service      │  │  │
+│  │  │     (Port 80)       │  │   (Port 8080)      │  │  │
+│  │  └─────────────────────┘  └─────────┬──────────┘  │  │
+│  └─────────────────────────────────────┼─────────────┘  │
+│                                        │                 │
+│               No TEE (Standard)        │                 │
+└────────────────────────────────────────┼─────────────────┘
+                                         │
+                                         ▼
+                           ┌─────────────────────────┐
+                           │  Attestation Fails      │
+                           │  (No SNP hardware)      │
+                           └─────────────────────────┘
 ```
 
 ## Project Structure
@@ -206,7 +216,8 @@ Deploys with:
 ```
 ├── Deploy-AttestationDemo.ps1      # Main script (build, deploy, cleanup)
 ├── app.py                          # Flask web application
-├── Dockerfile                      # Container image definition
+├── Dockerfile                      # Multi-stage build (Flask + SKR)
+├── supervisord.conf                # Process supervisor configuration
 ├── requirements.txt                # Python dependencies
 ├── templates/
 │   └── index.html                  # Web UI template
@@ -220,9 +231,9 @@ Deploys with:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Interactive demo UI with real-time attestation controls |
-| `/attest/maa` | POST | Request MAA attestation token (forwards to sidecar on port 8080) |
+| `/attest/maa` | POST | Request MAA attestation token (forwards to SKR on port 8080) |
 | `/attest/raw` | POST | Request raw AMD SEV-SNP attestation report |
-| `/sidecar/status` | GET | Check attestation sidecar availability |
+| `/sidecar/status` | GET | Check SKR service availability |
 | `/info` | GET | Live deployment info with attestation status and diagnostics |
 | `/health` | GET | Health check endpoint for container monitoring |
 
@@ -238,12 +249,85 @@ When attestation succeeds, the JWT token includes claims such as:
 | `x-ms-sevsnpvm-hostdata` | Security policy hash |
 | `x-ms-sevsnpvm-vmpl` | Virtual Machine Privilege Level |
 
+## Understanding CCE Policy
+
+The Confidential Computing Enforcement (CCE) policy is often misunderstood. Here's what it actually does:
+
+### What CCE Policy Controls
+
+| CCE Policy DOES Control | CCE Policy Does NOT Control |
+|-------------------------|-----------------------------|
+| Which container images can run in the TEE | Whether you deploy to Confidential SKU |
+| Allowed environment variables | Hardware selection |
+| Permitted mount points | Deployment target |
+| Command/entrypoint restrictions | Routing to ACC hardware |
+| Layer hash validation | |
+
+### The Enforcement Model
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Azure Resource Manager                                 │
+│  ├─ "sku": "Confidential" → Routes to SEV-SNP host     │
+│  └─ "sku": "Standard" → Routes to regular host         │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│  AMD SEV-SNP Hardware (Confidential SKU only)           │
+│  ├─ CCE Policy embedded in ARM template                 │
+│  ├─ Hardware validates container matches policy         │
+│  └─ Blocks execution if policy is violated              │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Key Insight
+
+**The CCE policy doesn't enforce WHERE the container runs — it enforces WHAT can run on ACC hardware.**
+
+To guarantee AMD SEV-SNP hardware, you must:
+1. Use `"sku": "Confidential"` in your ARM template (this routes to ACC hardware)
+2. The CCE policy then ensures only your approved container can run within that TEE
+
+This prevents an attacker from deploying a different (malicious) container to your confidential environment, even if they have deployment permissions.
+
 ## Security
 
 - **No secrets in code** - ACR credentials stored in Azure Key Vault
 - **Hardware isolation** - AMD SEV-SNP encrypts memory
 - **Policy enforcement** - Container configuration cryptographically verified
 - **Attestation** - Prove workload integrity to remote parties
+
+## Diagnostic Features
+
+When attestation fails, the UI provides detailed diagnostics to help identify the issue:
+
+### Service Logs Panel
+
+The logs panel auto-expands on attestation failure and shows:
+
+| Log | Description |
+|-----|-------------|
+| **AMD SEV-SNP Device Status** | Shows if `/dev/sev-guest` is available (required for attestation) |
+| **SKR Service Log** | Output from the Secure Key Release service |
+| **SKR Error Log** | Any errors from the SKR attestation process |
+| **Flask App Log** | Web application logs |
+| **Flask Error Log** | Application errors |
+| **Supervisord Log** | Process manager status |
+
+### SEV-SNP Device Detection
+
+The diagnostic panel checks for:
+- `/dev/sev-guest` - Primary AMD SEV-SNP guest device
+- `/dev/sev` - Alternative SEV device
+- `/dev/sev0` - Legacy device path
+
+If no device is found, it means:
+- Container is NOT running in a TEE
+- Hardware attestation is not possible
+- The container was deployed with Standard SKU (not Confidential)
+
+**Solution:** Redeploy without the `-NoAcc` flag to use Confidential SKU.
 
 ## Troubleshooting
 
@@ -263,7 +347,7 @@ Failed to generate security policy
 ```
 Attestation failed with status 500
 ```
-**Solution:** This is expected in `-NoAcc` mode. The sidecar response will show details about why attestation failed (no SNP hardware). Check the `/info` endpoint for detailed diagnostics.
+**Solution:** This is expected in `-NoAcc` mode. The SKR service response will show details about why attestation failed (no SNP hardware). Check the `/info` endpoint for detailed diagnostics.
 
 ### No configuration found
 ```
@@ -271,13 +355,13 @@ acr-config.json not found. Run with -Build first.
 ```
 **Solution:** Run `.\Deploy-AttestationDemo.ps1 -Build` before deploying.
 
-### Sidecar connection refused
+### SKR connection refused
 ```
-Attestation sidecar not available. Connection refused.
+Attestation service not available. Connection refused.
 ```
-**Solution:** Wait for the container group to fully start (can take 1-3 minutes). Check logs with:
+**Solution:** Wait for the container to fully start (can take 1-3 minutes). Check logs with:
 ```powershell
-az container logs -g <resource-group> -n <container-name> --container-name attestation-sidecar
+az container logs -g <resource-group> -n <container-name> --container-name attestation-demo
 ```
 
 ### Container not responding
