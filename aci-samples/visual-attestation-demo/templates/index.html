@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confidential ACI - Attestation Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.95;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section h2 {
+            color: #0078d4;
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #0078d4;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        
+        .info-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            border-left: 4px solid #0078d4;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .info-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .info-card h3 {
+            color: #495057;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        
+        .info-card p {
+            color: #0078d4;
+            font-size: 1.3em;
+            font-weight: bold;
+        }
+        
+        .attestation-box {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 30px;
+            margin: 20px 0;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin: 25px 0;
+        }
+        
+        button {
+            background: #0078d4;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1em;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+        
+        button:hover {
+            background: #005a9e;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,120,212,0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        .status-success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .status-error {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .status-info {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .status-warning {
+            background: #ffc107;
+            color: #333;
+        }
+        
+        .output-box {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            line-height: 1.6;
+            margin: 20px 0;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .output-box pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .features-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .features-list li {
+            padding: 15px;
+            margin: 10px 0;
+            background: white;
+            border-left: 4px solid #6c757d;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        }
+        
+        .features-list li.verified {
+            border-left-color: #28a745;
+        }
+        
+        .features-list li.unverified {
+            border-left-color: #dc3545;
+        }
+        
+        .features-list li.pending {
+            border-left-color: #6c757d;
+        }
+        
+        .features-list li .status-icon {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .features-list li.verified .status-icon {
+            color: #28a745;
+        }
+        
+        .features-list li.unverified .status-icon {
+            color: #dc3545;
+        }
+        
+        .features-list li.pending .status-icon {
+            color: #6c757d;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-left: 10px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 30px;
+            background: #f8f9fa;
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        .footer a {
+            color: #0078d4;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔒 Confidential Azure Container Instances</h1>
+            <p>Remote Attestation Demo with AMD SEV-SNP</p>
+        </div>
+        
+        <div class="content">
+            <div class="section">
+                <h2>🛡️ Security Features</h2>
+                <p id="securityStatus" style="margin-bottom: 15px; font-style: italic; color: #6c757d;">
+                    Click "Request Attestation Token" to verify security features...
+                </p>
+                <ul class="features-list" id="featuresList">
+                    <li class="pending" data-feature="tee"><span class="status-icon">○</span> Hardware-based Trusted Execution Environment (TEE)</li>
+                    <li class="pending" data-feature="memory"><span class="status-icon">○</span> Memory encryption with AMD SEV-SNP technology</li>
+                    <li class="pending" data-feature="confidentiality"><span class="status-icon">○</span> Data confidentiality and integrity protection</li>
+                    <li class="pending" data-feature="policy"><span class="status-icon">○</span> Code integrity verification through security policies</li>
+                    <li class="pending" data-feature="attestation"><span class="status-icon">○</span> Remote attestation with cryptographic proof</li>
+                    <li class="pending" data-feature="protection"><span class="status-icon">○</span> Protection against cloud provider and hardware attacks</li>
+                </ul>
+            </div>
+            
+            <div class="section">
+                <h2>🔍 Remote Attestation</h2>
+                <div class="attestation-box">
+                    <p><strong>Remote attestation</strong> allows you to cryptographically verify that your workload is running in a genuine confidential computing environment with the expected security configuration.</p>
+                    
+                    <div class="button-group">
+                        <button id="attestBtn" onclick="requestAttestation()">
+                            Request Attestation Token
+                        </button>
+                        <button id="rawBtn" onclick="requestRawAttestation()">
+                            Get Raw Attestation Report
+                        </button>
+                    </div>
+                    
+                    <div id="attestResult"></div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>📊 Deployment Information</h2>
+                <div id="deploymentInfo">
+                    <p>Loading deployment information...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p><strong>Powered by Azure Container Instances Confidential Computing</strong></p>
+            <p>Learn more: <a href="https://learn.microsoft.com/azure/container-instances/container-instances-confidential-overview" target="_blank">Confidential containers on ACI documentation</a></p>
+            <p>Sample based on: <a href="https://github.com/Azure-Samples/confidential-container-samples" target="_blank">Azure Confidential Container Samples</a></p>
+        </div>
+    </div>
+    
+    <script>
+        // Load deployment info on page load
+        window.onload = function() {
+            fetch('/info')
+                .then(response => response.json())
+                .then(data => {
+                    // Only update header if attestation is verified - otherwise keep default
+                    const header = document.querySelector('.header');
+                    const headerH1 = header.querySelector('h1');
+                    const headerP = header.querySelector('p');
+                    
+                    if (data.status && data.status.attestation_works) {
+                        // Attestation verified - show green success header
+                        header.style.background = 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)';
+                        headerH1.innerHTML = '🔒 Confidential Azure Container Instances';
+                        headerP.textContent = 'Running in AMD SEV-SNP Trusted Execution Environment';
+                        
+                        // Update security features to verified
+                        updateSecurityFeatures(true, null, null);
+                    }
+                    // If attestation fails, keep the default header - user will see failure when they click the button
+                    
+                    // Build deployment info display - show basic info without failure details
+                    let html = '<div class="info-grid">';
+                    html += `<div class="info-card"><h3>Platform</h3><p>${data.platform || 'Azure Container Instances'}</p></div>`;
+                    
+                    // Only color-code if we know attestation works
+                    if (data.status && data.status.attestation_works) {
+                        html += `<div class="info-card" style="border-left-color: #28a745;"><h3>SKU</h3><p>${data.sku || 'Confidential'}</p></div>`;
+                        html += `<div class="info-card" style="border-left-color: #28a745;"><h3>Hardware</h3><p>${data.hardware || 'AMD SEV-SNP'}</p></div>`;
+                    } else {
+                        html += `<div class="info-card"><h3>SKU</h3><p>Confidential</p></div>`;
+                        html += `<div class="info-card"><h3>Hardware</h3><p>AMD SEV-SNP</p></div>`;
+                    }
+                    html += `<div class="info-card"><h3>Attestation</h3><p>${data.attestation_service || data.attestation || 'Microsoft Azure Attestation'}</p></div>`;
+                    html += '</div>';
+                    
+                    // Only show success status box if attestation works
+                    if (data.status && data.status.attestation_works) {
+                        html += '<div style="margin-top: 20px; padding: 20px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">';
+                        html += '<h4 style="margin-bottom: 10px; color: #155724;">✓ Live Attestation Status: VERIFIED</h4>';
+                        html += '<p><strong>Sidecar Available:</strong> Yes</p>';
+                        html += '<p><strong>Attestation Works:</strong> Yes</p>';
+                        html += '</div>';
+                        
+                        if (data.diagnostics && data.diagnostics.recommendation) {
+                            html += '<div style="margin-top: 15px; padding: 15px; background: #cce5ff; border-radius: 8px; border-left: 4px solid #0078d4;">';
+                            html += '<p style="color: #004085;"><strong>💡 Status:</strong> ' + escapeHtml(data.diagnostics.recommendation) + '</p>';
+                            html += '</div>';
+                        }
+                        
+                        // Update features list for verified state
+                        if (data.features && Array.isArray(data.features)) {
+                            updateFeaturesFromInfo(data.features, true);
+                        }
+                    }
+                    // Don't show failure details on page load - let user discover via attestation button
+                    
+                    document.getElementById('deploymentInfo').innerHTML = html;
+                })
+                .catch(error => {
+                    document.getElementById('deploymentInfo').innerHTML = 
+                        '<p class="status-badge status-error">Error loading deployment info: ' + escapeHtml(error.message) + '</p>';
+                });
+        };
+        
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Update features list from /info response
+        function updateFeaturesFromInfo(features, isVerified) {
+            const featuresList = document.getElementById('featuresList');
+            let html = '';
+            features.forEach(feature => {
+                const isNegative = feature.includes('NOT') || feature.includes('FAILED');
+                const className = isNegative ? 'unverified' : (isVerified ? 'verified' : 'pending');
+                const icon = isNegative ? '✗' : (isVerified ? '✓' : '○');
+                html += `<li class="${className}"><span class="status-icon">${icon}</span> ${escapeHtml(feature)}</li>`;
+            });
+            featuresList.innerHTML = html;
+        }
+        
+        // Function to show attestation failure in the header and page
+        function showAttestationFailure(errorMessage, data) {
+            const header = document.querySelector('.header');
+            const headerH1 = header.querySelector('h1');
+            const headerP = header.querySelector('p');
+            
+            header.style.background = 'linear-gradient(135deg, #dc3545 0%, #a71d2a 100%)';
+            headerH1.innerHTML = '⚠️ Standard Azure Container Instances';
+            headerP.textContent = 'NOT running on confidential hardware - Attestation Failed';
+            
+            // Update the deployment info section to show failure
+            let html = '<div class="info-grid">';
+            html += `<div class="info-card"><h3>Platform</h3><p>Azure Container Instances</p></div>`;
+            html += `<div class="info-card" style="border-left-color: #dc3545;"><h3>SKU</h3><p>Standard (No TEE)</p></div>`;
+            html += `<div class="info-card" style="border-left-color: #dc3545;"><h3>Hardware</h3><p>No Hardware Security</p></div>`;
+            html += `<div class="info-card"><h3>Attestation</h3><p>Failed</p></div>`;
+            html += '</div>';
+            
+            // Show failure status box
+            html += '<div style="margin-top: 20px; padding: 20px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
+            html += '<h4 style="margin-bottom: 10px; color: #721c24;">✗ Live Attestation Status: FAILED</h4>';
+            html += '<p><strong>Error:</strong> ' + escapeHtml(errorMessage) + '</p>';
+            
+            if (data && data.failure_reason) {
+                html += '<p style="margin-top: 10px;"><strong>Reason:</strong> ' + escapeHtml(data.failure_reason) + '</p>';
+            }
+            
+            if (data && data.diagnosis && data.diagnosis.solution) {
+                html += '<p style="margin-top: 10px;"><strong>Solution:</strong> ' + escapeHtml(data.diagnosis.solution) + '</p>';
+            }
+            
+            html += '</div>';
+            
+            document.getElementById('deploymentInfo').innerHTML = html;
+        }
+        
+        function requestAttestation() {
+            const btn = document.getElementById('attestBtn');
+            const resultDiv = document.getElementById('attestResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = 'Requesting Attestation<span class="loading"></span>';
+            
+            resultDiv.innerHTML = '<p>Contacting Microsoft Azure Attestation service...</p>';
+            
+            fetch('/attest/maa', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    maa_endpoint: 'sharedeus.eus.attest.azure.net',
+                    runtime_data: btoa(JSON.stringify({
+                        timestamp: new Date().toISOString(),
+                        demo: 'Confidential ACI Attestation Demo'
+                    }))
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().catch(() => {
+                        throw new Error('Server returned error: ' + response.status);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = 'Request Attestation Token';
+                
+                if (data.status === 'success') {
+                    // Parse the JWT token
+                    try {
+                        const parts = data.attestation_token.split('.');
+                        const payload = JSON.parse(atob(parts[1]));
+                        
+                        // Update security features based on attestation claims
+                        updateSecurityFeatures(true, payload);
+                        
+                        let html = '<div style="margin-top: 20px;">';
+                        html += '<p><span class="status-badge status-success">Attestation Successful</span></p>';
+                        html += '<p style="margin: 15px 0;"><strong>MAA Endpoint:</strong> ' + data.maa_endpoint + '</p>';
+                        html += '<p style="margin: 15px 0;"><strong>Token Claims:</strong></p>';
+                        html += '<div class="output-box"><pre>' + JSON.stringify(payload, null, 2) + '</pre></div>';
+                        html += '<p style="margin: 15px 0;"><strong>Full JWT Token:</strong></p>';
+                        html += '<div class="output-box"><pre>' + data.attestation_token + '</pre></div>';
+                        html += '</div>';
+                        
+                        resultDiv.innerHTML = html;
+                    } catch (e) {
+                        // Token received but couldn't parse - partial success
+                        updateSecurityFeatures(false, null, 'Could not parse attestation token');
+                        resultDiv.innerHTML = 
+                            '<p><span class="status-badge status-warning">Attestation Token Received (Parse Error)</span></p>' +
+                            '<div class="output-box"><pre>' + data.attestation_token + '</pre></div>';
+                    }
+                } else {
+                    // Attestation failed - update header and page to show failure
+                    updateSecurityFeatures(false, null, data.message || 'Attestation failed');
+                    showAttestationFailure(data.message || 'Attestation failed', data);
+                    
+                    let errorHtml = '<div style="margin-top: 20px;">';
+                    errorHtml += '<p><span class="status-badge status-error">Attestation Failed</span></p>';
+                    errorHtml += '<p style="margin: 15px 0;"><strong>Error:</strong> ' + escapeHtml(data.message || 'Unknown error') + '</p>';
+                    
+                    // Show failure reason if available
+                    if (data.failure_reason) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
+                        errorHtml += '<p style="color: #721c24; font-weight: bold;">🔍 Failure Reason:</p>';
+                        errorHtml += '<p style="margin-top: 10px; color: #721c24;">' + escapeHtml(data.failure_reason) + '</p>';
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show diagnosis if available
+                    if (data.diagnosis) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">';
+                        errorHtml += '<p style="color: #856404; font-weight: bold;">💡 Diagnosis:</p>';
+                        if (data.diagnosis.likely_cause) {
+                            errorHtml += '<p style="margin-top: 10px; color: #856404;"><strong>Likely Cause:</strong> ' + escapeHtml(data.diagnosis.likely_cause) + '</p>';
+                        }
+                        if (data.diagnosis.solution) {
+                            errorHtml += '<p style="margin-top: 5px; color: #856404;"><strong>Solution:</strong> ' + escapeHtml(data.diagnosis.solution) + '</p>';
+                        }
+                        if (data.diagnosis.command) {
+                            errorHtml += '<p style="margin-top: 10px;"><code style="background: #333; color: #0f0; padding: 8px 12px; border-radius: 4px; display: inline-block;">' + escapeHtml(data.diagnosis.command) + '</code></p>';
+                        }
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show sidecar response if available
+                    if (data.sidecar_response) {
+                        errorHtml += '<div style="margin: 15px 0;">';
+                        errorHtml += '<p><strong>Sidecar Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
+                        errorHtml += '<div class="output-box" style="background: #2d2d2d; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + 
+                            escapeHtml(data.sidecar_response) + '</pre></div></div>';
+                    }
+                    
+                    if (data.note) {
+                        errorHtml += '<p style="margin: 15px 0; padding: 10px; background: #e2e3e5; border-radius: 5px; color: #383d41;"><em>ℹ️ ' + escapeHtml(data.note) + '</em></p>';
+                    }
+                    
+                    errorHtml += '</div>';
+                    resultDiv.innerHTML = errorHtml;
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = 'Request Attestation Token';
+                // Attestation request failed - also update header
+                showAttestationFailure(error.message, null);
+                updateSecurityFeatures(false, null, error.message);
+                resultDiv.innerHTML = 
+                    '<p><span class="status-badge status-error">Request Failed</span></p>' +
+                    '<p style="margin: 15px 0;"><strong>Error:</strong> ' + error.message + '</p>' +
+                    '<p style="margin: 15px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;">' +
+                    '<em>💡 This demo requires deployment with the attestation sidecar. ' +
+                    'Deploy using azure-aci-custom-demo.ps1 with Confidential SKU to enable attestation.</em></p>';
+            });
+        }
+        
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Function to update security features based on attestation result
+        function updateSecurityFeatures(verified, payload, errorMessage) {
+            const featuresList = document.getElementById('featuresList');
+            const statusEl = document.getElementById('securityStatus');
+            const features = featuresList.querySelectorAll('li');
+            
+            if (verified && payload) {
+                // Attestation successful - check specific claims
+                statusEl.innerHTML = '<span style="color: #28a745;">✓ Attestation verified successfully</span>';
+                statusEl.style.color = '#28a745';
+                
+                features.forEach(li => {
+                    li.className = 'verified';
+                    li.querySelector('.status-icon').textContent = '✓';
+                });
+                
+                // Check specific claims from the attestation payload
+                const claims = {
+                    tee: payload['x-ms-isolation-tee'] || payload['x-ms-sevsnpvm-is-debuggable'] === false,
+                    memory: payload['x-ms-sevsnpvm-vmpl'] !== undefined || payload['x-ms-isolation-tee'],
+                    confidentiality: payload['x-ms-compliance-status'] === 'azure-compliant-cvm' || payload['x-ms-isolation-tee'],
+                    policy: payload['x-ms-sevsnpvm-hostdata'] !== undefined,
+                    attestation: true, // We got a valid token
+                    protection: payload['x-ms-sevsnpvm-is-debuggable'] === false || payload['x-ms-isolation-tee']
+                };
+                
+                features.forEach(li => {
+                    const feature = li.dataset.feature;
+                    if (claims[feature] === false) {
+                        li.className = 'unverified';
+                        li.querySelector('.status-icon').textContent = '✗';
+                    }
+                });
+            } else {
+                // Attestation failed
+                statusEl.innerHTML = '<span style="color: #dc3545;">✗ Attestation failed: ' + (errorMessage || 'Unknown error') + '</span>';
+                statusEl.style.color = '#dc3545';
+                
+                features.forEach(li => {
+                    li.className = 'unverified';
+                    li.querySelector('.status-icon').textContent = '✗';
+                });
+            }
+        }
+        
+        function requestRawAttestation() {
+            const btn = document.getElementById('rawBtn');
+            const resultDiv = document.getElementById('attestResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = 'Getting Report<span class="loading"></span>';
+            
+            resultDiv.innerHTML = '<p>Retrieving raw attestation report...</p>';
+            
+            fetch('/attest/raw', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    runtime_data: btoa('Raw Report - ' + new Date().toISOString())
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().catch(() => {
+                        throw new Error('Server returned error: ' + response.status);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = 'Get Raw Attestation Report';
+                
+                if (data.status === 'success') {
+                    resultDiv.innerHTML = 
+                        '<div style="margin-top: 20px;">' +
+                        '<p><span class="status-badge status-success">Raw Report Retrieved</span></p>' +
+                        '<div class="output-box"><pre>' + data.attestation_report + '</pre></div>' +
+                        '</div>';
+                } else {
+                    let errorHtml = '<div style="margin-top: 20px;">';
+                    errorHtml += '<p><span class="status-badge status-error">Raw Attestation Failed</span></p>';
+                    errorHtml += '<p style="margin: 15px 0;"><strong>Error:</strong> ' + escapeHtml(data.message || 'Unknown error') + '</p>';
+                    
+                    // Show failure reason if available
+                    if (data.failure_reason) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
+                        errorHtml += '<p style="color: #721c24; font-weight: bold;">🔍 Failure Reason:</p>';
+                        errorHtml += '<p style="margin-top: 10px; color: #721c24;">' + escapeHtml(data.failure_reason) + '</p>';
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show diagnosis if available
+                    if (data.diagnosis) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">';
+                        errorHtml += '<p style="color: #856404; font-weight: bold;">💡 Diagnosis:</p>';
+                        if (data.diagnosis.likely_cause) {
+                            errorHtml += '<p style="margin-top: 10px; color: #856404;"><strong>Likely Cause:</strong> ' + escapeHtml(data.diagnosis.likely_cause) + '</p>';
+                        }
+                        if (data.diagnosis.detail) {
+                            errorHtml += '<p style="margin-top: 5px; color: #856404;"><strong>Detail:</strong> ' + escapeHtml(data.diagnosis.detail) + '</p>';
+                        }
+                        if (data.diagnosis.solution) {
+                            errorHtml += '<p style="margin-top: 5px; color: #856404;"><strong>Solution:</strong> ' + escapeHtml(data.diagnosis.solution) + '</p>';
+                        }
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show sidecar response if available
+                    if (data.sidecar_response) {
+                        errorHtml += '<div style="margin: 15px 0;">';
+                        errorHtml += '<p><strong>Sidecar Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
+                        errorHtml += '<div class="output-box" style="background: #2d2d2d; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + 
+                            escapeHtml(data.sidecar_response) + '</pre></div></div>';
+                    }
+                    
+                    if (data.note) {
+                        errorHtml += '<p style="margin: 15px 0; padding: 10px; background: #e2e3e5; border-radius: 5px; color: #383d41;"><em>ℹ️ ' + escapeHtml(data.note) + '</em></p>';
+                    }
+                    
+                    errorHtml += '</div>';
+                    resultDiv.innerHTML = errorHtml;
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = 'Get Raw Attestation Report';
+                resultDiv.innerHTML = 
+                    '<p><span class="status-badge status-error">Request Failed</span></p>' +
+                    '<p style="margin: 15px 0;"><strong>Error:</strong> ' + error.message + '</p>' +
+                    '<p style="margin: 15px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;">' +
+                    '<em>💡 This demo requires deployment with the attestation sidecar. ' +
+                    'Deploy using azure-aci-custom-demo.ps1 with Confidential SKU to enable attestation.</em></p>';
+            });
+        }
+    </script>
+</body>
+</html>

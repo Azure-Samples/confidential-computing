@@ -1,0 +1,22 @@
+{
+	"anyOf": [
+		{
+			"allOf": [
+				{
+					"claim": "x-ms-compliance-status",
+					"equals": "azure-compliant-cvm"
+				},
+				{
+					"anyOf": [
+						{
+							"claim": "x-ms-attestation-type",
+							"equals": "sevsnpvm"
+						}
+					]
+				}
+			],
+			"authority": "https://sgalldemoweu.weu.attest.azure.net/"
+		}
+	],
+	"version": "1.0.0"
+}

@@ -1,0 +1,14 @@
+{
+	"version": "1.0.0",
+	"anyOf": [
+		{
+			"authority": "https://<YOUR MAA ENDPOINT>.<REGION SHORT CODE>.attest.azure.net",
+			"allOf": [
+				{
+					"claim": "x-ms-compliance-status",
+					"equals": "azure-compliant-cvm"
+				}
+			]
+		}
+	]
+}

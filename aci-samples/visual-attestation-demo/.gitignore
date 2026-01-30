@@ -1,0 +1,25 @@
+# Azure configuration (may contain sensitive data references)
+acr-config.json
+
+# Generated deployment files
+deployment-params.json
+deployment-template.json
+create-params.ps1
+
+# Temp files
+*.txt
+*.log
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Docker
+.docker/
