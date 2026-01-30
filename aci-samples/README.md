@@ -1,10 +1,18 @@
-# Azure Container Instances (ACI) Confidential Computing Sample
+# Azure Container Instances (ACI) Confidential Computing Samples
+
+**Last Updated:** January 2026
 
 ## Overview
-This folder contains scripts for creating Confidential Azure Container Instances (ACIs) using Azure's confidential computing SKUs.
+This folder contains scripts and samples for creating Confidential Azure Container Instances (ACIs) using Azure's confidential computing SKUs with AMD SEV-SNP hardware protection.
 
-## Files
-- `BuildRandomACI.ps1` - PowerShell script to create a confidential ACI with a hello-world container
+## Samples
+
+| Sample | Description |
+|--------|-------------|
+| `BuildRandomACI.ps1` | PowerShell script to create a confidential ACI with a hello-world container |
+| [Visual Attestation Demo](visual-attestation-demo/README.md) | Interactive web application demonstrating remote attestation via Microsoft Azure Attestation (MAA) |
+
+---
 
 ## BuildRandomACI.ps1
 
@@ -26,3 +34,32 @@ Creates a confidential Azure Container Instance with:
 ```powershell
 .\BuildRandomACI.ps1 -subsID <YOUR_SUBSCRIPTION_ID> -basename <YOUR_BASENAME>
 ```
+
+---
+
+## Visual Attestation Demo
+
+An interactive Flask web application that demonstrates Azure Container Instances with AMD SEV-SNP confidential computing and remote attestation.
+
+### Features
+- **Interactive Web UI** - Modern interface with real-time attestation controls
+- **Remote Attestation** - Request JWT tokens from Microsoft Azure Attestation (MAA)
+- **Hardware Security** - AMD SEV-SNP memory encryption and isolation
+- **Security Policy Enforcement** - Cryptographic verification of container configuration
+- **Sidecar Pattern** - Uses Azure's attestation sidecar container
+
+### Quick Start
+```powershell
+cd visual-attestation-demo
+
+# Build container image
+.\Deploy-AttestationDemo.ps1 -Build
+
+# Deploy with confidential computing
+.\Deploy-AttestationDemo.ps1 -Deploy
+
+# Or deploy without TEE for testing
+.\Deploy-AttestationDemo.ps1 -Deploy -NoAcc
+```
+
+See [visual-attestation-demo/README.md](visual-attestation-demo/README.md) for complete documentation.
