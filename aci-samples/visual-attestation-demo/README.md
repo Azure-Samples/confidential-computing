@@ -97,11 +97,12 @@ Deploys with:
 
 Deploys with:
 - **Standard SKU** - No hardware TEE protection
+- **No Attestation Sidecar** - Sidecar container is not included in the deployment
+- **No Security Policy** - No confidential compute enforcement policy applied
 - **Faster Deployment** - No Docker or policy generation required
-- **Sidecar Included** - Attestation endpoint available but returns detailed error diagnostics
-- **Full Diagnostics** - Deployment shows sidecar logs and `/info` endpoint status
+- **Simplified Architecture** - Only the Flask web application container is deployed
 
-> ℹ️ **Use this mode for testing the UI and understanding attestation failures.** The web application provides detailed error messages explaining why attestation fails without AMD SEV-SNP hardware.
+> ℹ️ **Use this mode for testing the UI layout and basic functionality.** Attestation endpoints will return errors since there is no sidecar or TEE hardware.
 
 ### Combined Build and Deploy
 
