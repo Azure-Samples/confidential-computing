@@ -19,16 +19,33 @@ This project deploys a Python Flask web application to Azure Container Instances
 - **Key Vault Integration** - Secure credential storage using Azure Key Vault
 - **Live Diagnostics** - Real-time attestation status and error reporting
 
+## Attestation Results Comparison
+
+The screenshot below shows the attestation demo running side-by-side: with AMD SEV-SNP hardware protection (Confidential SKU) on the left, and without hardware protection (Standard SKU) on the right. **Both deployments use the exact same container image** — the only difference is the ACI SKU and hardware platform.
+
+![Attestation Side by Side Comparison](AttestationSideBySide.png)
+
+**With ACC Hardware (Left):**
+- Attestation succeeds and returns a valid JWT token from MAA
+- Security features show as verified (TEE, memory encryption, policy enforcement)
+- Container is cryptographically proven to be running in a trusted environment
+
+**Without ACC Protection (Right):**
+- Same container image deployed with Standard SKU (`-NoAcc` flag)
+- Attestation fails with detailed error diagnostics
+- Security features show as unavailable (no TEE hardware)
+- Demonstrates what happens when the same workload runs without AMD SEV-SNP
+
 ## Prerequisites
 
 - **Azure CLI** (v2.50+) - [Install Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
 - **Azure Subscription** - With permissions to create Container Instances, Container Registry, and Key Vault
-- **Docker Desktop** - Required for confidential mode (policy generation pulls and analyzes images)
-- **PowerShell** - Version 5.1 or later (PowerShell 7+ recommended)
+- **Docker Desktop** - [Download Docker Desktop](https://www.docker.com/products/docker-desktop/) (required for confidential mode policy generation)
+- **PowerShell** - Version 5.1 or later ([PowerShell 7+ recommended](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell))
 
 ### Azure CLI Extensions
 
-The confidential mode requires the `confcom` extension for security policy generation:
+The confidential mode requires the `confcom` extension for security policy generation. See the [az confcom documentation](https://learn.microsoft.com/en-us/cli/azure/confcom) for more details.
 
 ```powershell
 # Install or update the confcom extension
