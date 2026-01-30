@@ -46,7 +46,7 @@ Azure Container Instances with AMD SEV-SNP confidential computing:
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:
 - **BuildRandomCVM.ps1** - Deploy CVMs with Customer Managed Keys, Confidential Disk Encryption, and attestation (Windows Server, Windows 11, Ubuntu, RHEL)
-- **BuildCVMWithPrivateMAA.ps1** - CVM with private Azure Attestation provider
+- **BuildCVMWithPrivateMAA.ps1** - CVM with private Azure Attestation provider *(experimental)*
 - **BuildRandomSQLCVM.ps1** - SQL Server on Confidential VM
 
 ### [AKS Samples](/aks-samples/README.md)

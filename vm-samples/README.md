@@ -1,6 +1,20 @@
 # Confidential Virtual Machines
 
-BuildRandomCVM.ps1 will build a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Windows 11 Enterprise, Ubuntu 24.04 LTS, and RHEL 9.5 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand.
+**Last Updated:** January 2026
+
+## Available Scripts
+
+| Script | Description | Status |
+|--------|-------------|--------|
+| `BuildRandomCVM.ps1` | Deploy CVM with CMK, Confidential Disk Encryption, and Bastion | **Stable** |
+| `BuildCVMWithPrivateMAA.ps1` | CVM with private Azure Attestation provider | **Experimental** |
+| `BuildRandomSQLCVM.ps1` | SQL Server 2022 on Confidential VM | **Stable** |
+
+---
+
+## BuildRandomCVM.ps1
+
+Builds a CVM with Customer Managed Key, Confidential Disk Encryption, a private VNet (no public IP) and deploy Azure Bastion for remote access over the Internet. It supports Windows Server 2022, Windows 11 Enterprise, Ubuntu 24.04 LTS, and RHEL 9.5 CVM images. The script automatically detects the GitHub repository URL from the local git configuration and includes it in resource tagging. It will then kick off an attestation inside the CVM and present back the output via Invoke-AzVMRunCommand.
 
 Use at your own risk, no warranties implied.
 

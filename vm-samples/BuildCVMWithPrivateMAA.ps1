@@ -1,6 +1,10 @@
 # Enhanced script to build a Confidential Virtual Machine with Private Microsoft Azure Attestation (MAA) instance
 # VM will be created in a private vnet with no public IP and can only be accessed over the Internet via the Azure Bastion service
 # Private MAA instance will be created with private endpoint for secure attestation
+#
+# ⚠️ EXPERIMENTAL: This script is experimental and may not work in all scenarios.
+# Private MAA endpoints with CVMs is an advanced configuration that requires specific
+# Azure subscription permissions and regional availability. Use for testing purposes only.
 # 
 # Based on the original DEBUGBuildRandomCVMwithPvtMAA.ps1 and MAA private endpoint script
 # Enhanced November 2025 - Added private MAA instance creation with private endpoint
