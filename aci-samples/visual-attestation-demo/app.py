@@ -5,6 +5,84 @@ import os
 
 app = Flask(__name__)
 
+# Log file paths (configured in supervisord.conf)
+LOG_FILES = {
+    'skr': '/var/log/supervisor/skr.log',
+    'skr_error': '/var/log/supervisor/skr_error.log',
+    'flask': '/var/log/supervisor/flask.log',
+    'flask_error': '/var/log/supervisor/flask_error.log',
+    'supervisord': '/var/log/supervisor/supervisord.log'
+}
+
+def check_sev_guest_device():
+    """Check for AMD SEV-SNP guest device and return status info"""
+    sev_devices = [
+        '/dev/sev-guest',
+        '/dev/sev',
+        '/dev/sev0'
+    ]
+    
+    result = {
+        'available': False,
+        'device_path': None,
+        'device_info': None,
+        'explanation': None
+    }
+    
+    for device in sev_devices:
+        if os.path.exists(device):
+            result['available'] = True
+            result['device_path'] = device
+            try:
+                # Get device file info
+                import stat
+                st = os.stat(device)
+                result['device_info'] = {
+                    'mode': oct(st.st_mode),
+                    'type': 'character device' if stat.S_ISCHR(st.st_mode) else 'other',
+                    'accessible': os.access(device, os.R_OK)
+                }
+                result['explanation'] = f'AMD SEV-SNP device found at {device}. Hardware attestation should be available.'
+            except Exception as e:
+                result['device_info'] = f'Error reading device info: {str(e)}'
+            break
+    
+    if not result['available']:
+        result['explanation'] = (
+            'No AMD SEV-SNP device found (/dev/sev-guest, /dev/sev, /dev/sev0). '
+            'This means the container is NOT running inside a Trusted Execution Environment (TEE). '
+            'Hardware-based attestation is not possible. '
+            'To enable attestation, deploy with Confidential SKU (without -NoAcc flag) on AMD SEV-SNP capable hardware.'
+        )
+        # Check if we're in a container and list available devices
+        try:
+            dev_contents = os.listdir('/dev')
+            result['dev_listing'] = [d for d in dev_contents if 'sev' in d.lower() or 'tpm' in d.lower() or 'sgx' in d.lower()]
+        except:
+            result['dev_listing'] = []
+    
+    return result
+
+def read_log_files(max_lines=100):
+    """Read the last N lines from each log file"""
+    logs = {}
+    for name, path in LOG_FILES.items():
+        try:
+            if os.path.exists(path):
+                with open(path, 'r') as f:
+                    lines = f.readlines()
+                    # Get last max_lines
+                    logs[name] = ''.join(lines[-max_lines:]) if lines else '(empty)'
+            else:
+                logs[name] = f'(file not found: {path})'
+        except Exception as e:
+            logs[name] = f'(error reading file: {str(e)})'
+    
+    # Add SEV-SNP device status
+    logs['sev_device'] = check_sev_guest_device()
+    
+    return logs
+
 @app.route('/')
 def index():
     """Serve the main attestation demo page"""
@@ -65,7 +143,8 @@ def attest_maa():
                     'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
                     'command': '.\\Deploy-AttestationDemo.ps1 -Build -Deploy'
                 },
-                'note': 'Attestation requires AMD SEV-SNP hardware (Confidential SKU). Standard SKU containers cannot generate valid attestation evidence.'
+                'note': 'Attestation requires AMD SEV-SNP hardware (Confidential SKU). Standard SKU containers cannot generate valid attestation evidence.',
+                'logs': read_log_files()
             }), response.status_code
 
         return jsonify({
@@ -81,7 +160,8 @@ def attest_maa():
                 'likely_cause': 'Sidecar container not running or not yet started',
                 'solution': 'Wait for container group to fully start, or check container logs'
             },
-            'note': 'The sidecar container may not be running. Check container logs with: az container logs -g <rg> -n <container> --container-name attestation-sidecar'
+            'note': 'The sidecar container may not be running. Check container logs with: az container logs -g <rg> -n <container> --container-name attestation-sidecar',
+            'logs': read_log_files()
         }), 503
     except requests.exceptions.Timeout:
         return jsonify({
