@@ -42,11 +42,12 @@ Creates a confidential Azure Container Instance with:
 An interactive Flask web application that demonstrates Azure Container Instances with AMD SEV-SNP confidential computing and remote attestation.
 
 ### Features
+- **Single Container Architecture** - Combined Flask app and SKR attestation service
 - **Interactive Web UI** - Modern interface with real-time attestation controls
 - **Remote Attestation** - Request JWT tokens from Microsoft Azure Attestation (MAA)
 - **Hardware Security** - AMD SEV-SNP memory encryption and isolation
 - **Security Policy Enforcement** - Cryptographic verification of container configuration
-- **Sidecar Pattern** - Uses Azure's attestation sidecar container
+- **Multi-Stage Docker Build** - Extracts SKR binary from Microsoft's sidecar image
 
 ### Quick Start
 ```powershell

@@ -18,7 +18,7 @@
     "appImage": {
       "type": "string",
       "metadata": {
-        "description": "Container image for the main application"
+        "description": "Container image for the combined application (Flask + SKR)"
       }
     },
     "registryServer": {
@@ -46,9 +46,6 @@
       }
     }
   },
-  "variables": {
-    "attestationImage": "mcr.microsoft.com/aci/skr:2.7"
-  },
   "resources": [
     {
       "type": "Microsoft.ContainerInstance/containerGroups",
@@ -62,7 +59,7 @@
         },
         "containers": [
           {
-            "name": "attestation-demo-app",
+            "name": "attestation-demo",
             "properties": {
               "image": "[parameters('appImage')]",
               "ports": [
@@ -74,27 +71,8 @@
               "environmentVariables": [],
               "resources": {
                 "requests": {
-                  "memoryInGB": 1.5,
+                  "memoryInGB": 2,
                   "cpu": 1
-                }
-              }
-            }
-          },
-          {
-            "name": "attestation-sidecar",
-            "properties": {
-              "image": "[variables('attestationImage')]",
-              "ports": [
-                {
-                  "protocol": "TCP",
-                  "port": 8080
-                }
-              ],
-              "environmentVariables": [],
-              "resources": {
-                "requests": {
-                  "memoryInGB": 0.5,
-                  "cpu": 0.5
                 }
               }
             }

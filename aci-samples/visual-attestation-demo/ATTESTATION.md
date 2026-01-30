@@ -17,38 +17,43 @@ Remote attestation allows a relying party to verify that:
 
 ### Attestation Flow
 
+The demo uses a single container with both Flask and SKR (Secure Key Release) services managed by supervisord.
+
 ```
-┌──────────────┐     ┌─────────────────┐     ┌─────────────────────┐
-│   Browser    │     │   Flask App     │     │  Attestation        │
-│              │     │   (Port 80)     │     │  Sidecar (8080)     │
-└──────┬───────┘     └────────┬────────┘     └──────────┬──────────┘
-       │                      │                         │
-       │  GET /attest/maa     │                         │
-       │─────────────────────►│                         │
-       │                      │  POST /attest/maa       │
-       │                      │────────────────────────►│
-       │                      │                         │
-       │                      │         ┌───────────────┼─────────────────┐
-       │                      │         │               ▼                 │
-       │                      │         │  ┌─────────────────────────┐    │
-       │                      │         │  │   AMD SEV-SNP Hardware  │    │
-       │                      │         │  │   Generate SNP Report   │    │
-       │                      │         │  └────────────┬────────────┘    │
-       │                      │         │               │                 │
-       │                      │         │               ▼                 │
-       │                      │         │  ┌─────────────────────────┐    │
-       │                      │         │  │   Microsoft Azure       │    │
-       │                      │         │  │   Attestation (MAA)     │    │
-       │                      │         │  │   Verify & Sign JWT     │    │
-       │                      │         │  └────────────┬────────────┘    │
-       │                      │         │               │                 │
-       │                      │         └───────────────┼─────────────────┘
-       │                      │                         │
-       │                      │◄────────────────────────│
-       │                      │      JWT Token          │
-       │◄─────────────────────│                         │
-       │   Display Token      │                         │
-       │   & Claims           │                         │
+┌──────────────┐     ┌─────────────────────────────────────────────┐
+│   Browser    │     │           Combined Container                 │
+│              │     │  ┌─────────────────┐  ┌─────────────────┐   │
+└──────┬───────┘     │  │   Flask App     │  │  SKR Service    │   │
+       │             │  │   (Port 80)     │  │  (Port 8080)    │   │
+       │             │  └────────┬────────┘  └────────┬────────┘   │
+       │             └───────────┼────────────────────┼────────────┘
+       │                         │                    │
+       │  POST /attest/maa       │                    │
+       │────────────────────────►│                    │
+       │                         │  POST /attest/maa  │
+       │                         │───────────────────►│
+       │                         │                    │
+       │                         │    ┌───────────────┼─────────────────┐
+       │                         │    │               ▼                 │
+       │                         │    │  ┌─────────────────────────┐    │
+       │                         │    │  │   AMD SEV-SNP Hardware  │    │
+       │                         │    │  │   Generate SNP Report   │    │
+       │                         │    │  └────────────┬────────────┘    │
+       │                         │    │               │                 │
+       │                         │    │               ▼                 │
+       │                         │    │  ┌─────────────────────────┐    │
+       │                         │    │  │   Microsoft Azure       │    │
+       │                         │    │  │   Attestation (MAA)     │    │
+       │                         │    │  │   Verify & Sign JWT     │    │
+       │                         │    │  └────────────┬────────────┘    │
+       │                         │    │               │                 │
+       │                         │    └───────────────┼─────────────────┘
+       │                         │                    │
+       │                         │◄───────────────────│
+       │                         │    JWT Token       │
+       │◄────────────────────────│                    │
+       │   Display Token         │                    │
+       │   & Claims              │                    │
 ```
 
 ## JWT Token Structure
@@ -149,15 +154,15 @@ This:
 3. Generates Rego policy
 4. Encodes and injects into template
 
-## Sidecar Container
+## SKR Service (Secure Key Release)
 
-The attestation sidecar (`mcr.microsoft.com/aci/skr:2.7`) provides the following endpoints:
+The SKR binary is extracted from `mcr.microsoft.com/aci/skr:2.7` during the Docker multi-stage build and runs alongside Flask via supervisord. It provides the following endpoints on port 8080:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/attest/maa` | POST | Request MAA attestation token |
 | `/attest/raw` | POST | Get raw SNP attestation report |
-| `/status` | GET | Sidecar health status |
+| `/status` | GET | SKR service health status |
 
 ### MAA Request Format
 
@@ -194,11 +199,12 @@ The web UI dynamically updates security feature indicators based on attestation 
 | File | Purpose |
 |------|---------|
 | `Deploy-AttestationDemo.ps1` | Main script for build, deploy, cleanup |
-| `app.py` | Flask routes, forwards attestation requests to sidecar |
+| `app.py` | Flask routes, forwards attestation requests to SKR |
+| `supervisord.conf` | Process supervisor config for Flask + SKR |
 | `templates/index.html` | Interactive UI with JavaScript for attestation |
 | `deployment-template-original.json` | ARM template with Confidential SKU |
 | `deployment-template-standard.json` | ARM template with Standard SKU |
-| `Dockerfile` | Container image definition (Python Flask app) |
+| `Dockerfile` | Multi-stage build (Flask + SKR binary) |
 | `requirements.txt` | Python dependencies (Flask, requests) |
 | `acr-config.json` | Generated configuration (no secrets, created by `-Build`) |
 
@@ -206,7 +212,10 @@ The web UI dynamically updates security feature indicators based on attestation 
 
 ### "Connection refused" error
 
-The sidecar is not running. Ensure you deployed with the sidecar container.
+The SKR service is not running. Check container logs to verify supervisord started both processes:
+```powershell
+az container logs -g <resource-group> -n <container-name> --container-name attestation-demo
+```
 
 ### "400 Bad Request" from MAA
 
@@ -229,7 +238,7 @@ az container show --name <name> --resource-group <rg> --query "sku"
 
 ### Attestation fails in -NoAcc mode
 
-This is expected. The sidecar is included but attestation will fail because there's no AMD SEV-SNP hardware on Standard SKU containers. The error response from the sidecar will be displayed in the UI.
+This is expected. The SKR service is included but attestation will fail because there's no AMD SEV-SNP hardware on Standard SKU containers. The error response from the SKR service will be displayed in the UI.
 
 ## References
 

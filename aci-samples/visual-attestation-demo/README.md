@@ -11,11 +11,12 @@ This project deploys a Python Flask web application to Azure Container Instances
 
 ### Features
 
+- **Single Container Architecture** - Combined Flask app and SKR attestation service in one container
 - **Interactive Web UI** - Modern interface demonstrating attestation capabilities with real-time status indicators
 - **Remote Attestation** - Request JWT tokens from Microsoft Azure Attestation (MAA)
 - **Hardware Security** - AMD SEV-SNP memory encryption and isolation
 - **Security Policy Enforcement** - Cryptographic verification of container configuration with layer hash validation
-- **Sidecar Pattern** - Uses Azure's attestation sidecar container (`mcr.microsoft.com/aci/skr:2.7`)
+- **Multi-Stage Docker Build** - Extracts SKR binary from `mcr.microsoft.com/aci/skr:2.7`
 - **Key Vault Integration** - Secure credential storage using Azure Key Vault
 - **Live Diagnostics** - Real-time attestation status and error reporting
 
@@ -81,8 +82,8 @@ This creates:
 ```
 
 Deploys with:
+- **Single Container** - Combined Flask app and SKR attestation service
 - **Confidential SKU** - AMD SEV-SNP hardware protection with encrypted memory
-- **Attestation Sidecar** - `mcr.microsoft.com/aci/skr:2.7` provides attestation endpoints
 - **Security Policy** - Generated via `az confcom` with `--disable-stdio` (blocks shell access)
 - **Hardened Configuration** - No elevated privileges, no stack dumps, encrypted scratch storage
 - **Layer Hash Validation** - Each container layer hash is verified against the policy
@@ -96,13 +97,13 @@ Deploys with:
 ```
 
 Deploys with:
+- **Same Container Image** - Identical combined container (Flask + SKR)
 - **Standard SKU** - No hardware TEE protection
-- **No Attestation Sidecar** - Sidecar container is not included in the deployment
 - **No Security Policy** - No confidential compute enforcement policy applied
 - **Faster Deployment** - No Docker or policy generation required
-- **Simplified Architecture** - Only the Flask web application container is deployed
+- **SKR Fails Gracefully** - Attestation endpoints return detailed error diagnostics
 
-> ℹ️ **Use this mode for testing the UI layout and basic functionality.** Attestation endpoints will return errors since there is no sidecar or TEE hardware.
+> ℹ️ **Use this mode for testing the UI layout and basic functionality.** The SKR service will fail to generate attestation reports since there is no TEE hardware available.
 
 ### Combined Build and Deploy
 
@@ -152,30 +153,35 @@ Deploys with:
 
 ## Architecture
 
+The demo uses a **single combined container** that includes both the Flask web application and the SKR (Secure Key Release) attestation service. This is achieved using a multi-stage Docker build that extracts the SKR binary from Microsoft's sidecar image and runs both services via supervisord.
+
 ### Confidential Mode
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                Azure Container Instance                  │
 │                   (Confidential SKU)                     │
-│  ┌─────────────────────┐  ┌─────────────────────────┐   │
-│  │   Flask Web App     │  │   Attestation Sidecar   │   │
-│  │     (Port 80)       │  │      (Port 8080)        │   │
-│  │                     │  │                         │   │
-│  │  /attest/maa ──────────► /attest/maa             │   │
-│  │  /attest/raw ──────────► /attest/raw             │   │
-│  └─────────────────────┘  └───────────┬─────────────┘   │
-│                                       │                  │
-│              AMD SEV-SNP TEE          │                  │
-└───────────────────────────────────────┼─────────────────┘
-                                        │
-                                        ▼
-                          ┌─────────────────────────┐
-                          │  Microsoft Azure        │
-                          │  Attestation (MAA)      │
-                          │  sharedeus.eus.attest.  │
-                          │  azure.net              │
-                          └─────────────────────────┘
+│  ┌───────────────────────────────────────────────────┐  │
+│  │           Combined Container (supervisord)         │  │
+│  │  ┌─────────────────────┐  ┌────────────────────┐  │  │
+│  │  │   Flask Web App     │  │   SKR Service      │  │  │
+│  │  │     (Port 80)       │  │   (Port 8080)      │  │  │
+│  │  │                     │  │                    │  │  │
+│  │  │  /attest/maa ──────────► /attest/maa        │  │  │
+│  │  │  /attest/raw ──────────► /attest/raw        │  │  │
+│  │  └─────────────────────┘  └─────────┬──────────┘  │  │
+│  └─────────────────────────────────────┼─────────────┘  │
+│                                        │                 │
+│               AMD SEV-SNP TEE          │                 │
+└────────────────────────────────────────┼─────────────────┘
+                                         │
+                                         ▼
+                           ┌─────────────────────────┐
+                           │  Microsoft Azure        │
+                           │  Attestation (MAA)      │
+                           │  sharedeus.eus.attest.  │
+                           │  azure.net              │
+                           └─────────────────────────┘
 ```
 
 ### Standard Mode
@@ -184,21 +190,22 @@ Deploys with:
 ┌─────────────────────────────────────────────────────────┐
 │                Azure Container Instance                  │
 │                    (Standard SKU)                        │
-│  ┌─────────────────────┐  ┌─────────────────────────┐   │
-│  │   Flask Web App     │  │   Attestation Sidecar   │   │
-│  │     (Port 80)       │  │      (Port 8080)        │   │
-│  │                     │  │                         │   │
-│  │  /attest/maa ──────────► /attest/maa             │   │
-│  └─────────────────────┘  └───────────┬─────────────┘   │
-│                                       │                  │
-│              No TEE (Standard)        │                  │
-└───────────────────────────────────────┼─────────────────┘
-                                        │
-                                        ▼
-                          ┌─────────────────────────┐
-                          │  Attestation Fails      │
-                          │  (No SNP hardware)      │
-                          └─────────────────────────┘
+│  ┌───────────────────────────────────────────────────┐  │
+│  │           Combined Container (supervisord)         │  │
+│  │  ┌─────────────────────┐  ┌────────────────────┐  │  │
+│  │  │   Flask Web App     │  │   SKR Service      │  │  │
+│  │  │     (Port 80)       │  │   (Port 8080)      │  │  │
+│  │  └─────────────────────┘  └─────────┬──────────┘  │  │
+│  └─────────────────────────────────────┼─────────────┘  │
+│                                        │                 │
+│               No TEE (Standard)        │                 │
+└────────────────────────────────────────┼─────────────────┘
+                                         │
+                                         ▼
+                           ┌─────────────────────────┐
+                           │  Attestation Fails      │
+                           │  (No SNP hardware)      │
+                           └─────────────────────────┘
 ```
 
 ## Project Structure
@@ -206,7 +213,8 @@ Deploys with:
 ```
 ├── Deploy-AttestationDemo.ps1      # Main script (build, deploy, cleanup)
 ├── app.py                          # Flask web application
-├── Dockerfile                      # Container image definition
+├── Dockerfile                      # Multi-stage build (Flask + SKR)
+├── supervisord.conf                # Process supervisor configuration
 ├── requirements.txt                # Python dependencies
 ├── templates/
 │   └── index.html                  # Web UI template
@@ -220,9 +228,9 @@ Deploys with:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Interactive demo UI with real-time attestation controls |
-| `/attest/maa` | POST | Request MAA attestation token (forwards to sidecar on port 8080) |
+| `/attest/maa` | POST | Request MAA attestation token (forwards to SKR on port 8080) |
 | `/attest/raw` | POST | Request raw AMD SEV-SNP attestation report |
-| `/sidecar/status` | GET | Check attestation sidecar availability |
+| `/sidecar/status` | GET | Check SKR service availability |
 | `/info` | GET | Live deployment info with attestation status and diagnostics |
 | `/health` | GET | Health check endpoint for container monitoring |
 
@@ -263,7 +271,7 @@ Failed to generate security policy
 ```
 Attestation failed with status 500
 ```
-**Solution:** This is expected in `-NoAcc` mode. The sidecar response will show details about why attestation failed (no SNP hardware). Check the `/info` endpoint for detailed diagnostics.
+**Solution:** This is expected in `-NoAcc` mode. The SKR service response will show details about why attestation failed (no SNP hardware). Check the `/info` endpoint for detailed diagnostics.
 
 ### No configuration found
 ```
@@ -271,13 +279,13 @@ acr-config.json not found. Run with -Build first.
 ```
 **Solution:** Run `.\Deploy-AttestationDemo.ps1 -Build` before deploying.
 
-### Sidecar connection refused
+### SKR connection refused
 ```
-Attestation sidecar not available. Connection refused.
+Attestation service not available. Connection refused.
 ```
-**Solution:** Wait for the container group to fully start (can take 1-3 minutes). Check logs with:
+**Solution:** Wait for the container to fully start (can take 1-3 minutes). Check logs with:
 ```powershell
-az container logs -g <resource-group> -n <container-name> --container-name attestation-sidecar
+az container logs -g <resource-group> -n <container-name> --container-name attestation-demo
 ```
 
 ### Container not responding
