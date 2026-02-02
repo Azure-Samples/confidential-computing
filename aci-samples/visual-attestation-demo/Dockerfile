@@ -2,10 +2,10 @@
 # Uses multi-stage build to extract SKR binary from Microsoft's sidecar image
 
 # Stage 1: Extract SKR binary from Microsoft's attestation sidecar
-FROM mcr.microsoft.com/aci/skr:2.7 AS skr-source
+FROM mcr.microsoft.com/aci/skr:2.13 AS skr-source
 
 # Stage 2: Build the combined application container
-FROM python:3.11-slim-bookworm
+FROM python:3.13-slim-bookworm
 
 WORKDIR /app
 

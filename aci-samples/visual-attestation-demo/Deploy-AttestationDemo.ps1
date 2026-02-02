@@ -159,15 +159,97 @@ function Invoke-Build {
         throw "Failed to create ACR"
     }
     
-    # Create Azure Key Vault
-    Write-Host "Creating Azure Key Vault: $KeyVaultName..." -ForegroundColor Green
+    # Create Azure Key Vault (Premium SKU for HSM-backed keys with SKR)
+    Write-Host "Creating Azure Key Vault Premium: $KeyVaultName..." -ForegroundColor Green
     az keyvault create `
         --resource-group $ResourceGroup `
         --name $KeyVaultName `
         --location $Location `
+        --sku premium `
         --enable-rbac-authorization false | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create Key Vault, continuing..."
+    }
+    
+    # Create user-assigned managed identity for SKR
+    $IdentityName = "id-$RegistryName"
+    Write-Host "Creating managed identity: $IdentityName..." -ForegroundColor Green
+    az identity create `
+        --resource-group $ResourceGroup `
+        --name $IdentityName | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to create managed identity"
+    }
+    
+    # Get identity details
+    $IdentityClientId = az identity show --resource-group $ResourceGroup --name $IdentityName --query clientId -o tsv
+    $IdentityResourceId = az identity show --resource-group $ResourceGroup --name $IdentityName --query id -o tsv
+    $IdentityPrincipalId = az identity show --resource-group $ResourceGroup --name $IdentityName --query principalId -o tsv
+    
+    Write-Host "Managed Identity Client ID: $IdentityClientId"
+    
+    # Grant the managed identity access to Key Vault keys
+    Write-Host "Granting managed identity access to Key Vault..." -ForegroundColor Green
+    az keyvault set-policy `
+        --name $KeyVaultName `
+        --object-id $IdentityPrincipalId `
+        --key-permissions get release | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to set Key Vault policy for managed identity"
+    }
+    Write-Success "Managed identity granted 'get' and 'release' permissions on Key Vault keys"
+    
+    # Create SKR key with release policy for confidential computing
+    Write-Host "Creating SKR key with secure key release policy..." -ForegroundColor Green
+    $SkrKeyName = "skr-demo-key"
+    $MaaEndpoint = "sharedeus.eus.attest.azure.net"
+    
+    # Create release policy JSON for confidential containers
+    # Using x-ms-attestation-type claim which is present in all SEV-SNP attestation tokens
+    $releasePolicy = @{
+        version = "1.0.0"
+        anyOf = @(
+            @{
+                authority = "https://$MaaEndpoint"
+                allOf = @(
+                    @{
+                        claim = "x-ms-attestation-type"
+                        equals = "sevsnpvm"
+                    }
+                )
+            }
+        )
+    }
+    $releasePolicyPath = Join-Path $PSScriptRoot "skr-release-policy.json"
+    $releasePolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $releasePolicyPath -Encoding UTF8
+    
+    # Create the exportable HSM-backed key with release policy
+    try {
+        az keyvault key create `
+            --vault-name $KeyVaultName `
+            --name $SkrKeyName `
+            --kty RSA-HSM `
+            --size 2048 `
+            --ops wrapKey unwrapKey encrypt decrypt `
+            --exportable true `
+            --policy $releasePolicyPath | Out-Null
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "SKR key '$SkrKeyName' created with release policy"
+            Write-Host "  MAA Endpoint: $MaaEndpoint"
+            Write-Host "  Key Type: RSA-HSM (exportable)"
+        } else {
+            Write-Warning "Failed to create SKR key with release policy, trying without..."
+            # Fallback: create key without release policy (won't work for SKR but allows demo to continue)
+            az keyvault key create --vault-name $KeyVaultName --name $SkrKeyName --kty RSA --size 2048 | Out-Null
+        }
+    } catch {
+        Write-Warning "SKR key creation failed: $_"
+    }
+    
+    # Clean up temporary policy file
+    if (Test-Path $releasePolicyPath) {
+        Remove-Item $releasePolicyPath -Force
     }
     
     # Build and push image
@@ -214,13 +296,22 @@ function Invoke-Build {
         imageTag = $ImageTag
         fullImage = "$loginServer/${ImageName}:${ImageTag}"
         keyVaultName = $KeyVaultName
+        skrKeyName = $SkrKeyName
+        skrMaaEndpoint = $MaaEndpoint
+        skrAkvEndpoint = "$KeyVaultName.vault.azure.net"
+        identityName = $IdentityName
+        identityResourceId = $IdentityResourceId
+        identityClientId = $IdentityClientId
     }
     Save-Config $config
     
     Write-Header "Build Complete"
     Write-Host "Registry: $loginServer"
     Write-Host "Image: $loginServer/${ImageName}:${ImageTag}"
-    Write-Host "Key Vault: $KeyVaultName"
+    Write-Host "Key Vault: $KeyVaultName (Premium SKU)"
+    Write-Host "SKR Key: $SkrKeyName"
+    Write-Host "MAA Endpoint: $MaaEndpoint"
+    Write-Host "Managed Identity: $IdentityName"
     Write-Host ""
     Write-Success "Credentials stored securely in Azure Key Vault"
     Write-Host "Configuration saved to acr-config.json"
@@ -294,6 +385,10 @@ function Invoke-Deploy {
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
             'registryPassword' = @{ 'value' = $ACR_PASSWORD }
             'dnsNameLabel' = @{ 'value' = $dns_label }
+            'skrKeyName' = @{ 'value' = if ($config.skrKeyName) { $config.skrKeyName } else { '' } }
+            'skrMaaEndpoint' = @{ 'value' = if ($config.skrMaaEndpoint) { $config.skrMaaEndpoint } else { 'sharedeus.eus.attest.azure.net' } }
+            'skrAkvEndpoint' = @{ 'value' = if ($config.skrAkvEndpoint) { $config.skrAkvEndpoint } else { '' } }
+            'identityResourceId' = @{ 'value' = if ($config.identityResourceId) { $config.identityResourceId } else { '' } }
         }
     }
     $params | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params.json'
@@ -549,6 +644,10 @@ function Invoke-Compare {
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
             'registryPassword' = @{ 'value' = $ACR_PASSWORD }
             'dnsNameLabel' = @{ 'value' = $dns_conf }
+            'skrKeyName' = @{ 'value' = if ($config.skrKeyName) { $config.skrKeyName } else { '' } }
+            'skrMaaEndpoint' = @{ 'value' = if ($config.skrMaaEndpoint) { $config.skrMaaEndpoint } else { 'sharedeus.eus.attest.azure.net' } }
+            'skrAkvEndpoint' = @{ 'value' = if ($config.skrAkvEndpoint) { $config.skrAkvEndpoint } else { '' } }
+            'identityResourceId' = @{ 'value' = if ($config.identityResourceId) { $config.identityResourceId } else { '' } }
         }
     }
     $params_conf | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-conf.json'
@@ -589,6 +688,10 @@ function Invoke-Compare {
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
             'registryPassword' = @{ 'value' = $ACR_PASSWORD }
             'dnsNameLabel' = @{ 'value' = $dns_std }
+            'skrKeyName' = @{ 'value' = if ($config.skrKeyName) { $config.skrKeyName } else { '' } }
+            'skrMaaEndpoint' = @{ 'value' = if ($config.skrMaaEndpoint) { $config.skrMaaEndpoint } else { 'sharedeus.eus.attest.azure.net' } }
+            'skrAkvEndpoint' = @{ 'value' = if ($config.skrAkvEndpoint) { $config.skrAkvEndpoint } else { '' } }
+            'identityResourceId' = @{ 'value' = if ($config.identityResourceId) { $config.identityResourceId } else { '' } }
         }
     }
     $params_std | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-std.json'
