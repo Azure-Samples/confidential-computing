@@ -1,7 +1,7 @@
 # Azure Confidential Container Attestation Demo
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** January 2026
+**Last Updated:** February 2026
 
 A demonstration of Azure Container Instances (ACI) with AMD SEV-SNP confidential computing and remote attestation via Microsoft Azure Attestation (MAA).
 
@@ -108,6 +108,27 @@ Deploys with:
 
 > ℹ️ **Use this mode for testing the UI layout and basic functionality.** The SKR service will fail to generate attestation reports since there is no TEE hardware available.
 
+### Side-by-Side Comparison Mode
+
+```powershell
+.\Deploy-AttestationDemo.ps1 -Compare
+```
+
+Deploys **two containers simultaneously** for comparison:
+- **Confidential Container** - AMD SEV-SNP hardware with CCE policy enforcement
+- **Standard Container** - No TEE hardware protection
+
+Opens a split-screen browser view showing both containers side-by-side. This is the best way to demonstrate the difference between confidential and standard deployments:
+
+| Left Pane (Confidential) | Right Pane (Standard) |
+|--------------------------|----------------------|
+| ✅ Attestation succeeds | ❌ Attestation fails |
+| TEE hardware available | No TEE hardware |
+| CCE policy enforced | No policy |
+| `/dev/sev-guest` present | Device not found |
+
+When you close the browser, both containers are automatically cleaned up.
+
 ### Combined Build and Deploy
 
 ```powershell
@@ -131,6 +152,7 @@ Deploys with:
 |-----------|-------------|
 | `-Build` | Build and push container image to ACR (creates RG, ACR, Key Vault) |
 | `-Deploy` | Deploy container to ACI (requires prior `-Build`) |
+| `-Compare` | Deploy BOTH Confidential and Standard containers side-by-side for comparison |
 | `-Cleanup` | Delete all Azure resources in the resource group |
 | `-NoAcc` | Use Standard SKU (faster, no Docker required, attestation will fail) |
 | `-SkipBrowser` | Don't open Microsoft Edge browser after deployment |
@@ -146,6 +168,9 @@ Deploys with:
 
 # Build with custom registry name
 .\Deploy-AttestationDemo.ps1 -Build -RegistryName "myregistry"
+
+# Deploy both Confidential and Standard side-by-side
+.\Deploy-AttestationDemo.ps1 -Compare
 
 # Deploy and skip browser
 .\Deploy-AttestationDemo.ps1 -Deploy -SkipBrowser

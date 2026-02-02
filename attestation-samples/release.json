@@ -15,7 +15,7 @@
 					]
 				}
 			],
-			"authority": "https://sgalldemoweu.weu.attest.azure.net/"
+			"authority": "https://<YOUR_MAA_INSTANCE>.weu.attest.azure.net/"
 		}
 	],
 	"version": "1.0.0"
