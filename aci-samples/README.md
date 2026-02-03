@@ -45,6 +45,8 @@ An interactive Flask web application that demonstrates Azure Container Instances
 - **Single Container Architecture** - Combined Flask app and SKR attestation service
 - **Interactive Web UI** - Modern interface with real-time attestation controls
 - **Remote Attestation** - Request JWT tokens from Microsoft Azure Attestation (MAA)
+- **Secure Key Release (SKR)** - Release keys only to verified confidential containers
+- **Real-time Encryption** - Encrypt text using released SKR keys (RSA-OAEP-SHA256)
 - **Hardware Security** - AMD SEV-SNP memory encryption and isolation
 - **Security Policy Enforcement** - Cryptographic verification of container configuration
 - **Multi-Stage Docker Build** - Extracts SKR binary from Microsoft's sidecar image

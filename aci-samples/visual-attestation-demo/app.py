@@ -378,6 +378,10 @@ def skr_release():
                 except:
                     pass
             
+            # Store the released key for encryption use
+            global _released_key
+            _released_key = key_data
+            
             return jsonify({
                 'status': 'success',
                 'message': 'Secure Key Release successful!',
@@ -385,7 +389,8 @@ def skr_release():
                 'maa_endpoint': maa_endpoint,
                 'akv_endpoint': akv_endpoint,
                 'key_name': kid,
-                'note': 'This key was released because the container proved it is running in a hardware TEE that matches the key release policy.'
+                'note': 'This key was released because the container proved it is running in a hardware TEE that matches the key release policy.',
+                'encryption_enabled': True
             })
         except Exception as parse_error:
             return jsonify({
@@ -431,9 +436,158 @@ def skr_config():
     return jsonify({
         'maa_endpoint': os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net'),
         'akv_endpoint': os.environ.get('SKR_AKV_ENDPOINT', ''),
-        'kid': os.environ.get('SKR_KEY_NAME', ''),
+        'key_name': os.environ.get('SKR_KEY_NAME', ''),
         'configured': bool(os.environ.get('SKR_AKV_ENDPOINT') and os.environ.get('SKR_KEY_NAME'))
     })
+
+# Global storage for the released key (in-memory, cleared on restart)
+_released_key = None
+
+@app.route('/encrypt', methods=['POST'])
+def encrypt_with_released_key():
+    """
+    Encrypt plaintext using the previously released SKR key.
+    The key must have been released first via /skr/release.
+    Uses RSA-OAEP with SHA-256 for encryption.
+    """
+    global _released_key
+    
+    try:
+        data = request.get_json()
+        plaintext = data.get('plaintext', '')
+        
+        if not plaintext:
+            return jsonify({
+                'status': 'error',
+                'message': 'No plaintext provided'
+            }), 400
+        
+        if not _released_key:
+            return jsonify({
+                'status': 'error',
+                'message': 'No key has been released yet. Click "Test Secure Key Release" first.',
+                'hint': 'The key must be released from Azure Key Vault before encryption can work.'
+            }), 400
+        
+        # Import cryptography library
+        from cryptography.hazmat.primitives.asymmetric import rsa, padding
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.backends import default_backend
+        import base64
+        
+        # Parse the JWK key to extract RSA components
+        key_data = _released_key
+        
+        # Handle nested key structure
+        if isinstance(key_data, dict) and 'key' in key_data:
+            key_data = key_data['key']
+        
+        if not isinstance(key_data, dict):
+            return jsonify({
+                'status': 'error',
+                'message': 'Released key is not in expected JWK format',
+                'key_type': str(type(key_data))
+            }), 500
+        
+        # Get RSA components from JWK (n = modulus, e = exponent)
+        n_b64 = key_data.get('n', '')
+        e_b64 = key_data.get('e', '')
+        
+        if not n_b64 or not e_b64:
+            return jsonify({
+                'status': 'error',
+                'message': 'Key missing RSA components (n, e)',
+                'available_keys': list(key_data.keys())
+            }), 500
+        
+        # Convert Base64URL to bytes
+        def b64url_to_int(b64url):
+            # Add padding if needed
+            padding_needed = 4 - len(b64url) % 4
+            if padding_needed != 4:
+                b64url += '=' * padding_needed
+            # Replace URL-safe chars
+            b64 = b64url.replace('-', '+').replace('_', '/')
+            data = base64.b64decode(b64)
+            return int.from_bytes(data, byteorder='big')
+        
+        n = b64url_to_int(n_b64)
+        e = b64url_to_int(e_b64)
+        
+        # Create RSA public key from components
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+        public_numbers = RSAPublicNumbers(e, n)
+        public_key = public_numbers.public_key(default_backend())
+        
+        # Encrypt the plaintext using RSA-OAEP with SHA-256
+        plaintext_bytes = plaintext.encode('utf-8')
+        
+        # Check plaintext length (RSA-OAEP has size limits based on key size)
+        key_size_bytes = (public_key.key_size + 7) // 8
+        max_plaintext_size = key_size_bytes - 2 * 32 - 2  # For SHA-256
+        
+        if len(plaintext_bytes) > max_plaintext_size:
+            return jsonify({
+                'status': 'error',
+                'message': f'Plaintext too long. Maximum {max_plaintext_size} bytes for this key size.',
+                'plaintext_length': len(plaintext_bytes),
+                'max_length': max_plaintext_size
+            }), 400
+        
+        ciphertext = public_key.encrypt(
+            plaintext_bytes,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
+        # Return Base64-encoded ciphertext
+        ciphertext_b64 = base64.b64encode(ciphertext).decode('ascii')
+        
+        return jsonify({
+            'status': 'success',
+            'ciphertext': ciphertext_b64,
+            'algorithm': 'RSA-OAEP-SHA256',
+            'key_id': key_data.get('kid', 'unknown'),
+            'plaintext_length': len(plaintext_bytes),
+            'ciphertext_length': len(ciphertext)
+        })
+        
+    except ImportError as e:
+        return jsonify({
+            'status': 'error',
+            'message': 'Cryptography library not available',
+            'detail': str(e)
+        }), 500
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Encryption failed: {str(e)}',
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/skr/key-status', methods=['GET'])
+def skr_key_status():
+    """Check if a key has been released and is available for encryption."""
+    global _released_key
+    
+    if _released_key:
+        key_data = _released_key
+        if isinstance(key_data, dict) and 'key' in key_data:
+            key_data = key_data['key']
+        
+        return jsonify({
+            'released': True,
+            'key_type': key_data.get('kty', 'unknown') if isinstance(key_data, dict) else 'unknown',
+            'key_id': key_data.get('kid', 'unknown') if isinstance(key_data, dict) else 'unknown'
+        })
+    else:
+        return jsonify({
+            'released': False,
+            'message': 'No key has been released yet'
+        })
 
 @app.route('/health')
 def health():

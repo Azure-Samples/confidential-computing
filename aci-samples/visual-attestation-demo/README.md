@@ -15,9 +15,10 @@ This project deploys a Python Flask web application to Azure Container Instances
 - **Interactive Web UI** - Modern interface demonstrating attestation capabilities with real-time status indicators
 - **Remote Attestation** - Request JWT tokens from Microsoft Azure Attestation (MAA)
 - **Secure Key Release (SKR)** - Demonstrate Azure Key Vault releasing keys only to verified confidential containers
+- **Real-time Encryption** - Encrypt text using released SKR keys with RSA-OAEP-SHA256 algorithm
 - **Hardware Security** - AMD SEV-SNP memory encryption and isolation
 - **Security Policy Enforcement** - Cryptographic verification of container configuration with layer hash validation
-- **Multi-Stage Docker Build** - Extracts SKR binary from `mcr.microsoft.com/aci/skr:2.7`
+- **Multi-Stage Docker Build** - Extracts SKR binary from `mcr.microsoft.com/aci/skr:2.13`
 - **Key Vault Integration** - Premium SKU Key Vault with HSM-backed exportable keys and release policies
 - **Live Diagnostics** - Real-time attestation status and error reporting
 - **Service Logs Display** - When attestation fails, view SKR, Flask, and Supervisord logs directly in the UI
@@ -262,6 +263,8 @@ The demo uses a **single combined container** that includes both the Flask web a
 | `/attest/raw` | POST | Request raw AMD SEV-SNP attestation report |
 | `/skr/release` | POST | Test Secure Key Release - request protected key from Azure Key Vault |
 | `/skr/config` | GET | Get current SKR configuration (key vault, key name, MAA endpoint) |
+| `/skr/key-status` | GET | Check if a key has been released and is available for encryption |
+| `/encrypt` | POST | Encrypt plaintext using the released SKR key (RSA-OAEP-SHA256) |
 | `/sidecar/status` | GET | Check SKR service availability |
 | `/info` | GET | Live deployment info with attestation status and diagnostics |
 | `/health` | GET | Health check endpoint for container monitoring |
@@ -304,7 +307,29 @@ The demo includes:
 - **Exportable RSA-HSM Key** - Created with a release policy requiring confidential attestation
 - **Test Button in UI** - Click "Test Secure Key Release" to see if the key can be released
 - **Success Display** - Shows the released key in JWK format with a green checkmark
+- **Real-time Encryption** - After key release, encrypt text using the RSA key with live feedback
 - **Failure Diagnostics** - Shows detailed error including key vault name, MAA endpoint, and logs
+
+## Real-time Encryption
+
+After successfully releasing a key via SKR, the demo enables real-time encryption capabilities:
+
+### How It Works
+
+1. **Key Release** - Click "Test Secure Key Release" to obtain the RSA public key from Azure Key Vault
+2. **Key Storage** - The released key is stored in server memory (cleared on restart)
+3. **Live Encryption** - Type text in the plaintext box to encrypt it in real-time
+4. **Algorithm** - Uses RSA-OAEP with SHA-256 padding (industry standard)
+5. **Decryption** - Only the private key holder (Azure Key Vault HSM) can decrypt
+
+### Security Properties
+
+| Property | Description |
+|----------|-------------|
+| **Key Protection** | Private key never leaves the HSM |
+| **Attestation Required** | Key only released to verified TEE |
+| **Forward Secrecy** | Each container restart requires re-attestation |
+| **Memory Safety** | Key stored only in encrypted TEE memory |
 
 ### Release Policy
 
