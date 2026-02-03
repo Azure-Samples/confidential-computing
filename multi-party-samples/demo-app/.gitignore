@@ -1,4 +1,4 @@
-n# Azure configuration (may contain sensitive data references)
+# Azure configuration (may contain sensitive data references)
 acr-config.json
 
 # Generated deployment files

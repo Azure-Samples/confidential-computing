@@ -43,6 +43,23 @@ Azure Container Instances with AMD SEV-SNP confidential computing:
 - **BuildRandomACI.ps1** - Create confidential ACI with hello-world container
 - **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA), includes side-by-side comparison mode
 
+### [Multi-Party Samples](/multi-party-samples/demo-app/README-MultiParty.md) ⭐ NEW
+Secure multi-party computation demonstration with Azure Confidential Containers:
+- **Deploy-MultiParty.ps1** - Deploy 3 containers (Contoso, Fabrikam, Snooper) to demonstrate:
+  - 🔐 **Hardware-based isolation** - AMD SEV-SNP TEE protects data in memory
+  - 🛡️ **Remote attestation** - Cryptographic proof of TEE environment
+  - 🔑 **Secure Key Release (SKR)** - Keys only released to attested containers
+  - 🏢 **Company isolation** - Each party can only decrypt their own data
+  - 👁️ **Attacker view** - Snooper container sees only encrypted data
+  - 📦 **Shared storage** - Encrypted data from all parties in single blob
+  - 🔓 **TEE-only decryption** - Data decrypted only inside hardware-protected memory
+
+![Multi-Party Architecture](/multi-party-samples/demo-app/MultiPartyArchitecture.svg)
+
+**Encrypted Data Flow:** Data remains encrypted in storage and transit; decryption only occurs inside the TEE.
+
+![Data Flow Diagram](/multi-party-samples/demo-app/DataFlowDiagram.svg)
+
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:
 - **BuildRandomCVM.ps1** - Deploy CVMs with Customer Managed Keys, Confidential Disk Encryption, and attestation (Windows Server, Windows 11, Ubuntu, RHEL)
