@@ -305,9 +305,88 @@
             </div>
             
             <div class="section">
+                <h2>🔑 Secure Key Release</h2>
+                <div class="attestation-box">
+                    <p><strong>Secure Key Release (SKR)</strong> allows Azure Key Vault to release cryptographic keys only to verified confidential computing environments. The key is released only if the container proves it's running in a genuine AMD SEV-SNP TEE with the correct security policy.</p>
+                    
+                    <div id="skrConfigInfo" style="margin: 20px 0; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4;">
+                        <p style="color: #004085;"><em>Loading SKR configuration...</em></p>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button id="skrBtn" onclick="testSecureKeyRelease()">
+                            🔐 Test Secure Key Release
+                        </button>
+                    </div>
+                    
+                    <div id="skrResult"></div>
+                </div>
+            </div>
+            
+            <div class="section" id="encryptionSection">
+                <h2>🔒 Real-time Encryption</h2>
+                <div class="attestation-box">
+                    <p><strong>Live Encryption Demo:</strong> After successfully releasing a key, you can encrypt text in real-time using the released RSA key. The encryption uses RSA-OAEP with SHA-256 padding.</p>
+                    
+                    <div id="encryptionStatus" style="margin: 20px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+                        <p style="color: #856404;"><em>⚠️ Key not released yet. Click "Test Secure Key Release" above first.</em></p>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                        <div>
+                            <label for="plaintextInput" style="display: block; font-weight: bold; margin-bottom: 10px; color: #495057;">
+                                📝 Plaintext Input
+                            </label>
+                            <textarea 
+                                id="plaintextInput" 
+                                placeholder="Type your secret message here..."
+                                style="width: 100%; height: 150px; padding: 15px; border: 2px solid #dee2e6; border-radius: 8px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; resize: vertical;"
+                                oninput="encryptRealtime()"
+                                disabled
+                            ></textarea>
+                            <p style="margin-top: 5px; font-size: 0.85em; color: #6c757d;">
+                                <span id="plaintextLength">0</span> characters | Max: <span id="maxPlaintextLength">--</span> bytes
+                            </p>
+                        </div>
+                        <div>
+                            <label for="ciphertextOutput" style="display: block; font-weight: bold; margin-bottom: 10px; color: #495057;">
+                                🔐 Encrypted Output (Base64)
+                            </label>
+                            <textarea 
+                                id="ciphertextOutput" 
+                                placeholder="Encrypted ciphertext will appear here..."
+                                style="width: 100%; height: 150px; padding: 15px; border: 2px solid #28a745; border-radius: 8px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; background: #f8f9fa; resize: vertical;"
+                                readonly
+                            ></textarea>
+                            <p style="margin-top: 5px; font-size: 0.85em; color: #6c757d;">
+                                <span id="ciphertextLength">0</span> bytes encrypted | Algorithm: RSA-OAEP-SHA256
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div id="encryptionInfo" style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4; display: none;">
+                        <h4 style="color: #004085; margin-bottom: 10px;">ℹ️ How it works</h4>
+                        <ul style="color: #004085; margin-left: 20px;">
+                            <li>The released key (RSA public key) is stored in server memory</li>
+                            <li>Your plaintext is encrypted using RSA-OAEP with SHA-256</li>
+                            <li>Only the holder of the private key (Azure Key Vault HSM) can decrypt</li>
+                            <li>The private key never leaves the HSM - even after release</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section">
                 <h2>📊 Deployment Information</h2>
                 <div id="deploymentInfo">
                     <p>Loading deployment information...</p>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>📦 Container Image Information</h2>
+                <div id="containerInfo" style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #6c757d;">
+                    <p><em>Loading container information...</em></p>
                 </div>
             </div>
         </div>
@@ -320,8 +399,35 @@
     </div>
     
     <script>
-        // Load deployment info on page load
+        // Load deployment info and SKR config on page load
         window.onload = function() {
+            // Load SKR configuration
+            fetch('/skr/config')
+                .then(response => response.json())
+                .then(data => {
+                    const skrConfigDiv = document.getElementById('skrConfigInfo');
+                    if (data.configured) {
+                        let html = '<p style="color: #004085; margin-bottom: 10px;"><strong>SKR Configuration:</strong></p>';
+                        html += '<p style="color: #004085;"><strong>Key Vault:</strong> ' + escapeHtml(data.akv_endpoint) + '</p>';
+                        html += '<p style="color: #004085;"><strong>Key Name:</strong> ' + escapeHtml(data.key_name) + '</p>';
+                        html += '<p style="color: #004085;"><strong>MAA Endpoint:</strong> ' + escapeHtml(data.maa_endpoint) + '</p>';
+                        skrConfigDiv.innerHTML = html;
+                    } else {
+                        skrConfigDiv.innerHTML = '<p style="color: #856404;"><em>⚠️ SKR not configured. Deploy with -SKR parameter to enable Secure Key Release.</em></p>';
+                        skrConfigDiv.style.background = '#fff3cd';
+                        skrConfigDiv.style.borderLeftColor = '#ffc107';
+                        document.getElementById('skrBtn').disabled = true;
+                        document.getElementById('skrBtn').title = 'SKR not configured';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('skrConfigInfo').innerHTML = 
+                        '<p style="color: #856404;"><em>⚠️ Could not load SKR configuration: ' + escapeHtml(error.message) + '</em></p>';
+                });
+            
+            // Check if a key has already been released (e.g., page refresh)
+            checkKeyStatus();
+            
             fetch('/info')
                 .then(response => response.json())
                 .then(data => {
@@ -382,6 +488,122 @@
                 .catch(error => {
                     document.getElementById('deploymentInfo').innerHTML = 
                         '<p class="status-badge status-error">Error loading deployment info: ' + escapeHtml(error.message) + '</p>';
+                });
+            
+            // Load container image information
+            fetch('/container/info')
+                .then(response => response.json())
+                .then(data => {
+                    let html = '';
+                    
+                    // Container identity
+                    html += '<div style="margin-bottom: 20px;">';
+                    html += '<h4 style="color: #495057; margin-bottom: 10px;">🏷️ Container Identity</h4>';
+                    html += '<table style="width: 100%; border-collapse: collapse;">';
+                    html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold; width: 200px;">Hostname</td>';
+                    html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.hostname || 'Unknown') + '</td></tr>';
+                    html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Container ID</td>';
+                    html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.container_id || 'Unknown') + '</td></tr>';
+                    if (data.os) {
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">OS</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + escapeHtml(data.os.pretty_name || 'Unknown') + '</td></tr>';
+                    }
+                    html += '</table>';
+                    html += '</div>';
+                    
+                    // SKR Service Status (important for NoAcc mode)
+                    if (data.skr_status) {
+                        const skrRunning = data.skr_status.running === true;
+                        const statusColor = skrRunning ? '#28a745' : '#dc3545';
+                        const statusIcon = skrRunning ? '✅' : '❌';
+                        
+                        html += '<div style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: ' + (skrRunning ? '#d4edda' : '#f8d7da') + '; border-left: 4px solid ' + statusColor + ';">';
+                        html += '<h4 style="color: ' + statusColor + '; margin-bottom: 10px;">' + statusIcon + ' SKR Service Status</h4>';
+                        
+                        if (skrRunning) {
+                            html += '<p style="color: #155724;"><strong>Status:</strong> Running on port 8080</p>';
+                        } else {
+                            html += '<p style="color: #721c24;"><strong>Status:</strong> Not Running</p>';
+                            if (data.skr_status.reason) {
+                                html += '<p style="color: #721c24; margin-top: 10px;"><strong>Reason:</strong> ' + escapeHtml(data.skr_status.reason) + '</p>';
+                            }
+                            if (data.skr_status.explanation) {
+                                html += '<div style="margin-top: 10px; padding: 10px; background: rgba(255,255,255,0.5); border-radius: 4px;">';
+                                html += '<p style="color: #721c24; font-size: 0.9em;">' + escapeHtml(data.skr_status.explanation) + '</p>';
+                                html += '</div>';
+                            }
+                            if (data.skr_status.solution) {
+                                html += '<p style="color: #155724; margin-top: 10px; background: #d4edda; padding: 8px; border-radius: 4px;"><strong>💡 Solution:</strong> ' + escapeHtml(data.skr_status.solution) + '</p>';
+                            }
+                            if (data.skr_status.technical_detail) {
+                                html += '<p style="color: #6c757d; margin-top: 10px; font-size: 0.85em;"><em>Technical: ' + escapeHtml(data.skr_status.technical_detail) + '</em></p>';
+                            }
+                        }
+                        html += '</div>';
+                    }
+                    
+                    // SEV Device Status
+                    if (data.sev_device) {
+                        const sevAvailable = data.sev_device.available;
+                        const sevColor = sevAvailable ? '#28a745' : '#dc3545';
+                        const sevIcon = sevAvailable ? '✅' : '❌';
+                        
+                        html += '<div style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: ' + (sevAvailable ? '#d4edda' : '#f8d7da') + '; border-left: 4px solid ' + sevColor + ';">';
+                        html += '<h4 style="color: ' + sevColor + '; margin-bottom: 10px;">' + sevIcon + ' AMD SEV-SNP Device</h4>';
+                        
+                        if (sevAvailable) {
+                            html += '<p style="color: #155724;"><strong>Device:</strong> ' + escapeHtml(data.sev_device.device_path) + '</p>';
+                        } else {
+                            html += '<p style="color: #721c24;"><strong>Device:</strong> Not found (no /dev/sev-guest)</p>';
+                            html += '<p style="color: #721c24; font-size: 0.9em; margin-top: 5px;"><em>This container is NOT running on confidential computing hardware.</em></p>';
+                        }
+                        html += '</div>';
+                    }
+                    
+                    // SKR Binary Info with checksums
+                    if (data.skr_binary_info && !data.skr_binary_info.error) {
+                        html += '<div style="margin-bottom: 20px;">';
+                        html += '<h4 style="color: #495057; margin-bottom: 10px;">🔐 SKR Binary</h4>';
+                        html += '<table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold; width: 200px;">Path</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.skr_binary_info.path) + '</td></tr>';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Size</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + (data.skr_binary_info.size_bytes ? (data.skr_binary_info.size_bytes / 1024 / 1024).toFixed(2) + ' MB' : 'Unknown') + '</td></tr>';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">MD5</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace; font-size: 0.85em;">' + escapeHtml(data.skr_binary_info.md5 || 'N/A') + '</td></tr>';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">SHA256 (partial)</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace; font-size: 0.85em;">' + escapeHtml(data.skr_binary_info.sha256 || 'N/A') + '</td></tr>';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Executable</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + (data.skr_binary_info.executable ? '✓ Yes' : '✗ No') + '</td></tr>';
+                        if (data.skr_binary_info.version) {
+                            html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Version</td>';
+                            html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + escapeHtml(data.skr_binary_info.version) + '</td></tr>';
+                        }
+                        html += '</table>';
+                        html += '</div>';
+                    }
+                    
+                    // Application file checksums
+                    if (data.app_checksums && Object.keys(data.app_checksums).length > 0) {
+                        html += '<div style="margin-bottom: 20px;">';
+                        html += '<h4 style="color: #495057; margin-bottom: 10px;">📄 Application Files (MD5 Checksums)</h4>';
+                        html += '<table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">';
+                        for (const [path, info] of Object.entries(data.app_checksums)) {
+                            if (info.md5) {
+                                html += '<tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6; font-family: monospace; word-break: break-all;">' + escapeHtml(path) + '</td>';
+                                html += '<td style="padding: 6px; border-bottom: 1px solid #dee2e6; font-family: monospace; color: #0078d4;">' + escapeHtml(info.md5) + '</td>';
+                                html += '<td style="padding: 6px; border-bottom: 1px solid #dee2e6; color: #6c757d;">' + (info.size_bytes ? (info.size_bytes / 1024).toFixed(1) + ' KB' : '') + '</td></tr>';
+                            }
+                        }
+                        html += '</table>';
+                        html += '</div>';
+                    }
+                    
+                    document.getElementById('containerInfo').innerHTML = html;
+                })
+                .catch(error => {
+                    document.getElementById('containerInfo').innerHTML = 
+                        '<p style="color: #dc3545;">Error loading container info: ' + escapeHtml(error.message) + '</p>';
                 });
         };
         
@@ -684,6 +906,248 @@
                     li.querySelector('.status-icon').textContent = '✗';
                 });
             }
+        }
+        
+        function testSecureKeyRelease() {
+            const btn = document.getElementById('skrBtn');
+            const resultDiv = document.getElementById('skrResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = '🔐 Releasing Key<span class="loading"></span>';
+            
+            resultDiv.innerHTML = '<p>Requesting secure key release from Azure Key Vault...</p>';
+            
+            fetch('/skr/release', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '🔐 Test Secure Key Release';
+                
+                if (data.status === 'success') {
+                    let html = '<div style="margin-top: 20px;">';
+                    html += '<div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">';
+                    html += '<span style="font-size: 3em; color: #28a745;">✓</span>';
+                    html += '<div>';
+                    html += '<p><span class="status-badge status-success">Secure Key Release Successful</span></p>';
+                    html += '<p style="margin-top: 10px; color: #155724;">The key was successfully released by Azure Key Vault to this verified confidential container.</p>';
+                    html += '</div>';
+                    html += '</div>';
+                    
+                    // Show SKR details
+                    html += '<div style="padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745; margin-bottom: 20px;">';
+                    html += '<h4 style="color: #155724; margin-bottom: 10px;">🔑 Key Release Details</h4>';
+                    html += '<p style="color: #155724;"><strong>Key Vault:</strong> ' + escapeHtml(data.akv_endpoint || 'N/A') + '</p>';
+                    html += '<p style="color: #155724;"><strong>Key Name:</strong> ' + escapeHtml(data.key_name || 'N/A') + '</p>';
+                    html += '<p style="color: #155724;"><strong>MAA Endpoint:</strong> ' + escapeHtml(data.maa_endpoint || 'N/A') + '</p>';
+                    html += '</div>';
+                    
+                    // Show the released key
+                    html += '<p style="margin: 15px 0;"><strong>Released Key (JWK format):</strong></p>';
+                    html += '<div class="output-box" style="border-left: 4px solid #28a745;"><pre>' + JSON.stringify(data.key, null, 2) + '</pre></div>';
+                    
+                    html += '</div>';
+                    resultDiv.innerHTML = html;
+                    
+                    // Enable the real-time encryption UI
+                    enableEncryptionUI();
+                } else {
+                    // SKR failed
+                    let errorHtml = '<div style="margin-top: 20px;">';
+                    errorHtml += '<div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">';
+                    errorHtml += '<span style="font-size: 3em; color: #dc3545;">✗</span>';
+                    errorHtml += '<div>';
+                    errorHtml += '<p><span class="status-badge status-error">Secure Key Release Failed</span></p>';
+                    errorHtml += '<p style="margin-top: 10px; color: #721c24;">' + escapeHtml(data.message || 'Unknown error') + '</p>';
+                    errorHtml += '</div>';
+                    errorHtml += '</div>';
+                    
+                    // Show SKR configuration
+                    errorHtml += '<div style="padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #6c757d; margin-bottom: 20px;">';
+                    errorHtml += '<h4 style="color: #495057; margin-bottom: 10px;">🔧 SKR Configuration</h4>';
+                    errorHtml += '<p><strong>Key Vault:</strong> ' + escapeHtml(data.akv_endpoint || 'Not configured') + '</p>';
+                    errorHtml += '<p><strong>Key Name:</strong> ' + escapeHtml(data.key_name || 'Not configured') + '</p>';
+                    errorHtml += '<p><strong>MAA Endpoint:</strong> ' + escapeHtml(data.maa_endpoint || 'Not configured') + '</p>';
+                    errorHtml += '</div>';
+                    
+                    // Show failure reason if available
+                    if (data.failure_reason) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
+                        errorHtml += '<p style="color: #721c24; font-weight: bold;">🔍 Failure Reason:</p>';
+                        errorHtml += '<p style="margin-top: 10px; color: #721c24;">' + escapeHtml(data.failure_reason) + '</p>';
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show diagnosis if available
+                    if (data.diagnosis) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">';
+                        errorHtml += '<p style="color: #856404; font-weight: bold;">💡 Diagnosis:</p>';
+                        if (data.diagnosis.likely_cause) {
+                            errorHtml += '<p style="margin-top: 10px; color: #856404;"><strong>Likely Cause:</strong> ' + escapeHtml(data.diagnosis.likely_cause) + '</p>';
+                        }
+                        if (data.diagnosis.solution) {
+                            errorHtml += '<p style="margin-top: 5px; color: #856404;"><strong>Solution:</strong> ' + escapeHtml(data.diagnosis.solution) + '</p>';
+                        }
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show sidecar response if available
+                    if (data.sidecar_response) {
+                        errorHtml += '<div style="margin: 15px 0;">';
+                        errorHtml += '<p><strong>SKR Sidecar Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
+                        errorHtml += '<div class="output-box" style="background: #2d2d2d; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + 
+                            escapeHtml(data.sidecar_response) + '</pre></div></div>';
+                    }
+                    
+                    // Show service logs if available
+                    if (data.logs) {
+                        errorHtml += '<details open style="margin: 20px 0; border: 1px solid #6c757d; border-radius: 8px; overflow: hidden;">';
+                        errorHtml += '<summary style="padding: 15px; background: #343a40; color: #fff; cursor: pointer; font-weight: bold;">📋 Service Logs</summary>';
+                        errorHtml += '<div style="padding: 15px; background: #1e1e1e;">';
+                        
+                        // SEV-SNP Device Status
+                        if (data.logs.sev_device) {
+                            const sevDevice = data.logs.sev_device;
+                            const sevAvailable = sevDevice.available;
+                            const sevColor = sevAvailable ? '#28a745' : '#dc3545';
+                            const sevIcon = sevAvailable ? '✅' : '❌';
+                            
+                            errorHtml += '<div style="margin-bottom: 15px; padding: 15px; border-radius: 8px; background: ' + (sevAvailable ? '#d4edda' : '#f8d7da') + '; border-left: 4px solid ' + sevColor + ';">';
+                            errorHtml += '<h4 style="color: ' + sevColor + '; margin-bottom: 10px;">' + sevIcon + ' AMD SEV-SNP Device Status</h4>';
+                            
+                            if (sevAvailable) {
+                                errorHtml += '<p style="color: #155724;"><strong>Device Found:</strong> ' + escapeHtml(sevDevice.device_path) + '</p>';
+                            } else {
+                                errorHtml += '<p style="color: #721c24;"><strong>Device Not Found</strong></p>';
+                                errorHtml += '<p style="color: #721c24;"><em>SKR requires AMD SEV-SNP hardware (Confidential ACI)</em></p>';
+                            }
+                            
+                            errorHtml += '<p style="margin-top: 10px; color: ' + (sevAvailable ? '#155724' : '#721c24') + ';"><em>' + escapeHtml(sevDevice.explanation) + '</em></p>';
+                            errorHtml += '</div>';
+                        }
+                        
+                        // SKR logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #17a2b8; margin-bottom: 10px;">🔐 SKR Service Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto;"><pre>' + escapeHtml(data.logs.skr || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // SKR error logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #dc3545; margin-bottom: 10px;">❌ SKR Error Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + escapeHtml(data.logs.skr_error || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        errorHtml += '</div></details>';
+                    }
+                    
+                    errorHtml += '</div>';
+                    resultDiv.innerHTML = errorHtml;
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = '🔐 Test Secure Key Release';
+                resultDiv.innerHTML = 
+                    '<p><span class="status-badge status-error">Request Failed</span></p>' +
+                    '<p style="margin: 15px 0;"><strong>Error:</strong> ' + escapeHtml(error.message) + '</p>' +
+                    '<p style="margin: 15px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;">' +
+                    '<em>💡 Secure Key Release requires the SKR sidecar and Key Vault configuration. ' +
+                    'Deploy using -SKR parameter to enable this feature.</em></p>';
+            });
+        }
+        
+        // Debounce timer for real-time encryption
+        let encryptionTimer = null;
+        
+        function enableEncryptionUI() {
+            // Enable the encryption text box and update status
+            const statusDiv = document.getElementById('encryptionStatus');
+            const plaintextInput = document.getElementById('plaintextInput');
+            const encryptionInfo = document.getElementById('encryptionInfo');
+            
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.borderLeftColor = '#28a745';
+            statusDiv.innerHTML = '<p style="color: #155724;"><strong>✅ Key released successfully!</strong> You can now encrypt text in real-time.</p>';
+            
+            plaintextInput.disabled = false;
+            plaintextInput.placeholder = 'Type your secret message here...';
+            plaintextInput.focus();
+            
+            encryptionInfo.style.display = 'block';
+            
+            // Update max plaintext length (assuming 4096-bit key = 446 bytes max for RSA-OAEP-SHA256)
+            document.getElementById('maxPlaintextLength').textContent = '446';
+        }
+        
+        function encryptRealtime() {
+            const plaintextInput = document.getElementById('plaintextInput');
+            const ciphertextOutput = document.getElementById('ciphertextOutput');
+            const plaintextLengthSpan = document.getElementById('plaintextLength');
+            const ciphertextLengthSpan = document.getElementById('ciphertextLength');
+            
+            const plaintext = plaintextInput.value;
+            plaintextLengthSpan.textContent = plaintext.length;
+            
+            // Clear previous timer
+            if (encryptionTimer) {
+                clearTimeout(encryptionTimer);
+            }
+            
+            if (!plaintext) {
+                ciphertextOutput.value = '';
+                ciphertextLengthSpan.textContent = '0';
+                return;
+            }
+            
+            // Debounce: wait 200ms after user stops typing
+            encryptionTimer = setTimeout(() => {
+                ciphertextOutput.value = 'Encrypting...';
+                ciphertextOutput.style.borderColor = '#ffc107';
+                
+                fetch('/encrypt', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ plaintext: plaintext })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        ciphertextOutput.value = data.ciphertext;
+                        ciphertextOutput.style.borderColor = '#28a745';
+                        ciphertextLengthSpan.textContent = data.ciphertext_length;
+                    } else {
+                        ciphertextOutput.value = 'Error: ' + (data.message || 'Encryption failed');
+                        ciphertextOutput.style.borderColor = '#dc3545';
+                        ciphertextLengthSpan.textContent = '0';
+                    }
+                })
+                .catch(error => {
+                    ciphertextOutput.value = 'Error: ' + error.message;
+                    ciphertextOutput.style.borderColor = '#dc3545';
+                    ciphertextLengthSpan.textContent = '0';
+                });
+            }, 200);
+        }
+        
+        // Check key status on page load
+        function checkKeyStatus() {
+            fetch('/skr/key-status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.released) {
+                        enableEncryptionUI();
+                    }
+                })
+                .catch(() => {
+                    // Ignore errors - key just not available yet
+                });
         }
         
         function requestRawAttestation() {

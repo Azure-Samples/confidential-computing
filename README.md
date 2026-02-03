@@ -21,7 +21,7 @@ urlFragment: confidential-computing-samples
 
 ![MIT license badge](https://img.shields.io/badge/license-MIT-green.svg)
 
-**Last Updated:** January 2026
+**Last Updated:** February 2026
 
 Security is a key driver accelerating the adoption of cloud computing, but it’s also a major concern when you’re moving extremely sensitive IP and data scenarios to the cloud.
 
@@ -41,7 +41,7 @@ This repository is organized by Azure service type and deployment method:
 ### [ACI Samples](/aci-samples/README.md)
 Azure Container Instances with AMD SEV-SNP confidential computing:
 - **BuildRandomACI.ps1** - Create confidential ACI with hello-world container
-- **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA)
+- **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA), includes side-by-side comparison mode
 
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:

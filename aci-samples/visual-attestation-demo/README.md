@@ -1,7 +1,7 @@
 # Azure Confidential Container Attestation Demo
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** January 2026
+**Last Updated:** February 2026
 
 A demonstration of Azure Container Instances (ACI) with AMD SEV-SNP confidential computing and remote attestation via Microsoft Azure Attestation (MAA).
 
@@ -14,10 +14,12 @@ This project deploys a Python Flask web application to Azure Container Instances
 - **Single Container Architecture** - Combined Flask app and SKR attestation service in one container
 - **Interactive Web UI** - Modern interface demonstrating attestation capabilities with real-time status indicators
 - **Remote Attestation** - Request JWT tokens from Microsoft Azure Attestation (MAA)
+- **Secure Key Release (SKR)** - Demonstrate Azure Key Vault releasing keys only to verified confidential containers
+- **Real-time Encryption** - Encrypt text using released SKR keys with RSA-OAEP-SHA256 algorithm
 - **Hardware Security** - AMD SEV-SNP memory encryption and isolation
 - **Security Policy Enforcement** - Cryptographic verification of container configuration with layer hash validation
-- **Multi-Stage Docker Build** - Extracts SKR binary from `mcr.microsoft.com/aci/skr:2.7`
-- **Key Vault Integration** - Secure credential storage using Azure Key Vault
+- **Multi-Stage Docker Build** - Extracts SKR binary from `mcr.microsoft.com/aci/skr:2.13`
+- **Key Vault Integration** - Premium SKU Key Vault with HSM-backed exportable keys and release policies
 - **Live Diagnostics** - Real-time attestation status and error reporting
 - **Service Logs Display** - When attestation fails, view SKR, Flask, and Supervisord logs directly in the UI
 - **TEE Hardware Detection** - Automatic detection and display of AMD SEV-SNP device (`/dev/sev-guest`) availability
@@ -72,7 +74,8 @@ All operations are performed using a single script: `Deploy-AttestationDemo.ps1`
 This creates:
 - **Azure Resource Group** - Named `sgall<registryname>-rg` in East US
 - **Azure Container Registry (ACR)** - Basic SKU with admin enabled
-- **Azure Key Vault** - Stores ACR credentials securely (username and password)
+- **Azure Key Vault (Premium SKU)** - Stores ACR credentials and SKR-protected key
+- **SKR Key** - RSA-HSM exportable key with release policy for confidential computing
 - **Container Image** - Built and pushed to ACR using `az acr build`
 - **Configuration File** - `acr-config.json` with registry details (no secrets stored locally)
 
@@ -108,6 +111,27 @@ Deploys with:
 
 > ℹ️ **Use this mode for testing the UI layout and basic functionality.** The SKR service will fail to generate attestation reports since there is no TEE hardware available.
 
+### Side-by-Side Comparison Mode
+
+```powershell
+.\Deploy-AttestationDemo.ps1 -Compare
+```
+
+Deploys **two containers simultaneously** for comparison:
+- **Confidential Container** - AMD SEV-SNP hardware with CCE policy enforcement
+- **Standard Container** - No TEE hardware protection
+
+Opens a split-screen browser view showing both containers side-by-side. This is the best way to demonstrate the difference between confidential and standard deployments:
+
+| Left Pane (Confidential) | Right Pane (Standard) |
+|--------------------------|----------------------|
+| ✅ Attestation succeeds | ❌ Attestation fails |
+| TEE hardware available | No TEE hardware |
+| CCE policy enforced | No policy |
+| `/dev/sev-guest` present | Device not found |
+
+When you close the browser, both containers are automatically cleaned up.
+
 ### Combined Build and Deploy
 
 ```powershell
@@ -131,6 +155,7 @@ Deploys with:
 |-----------|-------------|
 | `-Build` | Build and push container image to ACR (creates RG, ACR, Key Vault) |
 | `-Deploy` | Deploy container to ACI (requires prior `-Build`) |
+| `-Compare` | Deploy BOTH Confidential and Standard containers side-by-side for comparison |
 | `-Cleanup` | Delete all Azure resources in the resource group |
 | `-NoAcc` | Use Standard SKU (faster, no Docker required, attestation will fail) |
 | `-SkipBrowser` | Don't open Microsoft Edge browser after deployment |
@@ -146,6 +171,9 @@ Deploys with:
 
 # Build with custom registry name
 .\Deploy-AttestationDemo.ps1 -Build -RegistryName "myregistry"
+
+# Deploy both Confidential and Standard side-by-side
+.\Deploy-AttestationDemo.ps1 -Compare
 
 # Deploy and skip browser
 .\Deploy-AttestationDemo.ps1 -Deploy -SkipBrowser
@@ -233,9 +261,109 @@ The demo uses a **single combined container** that includes both the Flask web a
 | `/` | GET | Interactive demo UI with real-time attestation controls |
 | `/attest/maa` | POST | Request MAA attestation token (forwards to SKR on port 8080) |
 | `/attest/raw` | POST | Request raw AMD SEV-SNP attestation report |
+| `/skr/release` | POST | Test Secure Key Release - request protected key from Azure Key Vault |
+| `/skr/config` | GET | Get current SKR configuration (key vault, key name, MAA endpoint) |
+| `/skr/key-status` | GET | Check if a key has been released and is available for encryption |
+| `/encrypt` | POST | Encrypt plaintext using the released SKR key (RSA-OAEP-SHA256) |
 | `/sidecar/status` | GET | Check SKR service availability |
 | `/info` | GET | Live deployment info with attestation status and diagnostics |
 | `/health` | GET | Health check endpoint for container monitoring |
+| `/container/info` | GET | Container image metadata, checksums, and SKR service status |
+
+## Secure Key Release (SKR)
+
+Secure Key Release allows Azure Key Vault to release cryptographic keys **only** to containers running in a verified confidential computing environment. The key is protected by a release policy that requires attestation proof.
+
+### How SKR Works
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Confidential Container (AMD SEV-SNP)                                    │
+│                                                                          │
+│  1. Container requests key from Key Vault                               │
+│  2. Key Vault requires attestation proof                                │
+│  3. SKR service generates attestation report from TEE hardware         │
+│  4. Attestation sent to MAA for validation                              │
+│  5. Key Vault validates MAA token against release policy                │
+│  6. If valid, key is released to container in JWK format               │
+└─────────────────────────────────────────────────────────────────────────┘
+              │                                    ▲
+              ▼                                    │
+┌─────────────────────────┐       ┌───────────────────────────────────────┐
+│  Azure Key Vault        │       │  Microsoft Azure Attestation (MAA)    │
+│  (Premium SKU)          │       │                                       │
+│                         │       │  Validates:                           │
+│  Release Policy:        │◄──────│  - x-ms-compliance-status =          │
+│  "x-ms-compliance-      │       │    azure-compliant-cvm                │
+│   status = azure-       │       │  - Hardware attestation report        │
+│   compliant-cvm"        │       │                                       │
+└─────────────────────────┘       └───────────────────────────────────────┘
+```
+
+### SKR Demo Features
+
+The demo includes:
+- **Azure Key Vault Premium** - Automatically created with HSM-backed keys during build
+- **Exportable RSA-HSM Key** - Created with a release policy requiring confidential attestation
+- **Test Button in UI** - Click "Test Secure Key Release" to see if the key can be released
+- **Success Display** - Shows the released key in JWK format with a green checkmark
+- **Real-time Encryption** - After key release, encrypt text using the RSA key with live feedback
+- **Failure Diagnostics** - Shows detailed error including key vault name, MAA endpoint, and logs
+
+## Real-time Encryption
+
+After successfully releasing a key via SKR, the demo enables real-time encryption capabilities:
+
+### How It Works
+
+1. **Key Release** - Click "Test Secure Key Release" to obtain the RSA public key from Azure Key Vault
+2. **Key Storage** - The released key is stored in server memory (cleared on restart)
+3. **Live Encryption** - Type text in the plaintext box to encrypt it in real-time
+4. **Algorithm** - Uses RSA-OAEP with SHA-256 padding (industry standard)
+5. **Decryption** - Only the private key holder (Azure Key Vault HSM) can decrypt
+
+### Security Properties
+
+| Property | Description |
+|----------|-------------|
+| **Key Protection** | Private key never leaves the HSM |
+| **Attestation Required** | Key only released to verified TEE |
+| **Forward Secrecy** | Each container restart requires re-attestation |
+| **Memory Safety** | Key stored only in encrypted TEE memory |
+
+### Release Policy
+
+The key is created with this release policy:
+
+```json
+{
+  "version": "1.0.0",
+  "anyOf": [
+    {
+      "authority": "https://sharedeus.eus.attest.azure.net",
+      "allOf": [
+        {
+          "claim": "x-ms-attestation-type",
+          "equals": "sevsnpvm"
+        }
+      ]
+    }
+  ]
+}
+```
+
+This ensures the key is only released when:
+1. The container is running on AMD SEV-SNP hardware (Confidential SKU)
+2. MAA validates the hardware attestation report
+3. The attestation claims include `x-ms-attestation-type: sevsnpvm`
+
+### SKR Demo Outcomes
+
+| Deployment Mode | SKR Result |
+|-----------------|------------|
+| Confidential (`-Deploy`) | ✅ Key released successfully |
+| Standard (`-Deploy -NoAcc`) | ❌ Key release fails - no TEE hardware |
+| Compare (`-Compare`) | ✅/❌ Left shows success, right shows failure |
 
 ## Attestation Token Claims
 

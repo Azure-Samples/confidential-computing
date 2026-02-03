@@ -15,6 +15,10 @@
     Deploy the container to Azure Container Instances.
     Requires a previous build (acr-config.json must exist).
 
+.PARAMETER Compare
+    Deploy TWO containers side by side - one Confidential SKU and one Standard SKU.
+    Opens Edge with split tabs showing both containers for comparison.
+
 .PARAMETER Cleanup
     Delete all Azure resources created by this script.
 
@@ -47,6 +51,10 @@
     Deploy with standard SKU (attestation will fail)
 
 .EXAMPLE
+    .\Deploy-AttestationDemo.ps1 -Compare
+    Deploy both Confidential and Standard containers side by side
+
+.EXAMPLE
     .\Deploy-AttestationDemo.ps1 -Cleanup
     Delete all Azure resources
 #>
@@ -54,6 +62,7 @@
 param(
     [switch]$Build,
     [switch]$Deploy,
+    [switch]$Compare,
     [switch]$Cleanup,
     [switch]$NoAcc,
     [switch]$SkipBrowser,
@@ -150,15 +159,97 @@ function Invoke-Build {
         throw "Failed to create ACR"
     }
     
-    # Create Azure Key Vault
-    Write-Host "Creating Azure Key Vault: $KeyVaultName..." -ForegroundColor Green
+    # Create Azure Key Vault (Premium SKU for HSM-backed keys with SKR)
+    Write-Host "Creating Azure Key Vault Premium: $KeyVaultName..." -ForegroundColor Green
     az keyvault create `
         --resource-group $ResourceGroup `
         --name $KeyVaultName `
         --location $Location `
+        --sku premium `
         --enable-rbac-authorization false | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create Key Vault, continuing..."
+    }
+    
+    # Create user-assigned managed identity for SKR
+    $IdentityName = "id-$RegistryName"
+    Write-Host "Creating managed identity: $IdentityName..." -ForegroundColor Green
+    az identity create `
+        --resource-group $ResourceGroup `
+        --name $IdentityName | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to create managed identity"
+    }
+    
+    # Get identity details
+    $IdentityClientId = az identity show --resource-group $ResourceGroup --name $IdentityName --query clientId -o tsv
+    $IdentityResourceId = az identity show --resource-group $ResourceGroup --name $IdentityName --query id -o tsv
+    $IdentityPrincipalId = az identity show --resource-group $ResourceGroup --name $IdentityName --query principalId -o tsv
+    
+    Write-Host "Managed Identity Client ID: $IdentityClientId"
+    
+    # Grant the managed identity access to Key Vault keys
+    Write-Host "Granting managed identity access to Key Vault..." -ForegroundColor Green
+    az keyvault set-policy `
+        --name $KeyVaultName `
+        --object-id $IdentityPrincipalId `
+        --key-permissions get release | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to set Key Vault policy for managed identity"
+    }
+    Write-Success "Managed identity granted 'get' and 'release' permissions on Key Vault keys"
+    
+    # Create SKR key with release policy for confidential computing
+    Write-Host "Creating SKR key with secure key release policy..." -ForegroundColor Green
+    $SkrKeyName = "skr-demo-key"
+    $MaaEndpoint = "sharedeus.eus.attest.azure.net"
+    
+    # Create release policy JSON for confidential containers
+    # Using x-ms-attestation-type claim which is present in all SEV-SNP attestation tokens
+    $releasePolicy = @{
+        version = "1.0.0"
+        anyOf = @(
+            @{
+                authority = "https://$MaaEndpoint"
+                allOf = @(
+                    @{
+                        claim = "x-ms-attestation-type"
+                        equals = "sevsnpvm"
+                    }
+                )
+            }
+        )
+    }
+    $releasePolicyPath = Join-Path $PSScriptRoot "skr-release-policy.json"
+    $releasePolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $releasePolicyPath -Encoding UTF8
+    
+    # Create the exportable HSM-backed key with release policy
+    try {
+        az keyvault key create `
+            --vault-name $KeyVaultName `
+            --name $SkrKeyName `
+            --kty RSA-HSM `
+            --size 2048 `
+            --ops wrapKey unwrapKey encrypt decrypt `
+            --exportable true `
+            --policy $releasePolicyPath | Out-Null
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "SKR key '$SkrKeyName' created with release policy"
+            Write-Host "  MAA Endpoint: $MaaEndpoint"
+            Write-Host "  Key Type: RSA-HSM (exportable)"
+        } else {
+            Write-Warning "Failed to create SKR key with release policy, trying without..."
+            # Fallback: create key without release policy (won't work for SKR but allows demo to continue)
+            az keyvault key create --vault-name $KeyVaultName --name $SkrKeyName --kty RSA --size 2048 | Out-Null
+        }
+    } catch {
+        Write-Warning "SKR key creation failed: $_"
+    }
+    
+    # Clean up temporary policy file
+    if (Test-Path $releasePolicyPath) {
+        Remove-Item $releasePolicyPath -Force
     }
     
     # Build and push image
@@ -205,13 +296,22 @@ function Invoke-Build {
         imageTag = $ImageTag
         fullImage = "$loginServer/${ImageName}:${ImageTag}"
         keyVaultName = $KeyVaultName
+        skrKeyName = $SkrKeyName
+        skrMaaEndpoint = $MaaEndpoint
+        skrAkvEndpoint = "$KeyVaultName.vault.azure.net"
+        identityName = $IdentityName
+        identityResourceId = $IdentityResourceId
+        identityClientId = $IdentityClientId
     }
     Save-Config $config
     
     Write-Header "Build Complete"
     Write-Host "Registry: $loginServer"
     Write-Host "Image: $loginServer/${ImageName}:${ImageTag}"
-    Write-Host "Key Vault: $KeyVaultName"
+    Write-Host "Key Vault: $KeyVaultName (Premium SKU)"
+    Write-Host "SKR Key: $SkrKeyName"
+    Write-Host "MAA Endpoint: $MaaEndpoint"
+    Write-Host "Managed Identity: $IdentityName"
     Write-Host ""
     Write-Success "Credentials stored securely in Azure Key Vault"
     Write-Host "Configuration saved to acr-config.json"
@@ -285,6 +385,10 @@ function Invoke-Deploy {
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
             'registryPassword' = @{ 'value' = $ACR_PASSWORD }
             'dnsNameLabel' = @{ 'value' = $dns_label }
+            'skrKeyName' = @{ 'value' = if ($config.skrKeyName) { $config.skrKeyName } else { '' } }
+            'skrMaaEndpoint' = @{ 'value' = if ($config.skrMaaEndpoint) { $config.skrMaaEndpoint } else { 'sharedeus.eus.attest.azure.net' } }
+            'skrAkvEndpoint' = @{ 'value' = if ($config.skrAkvEndpoint) { $config.skrAkvEndpoint } else { '' } }
+            'identityResourceId' = @{ 'value' = if ($config.identityResourceId) { $config.identityResourceId } else { '' } }
         }
     }
     $params | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params.json'
@@ -471,6 +575,284 @@ function Invoke-Deploy {
 }
 
 # ============================================================================
+# Compare Phase - Deploy Both Confidential and Standard Side by Side
+# ============================================================================
+
+function Invoke-Compare {
+    Write-Header "Deploying Comparison: Confidential vs Standard"
+    
+    $config = Get-Config
+    if (-not $config) {
+        throw "acr-config.json not found. Run with -Build first."
+    }
+    
+    $resource_group = $config.resourceGroup
+    $ACR_LOGIN_SERVER = $config.loginServer
+    $FULL_IMAGE = $config.fullImage
+    $KeyVaultName = $config.keyVaultName
+    
+    # Get ACR credentials from Key Vault
+    Write-Host "Retrieving ACR credentials from Key Vault..."
+    $ACR_USERNAME = az keyvault secret show --vault-name $KeyVaultName --name "acr-username" --query "value" -o tsv
+    $ACR_PASSWORD = az keyvault secret show --vault-name $KeyVaultName --name "acr-password" --query "value" -o tsv
+    
+    if (-not $ACR_USERNAME -or -not $ACR_PASSWORD) {
+        throw "Failed to retrieve ACR credentials from Key Vault"
+    }
+    
+    # Generate unique names for both containers
+    $timestamp = Get-Date -Format "MMddHHmm"
+    $container_conf = "aci-attest-conf-$timestamp"
+    $container_std = "aci-attest-std-$timestamp"
+    $dns_conf = "attest-conf-$timestamp"
+    $dns_std = "attest-std-$timestamp"
+    
+    Write-Host "Confidential Container: $container_conf"
+    Write-Host "Standard Container: $container_std"
+    Write-Host ""
+    
+    # Check Docker for confidential deployment
+    Write-Host "Checking if Docker is running (required for Confidential SKU)..."
+    $dockerInfo = docker info 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Docker is not running. Required for security policy generation. Start Docker Desktop."
+    }
+    Write-Success "Docker is running"
+    Write-Host ""
+    
+    # Login to ACR
+    Write-Host "Logging into Azure Container Registry..."
+    az acr login --name $ACR_LOGIN_SERVER --username $ACR_USERNAME --password $ACR_PASSWORD 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        docker login $ACR_LOGIN_SERVER -u $ACR_USERNAME -p $ACR_PASSWORD 2>&1 | Out-Null
+    }
+    Write-Success "ACR login complete"
+    Write-Host ""
+    
+    # ========== Deploy Confidential Container ==========
+    Write-Header "Deploying Confidential Container (with AMD SEV-SNP)"
+    
+    # Create parameters for confidential
+    $params_conf = @{
+        '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+        'contentVersion' = '1.0.0.0'
+        'parameters' = @{
+            'containerGroupName' = @{ 'value' = $container_conf }
+            'location' = @{ 'value' = $Location }
+            'appImage' = @{ 'value' = $FULL_IMAGE }
+            'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
+            'registryUsername' = @{ 'value' = $ACR_USERNAME }
+            'registryPassword' = @{ 'value' = $ACR_PASSWORD }
+            'dnsNameLabel' = @{ 'value' = $dns_conf }
+            'skrKeyName' = @{ 'value' = if ($config.skrKeyName) { $config.skrKeyName } else { '' } }
+            'skrMaaEndpoint' = @{ 'value' = if ($config.skrMaaEndpoint) { $config.skrMaaEndpoint } else { 'sharedeus.eus.attest.azure.net' } }
+            'skrAkvEndpoint' = @{ 'value' = if ($config.skrAkvEndpoint) { $config.skrAkvEndpoint } else { '' } }
+            'identityResourceId' = @{ 'value' = if ($config.identityResourceId) { $config.identityResourceId } else { '' } }
+        }
+    }
+    $params_conf | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-conf.json'
+    
+    # Copy template and generate policy for confidential
+    Copy-Item -Path "deployment-template-original.json" -Destination "deployment-template-conf.json" -Force
+    
+    Write-Host "Generating security policy for confidential container..."
+    az confcom acipolicygen -a deployment-template-conf.json --parameters deployment-params-conf.json --disable-stdio
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to generate security policy for confidential container"
+    }
+    Write-Success "Security policy generated"
+    
+    Write-Host "Deploying confidential container..."
+    az deployment group create `
+        --resource-group $resource_group `
+        --template-file deployment-template-conf.json `
+        --parameters '@deployment-params-conf.json' | Out-Null
+    
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to deploy confidential container"
+    }
+    Write-Success "Confidential container deployed!"
+    
+    # ========== Deploy Standard Container ==========
+    Write-Header "Deploying Standard Container (no TEE)"
+    
+    # Create parameters for standard
+    $params_std = @{
+        '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+        'contentVersion' = '1.0.0.0'
+        'parameters' = @{
+            'containerGroupName' = @{ 'value' = $container_std }
+            'location' = @{ 'value' = $Location }
+            'appImage' = @{ 'value' = $FULL_IMAGE }
+            'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
+            'registryUsername' = @{ 'value' = $ACR_USERNAME }
+            'registryPassword' = @{ 'value' = $ACR_PASSWORD }
+            'dnsNameLabel' = @{ 'value' = $dns_std }
+            'skrKeyName' = @{ 'value' = if ($config.skrKeyName) { $config.skrKeyName } else { '' } }
+            'skrMaaEndpoint' = @{ 'value' = if ($config.skrMaaEndpoint) { $config.skrMaaEndpoint } else { 'sharedeus.eus.attest.azure.net' } }
+            'skrAkvEndpoint' = @{ 'value' = if ($config.skrAkvEndpoint) { $config.skrAkvEndpoint } else { '' } }
+            'identityResourceId' = @{ 'value' = if ($config.identityResourceId) { $config.identityResourceId } else { '' } }
+        }
+    }
+    $params_std | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-std.json'
+    
+    # Use standard template (no policy)
+    Copy-Item -Path "deployment-template-standard.json" -Destination "deployment-template-std.json" -Force
+    
+    Write-Host "Deploying standard container..."
+    az deployment group create `
+        --resource-group $resource_group `
+        --template-file deployment-template-std.json `
+        --parameters '@deployment-params-std.json' | Out-Null
+    
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to deploy standard container"
+    }
+    Write-Success "Standard container deployed!"
+    
+    # ========== Wait for Both Containers ==========
+    Write-Header "Waiting for Containers to Start"
+    
+    $fqdn_conf = az container show --resource-group $resource_group --name $container_conf --query "ipAddress.fqdn" --output tsv
+    $fqdn_std = az container show --resource-group $resource_group --name $container_std --query "ipAddress.fqdn" --output tsv
+    
+    Write-Host "Confidential FQDN: http://$fqdn_conf"
+    Write-Host "Standard FQDN: http://$fqdn_std"
+    Write-Host ""
+    
+    $timeout_seconds = 180
+    $elapsed_seconds = 0
+    $conf_ready = $false
+    $std_ready = $false
+    
+    while ($elapsed_seconds -lt $timeout_seconds -and (-not $conf_ready -or -not $std_ready)) {
+        if (-not $conf_ready) {
+            try {
+                $response = Invoke-WebRequest -Uri "http://$fqdn_conf" -Method Head -TimeoutSec 5 -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) { 
+                    $conf_ready = $true
+                    Write-Success "Confidential container is ready!"
+                }
+            } catch { }
+        }
+        
+        if (-not $std_ready) {
+            try {
+                $response = Invoke-WebRequest -Uri "http://$fqdn_std" -Method Head -TimeoutSec 5 -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) { 
+                    $std_ready = $true
+                    Write-Success "Standard container is ready!"
+                }
+            } catch { }
+        }
+        
+        if (-not $conf_ready -or -not $std_ready) {
+            $status = "Waiting... ($elapsed_seconds/$timeout_seconds sec) - "
+            $status += "Confidential: $(if ($conf_ready) { 'Ready' } else { 'Starting...' }), "
+            $status += "Standard: $(if ($std_ready) { 'Ready' } else { 'Starting...' })"
+            Write-Host $status
+            Start-Sleep -Seconds 5
+            $elapsed_seconds += 5
+        }
+    }
+    
+    if (-not $conf_ready -or -not $std_ready) {
+        Write-Warning "Some containers did not start in time"
+        if (-not $conf_ready) { Write-Warning "  - Confidential container not ready" }
+        if (-not $std_ready) { Write-Warning "  - Standard container not ready" }
+    }
+    
+    # ========== Open Edge with Split View ==========
+    Write-Header "Opening Side-by-Side Comparison"
+    
+    Write-Host "Creating split-screen comparison view..."
+    Write-Host "  Left:  Confidential (AMD SEV-SNP) - http://$fqdn_conf"
+    Write-Host "  Right: Standard (No TEE)         - http://$fqdn_std"
+    Write-Host ""
+    
+    # Create a local HTML file with iframes for split view
+    $splitHtml = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Attestation Comparison: Confidential vs Standard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { display: flex; flex-direction: column; height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        .header { 
+            display: flex; 
+            background: #1a1a2e; 
+            color: white; 
+            padding: 4px 15px;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 { font-size: 14px; font-weight: 500; }
+        .labels { display: flex; gap: 0; }
+        .label { 
+            flex: 1; 
+            text-align: center; 
+            padding: 4px; 
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .label.confidential { background: #28a745; color: white; }
+        .label.standard { background: #dc3545; color: white; }
+        .container { display: flex; flex: 1; }
+        .pane { flex: 1; border: none; }
+        .divider { width: 3px; background: #1a1a2e; }
+        iframe { width: 100%; height: 100%; border: none; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Azure Confidential Container Attestation Demo - Comparison View</h1>
+    </div>
+    <div class="labels">
+        <div class="label confidential">✅ CONFIDENTIAL (AMD SEV-SNP TEE)</div>
+        <div class="label standard">❌ STANDARD (No Hardware Protection)</div>
+    </div>
+    <div class="container">
+        <div class="pane">
+            <iframe src="http://$fqdn_conf" title="Confidential Container"></iframe>
+        </div>
+        <div class="divider"></div>
+        <div class="pane">
+            <iframe src="http://$fqdn_std" title="Standard Container"></iframe>
+        </div>
+    </div>
+</body>
+</html>
+"@
+    
+    $splitHtmlPath = Join-Path $PSScriptRoot "comparison-view.html"
+    $splitHtml | Out-File -FilePath $splitHtmlPath -Encoding UTF8
+    
+    # Open the split view HTML in Edge
+    Start-Process "msedge" -ArgumentList "--new-window `"file:///$($splitHtmlPath.Replace('\', '/'))`"" -Wait
+    
+    # Cleanup prompt
+    Write-Host "Press Enter when done viewing to cleanup containers..." -ForegroundColor Yellow
+    Read-Host
+    
+    Write-Header "Cleanup Comparison Containers"
+    
+    Write-Host "Deleting comparison containers..."
+    az container delete --resource-group $resource_group --name $container_conf --yes 2>&1 | Out-Null
+    az container delete --resource-group $resource_group --name $container_std --yes 2>&1 | Out-Null
+    
+    # Cleanup temp files
+    Remove-Item -Path "deployment-params-conf.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "deployment-params-std.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "deployment-template-conf.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "deployment-template-std.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "comparison-view.html" -Force -ErrorAction SilentlyContinue
+    
+    Write-Success "Comparison containers deleted. ACR and Key Vault preserved."
+    Write-Host "Run -Cleanup to delete all resources including ACR and Key Vault."
+}
+
+# ============================================================================
 # Cleanup Phase
 # ============================================================================
 
@@ -523,7 +905,7 @@ function Invoke-Cleanup {
 # ============================================================================
 
 # Show help if no action specified
-if (-not $Build -and -not $Deploy -and -not $Cleanup) {
+if (-not $Build -and -not $Deploy -and -not $Compare -and -not $Cleanup) {
     Write-Host ""
     Write-Host "Azure Confidential Container Attestation Demo" -ForegroundColor Cyan
     Write-Host "=============================================="
@@ -532,6 +914,7 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
     Write-Host "  .\Deploy-AttestationDemo.ps1 -Build              # Build container image"
     Write-Host "  .\Deploy-AttestationDemo.ps1 -Deploy             # Deploy to ACI (confidential)"
     Write-Host "  .\Deploy-AttestationDemo.ps1 -Deploy -NoAcc      # Deploy to ACI (standard)"
+    Write-Host "  .\Deploy-AttestationDemo.ps1 -Compare            # Deploy BOTH side by side"
     Write-Host "  .\Deploy-AttestationDemo.ps1 -Build -Deploy      # Build and deploy"
     Write-Host "  .\Deploy-AttestationDemo.ps1 -Cleanup            # Delete all resources"
     Write-Host ""
@@ -560,7 +943,10 @@ try {
         $config = Invoke-Build -RegistryName $RegistryName
     }
     
-    if ($Deploy) {
+    if ($Compare) {
+        Invoke-Compare
+    }
+    elseif ($Deploy) {
         Invoke-Deploy -NoAcc:$NoAcc -SkipBrowser:$SkipBrowser
     }
     

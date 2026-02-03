@@ -44,6 +44,34 @@
       "metadata": {
         "description": "DNS name label for the public IP"
       }
+    },
+    "skrKeyName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the SKR-protected key in Key Vault"
+      }
+    },
+    "skrMaaEndpoint": {
+      "type": "string",
+      "defaultValue": "sharedeus.eus.attest.azure.net",
+      "metadata": {
+        "description": "MAA endpoint for Secure Key Release attestation"
+      }
+    },
+    "skrAkvEndpoint": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure Key Vault endpoint for Secure Key Release"
+      }
+    },
+    "identityResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resource ID of the user-assigned managed identity for SKR"
+      }
     }
   },
   "resources": [
@@ -52,6 +80,7 @@
       "apiVersion": "2023-05-01",
       "name": "[parameters('containerGroupName')]",
       "location": "[parameters('location')]",
+      "identity": "[if(empty(parameters('identityResourceId')), null(), createObject('type', 'UserAssigned', 'userAssignedIdentities', createObject(parameters('identityResourceId'), createObject())))]",
       "properties": {
         "sku": "Confidential",
         "confidentialComputeProperties": {
@@ -68,7 +97,20 @@
                   "port": 80
                 }
               ],
-              "environmentVariables": [],
+              "environmentVariables": [
+                {
+                  "name": "SKR_KEY_NAME",
+                  "value": "[parameters('skrKeyName')]"
+                },
+                {
+                  "name": "SKR_MAA_ENDPOINT",
+                  "value": "[parameters('skrMaaEndpoint')]"
+                },
+                {
+                  "name": "SKR_AKV_ENDPOINT",
+                  "value": "[parameters('skrAkvEndpoint')]"
+                }
+              ],
               "resources": {
                 "requests": {
                   "memoryInGB": 2,

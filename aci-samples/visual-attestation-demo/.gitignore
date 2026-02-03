@@ -3,8 +3,14 @@ acr-config.json
 
 # Generated deployment files
 deployment-params.json
+deployment-params-*.json
 deployment-template.json
+deployment-template-conf.json
+deployment-template-std.json
 create-params.ps1
+
+# Generated comparison view
+comparison-view.html
 
 # Temp files
 *.txt

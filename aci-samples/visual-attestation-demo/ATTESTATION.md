@@ -1,7 +1,7 @@
 # Attestation Technical Details
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** January 2026
+**Last Updated:** February 2026
 
 > **Note:** See [README.md](README.md) for the main project documentation.
 
