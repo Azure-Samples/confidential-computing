@@ -27,6 +27,10 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY templates/ templates/
 
+# Copy company data CSV files for seeding
+COPY contoso-data.csv .
+COPY fabrikam-data.csv .
+
 # Create supervisord configuration to run both services
 RUN mkdir -p /var/log/supervisor
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf

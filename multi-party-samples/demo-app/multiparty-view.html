@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Multi-Party Confidential Computing Demo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { display: flex; flex-direction: column; height: 100vh; font-family: 'Segoe UI', sans-serif; background: #1a1a2e; }
+        .header { 
+            background: #1a1a2e; 
+            color: white; 
+            padding: 8px 20px;
+            text-align: center;
+            border-bottom: 2px solid #333;
+        }
+        .header h1 { font-size: 18px; font-weight: 500; margin-bottom: 4px; }
+        .header p { font-size: 12px; color: #888; }
+        .top-row { display: flex; flex: 1; }
+        .bottom-row { flex: 1; display: flex; flex-direction: column; }
+        .pane { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column;
+            border: 2px solid #333;
+        }
+        .label { 
+            padding: 8px 12px; 
+            font-weight: bold;
+            font-size: 13px;
+            text-align: center;
+        }
+        .label.confidential { background: #28a745; color: white; }
+        .label.standard { background: #dc3545; color: white; }
+        .label .subtitle { font-size: 10px; font-weight: normal; opacity: 0.9; }
+        .label .key-name { font-size: 11px; font-family: monospace; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 3px; margin-top: 4px; display: inline-block; }
+        iframe { flex: 1; width: 100%; border: none; background: white; }
+        .divider-v { width: 2px; background: #1a1a2e; }
+        .divider-h { height: 2px; background: #1a1a2e; }
+        .legend {
+            background: #252545;
+            padding: 8px 20px;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            font-size: 11px;
+            color: #ccc;
+        }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .legend-dot.green { background: #28a745; }
+        .legend-dot.red { background: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔐 Multi-Party Confidential Computing Demonstration</h1>
+        <p>Each company has their own Key Vault and SKR key - only their confidential container can release it</p>
+    </div>
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-dot green"></div>
+            <span>Confidential containers can attest and release their own cryptographic keys</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot red"></div>
+            <span>Standard containers cannot attest - key release will fail</span>
+        </div>
+    </div>
+    <div class="top-row">
+        <div class="pane">
+            <div class="label confidential">
+                ✅ CONTOSO (Confidential)
+                <div class="subtitle">AMD SEV-SNP TEE • Key Vault: kvacrowuvsxpia</div>
+                <div class="key-name">🔑 contoso-secret-key</div>
+            </div>
+            <iframe src="http://contoso-02031749.eastus.azurecontainer.io" title="Contoso - Confidential Container"></iframe>
+        </div>
+        <div class="divider-v"></div>
+        <div class="pane">
+            <div class="label confidential">
+                ✅ FABRIKAM (Confidential)
+                <div class="subtitle">AMD SEV-SNP TEE • Key Vault: kvacrowuvsxpib</div>
+                <div class="key-name">🔑 fabrikam-secret-key</div>
+            </div>
+            <iframe src="http://fabrikam-02031749.eastus.azurecontainer.io" title="Fabrikam - Confidential Container"></iframe>
+        </div>
+    </div>
+    <div class="divider-h"></div>
+    <div class="bottom-row">
+        <div class="pane">
+            <div class="label standard">
+                ❌ SNOOPER (Standard - No Hardware Protection)
+                <div class="subtitle">No TEE • Cannot attest • Tries to access: kvacrowuvsxpia</div>
+                <div class="key-name" style="background: rgba(0,0,0,0.2);">🔒 contoso-secret-key (ACCESS DENIED)</div>
+            </div>
+            <iframe src="http://snooper-02031749.eastus.azurecontainer.io" title="Snooper - Standard Container (No TEE)"></iframe>
+        </div>
+    </div>
+</body>
+</html>

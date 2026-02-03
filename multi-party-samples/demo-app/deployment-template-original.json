@@ -72,6 +72,13 @@
       "metadata": {
         "description": "Resource ID of the user-assigned managed identity for SKR"
       }
+    },
+    "storageConnectionString": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure Storage connection string with SAS token for external blob access"
+      }
     }
   },
   "resources": [
@@ -109,6 +116,10 @@
                 {
                   "name": "SKR_AKV_ENDPOINT",
                   "value": "[parameters('skrAkvEndpoint')]"
+                },
+                {
+                  "name": "AZURE_STORAGE_CONNECTION_STRING",
+                  "secureValue": "[parameters('storageConnectionString')]"
                 }
               ],
               "resources": {
