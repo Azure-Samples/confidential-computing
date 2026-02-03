@@ -52,8 +52,13 @@ Secure multi-party computation demonstration with Azure Confidential Containers:
   - 🏢 **Company isolation** - Each party can only decrypt their own data
   - 👁️ **Attacker view** - Snooper container sees only encrypted data
   - 📦 **Shared storage** - Encrypted data from all parties in single blob
+  - 🔓 **TEE-only decryption** - Data decrypted only inside hardware-protected memory
 
 ![Multi-Party Architecture](/multi-party-samples/demo-app/MultiPartyArchitecture.svg)
+
+**Encrypted Data Flow:** Data remains encrypted in storage and transit; decryption only occurs inside the TEE.
+
+![Data Flow Diagram](/multi-party-samples/demo-app/DataFlowDiagram.svg)
 
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:

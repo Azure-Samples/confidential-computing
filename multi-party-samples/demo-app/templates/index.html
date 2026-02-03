@@ -585,7 +585,7 @@
                     
                     <!-- Snooper's view of consolidated records -->
                     <div id="snooperRecordsView" style="display: none; margin-top: 20px;">
-                        <h4 style="color: #dc3545; margin-bottom: 15px;">&#128373; Intercepted Encrypted Records (consolidated-records.json)</h4>
+                        <h4 id="snooperRecordsHeader" style="color: #dc3545; margin-bottom: 15px;">&#128373; Intercepted Encrypted Records (<span id="snooperBlobName">consolidated-records.json</span>)</h4>
                         <div id="snooperRecordsTable" style="background: #1e1e1e; padding: 20px; border-radius: 8px; border: 2px solid #dc3545;">
                             <p style="color: #f8f8f2;"><em>Loading intercepted data...</em></p>
                         </div>
@@ -689,15 +689,16 @@
                     let html = '<div class="info-grid">';
                     html += `<div class="info-card"><h3>Platform</h3><p>${data.platform || 'Azure Container Instances'}</p></div>`;
                     
-                    // Only color-code if we know attestation works
+                    // Show correct SKU and hardware based on attestation status
                     if (data.status && data.status.attestation_works) {
                         html += `<div class="info-card" style="border-left-color: #28a745;"><h3>SKU</h3><p>${data.sku || 'Confidential'}</p></div>`;
                         html += `<div class="info-card" style="border-left-color: #28a745;"><h3>Hardware</h3><p>${data.hardware || 'AMD SEV-SNP'}</p></div>`;
+                        html += `<div class="info-card"><h3>Attestation</h3><p>${data.attestation_service || data.attestation || 'Microsoft Azure Attestation'}</p></div>`;
                     } else {
-                        html += `<div class="info-card"><h3>SKU</h3><p>Confidential</p></div>`;
-                        html += `<div class="info-card"><h3>Hardware</h3><p>AMD SEV-SNP</p></div>`;
+                        html += `<div class="info-card" style="border-left-color: #dc3545;"><h3>SKU</h3><p>Standard (No TEE)</p></div>`;
+                        html += `<div class="info-card" style="border-left-color: #dc3545;"><h3>Hardware</h3><p>No Hardware Security</p></div>`;
+                        html += `<div class="info-card" style="border-left-color: #dc3545;"><h3>Attestation</h3><p>Not Available</p></div>`;
                     }
-                    html += `<div class="info-card"><h3>Attestation</h3><p>${data.attestation_service || data.attestation || 'Microsoft Azure Attestation'}</p></div>`;
                     html += '</div>';
                     
                     // Only show success status box if attestation works
@@ -1494,6 +1495,11 @@
             fetch('/storage/config')
                 .then(response => response.json())
                 .then(data => {
+                    // Store the consolidated blob name for snooper mode
+                    if (data.consolidated_blob_name) {
+                        consolidatedBlobName = data.consolidated_blob_name;
+                    }
+                    
                     const configDiv = document.getElementById('storageConfigInfo');
                     let html = '<div style="text-align: center;">';
                     html += '<p style="color: #856404; font-size: 0.9em; margin-bottom: 5px;">EXTERNAL BLOB STORAGE (PUBLIC ACCESS)</p>';
@@ -1799,7 +1805,9 @@
                         storedCompanyInfo = {
                             company: data.company,
                             blob_name: data.blob_name,
+                            full_blob_url: data.full_blob_url,
                             record_count: data.record_count,
+                            total_records_in_file: data.total_records_in_file,
                             note: data.note
                         };
                         
@@ -1820,47 +1828,83 @@
             const contentDiv = document.getElementById('companyDataContent');
             isShowingDecrypted = showDecrypted;
             
-            let html = '<div style="margin-bottom: 15px; padding: 10px; background: #e2e3e5; border-radius: 6px;">';
-            html += '<strong>Company:</strong> ' + escapeHtml(storedCompanyInfo.company || '') + ' | ';
-            html += '<strong>File:</strong> ' + escapeHtml(storedCompanyInfo.blob_name || '') + ' | ';
-            html += '<strong>Records:</strong> ' + (storedCompanyInfo.record_count || 0);
+            // Header with full blob URL
+            let html = '<div style="margin-bottom: 15px; padding: 12px; background: #e2e3e5; border-radius: 6px;">';
+            html += '<div style="margin-bottom: 8px;"><strong>Company:</strong> ' + escapeHtml(storedCompanyInfo.company || '') + '</div>';
+            html += '<div style="margin-bottom: 8px;"><strong>Storage URL:</strong></div>';
+            html += '<div style="background: #fff; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 0.85em; word-break: break-all; margin-bottom: 8px;">';
+            html += '<a href="' + escapeHtml(storedCompanyInfo.full_blob_url || '') + '" target="_blank" style="color: #0078d4;">' + escapeHtml(storedCompanyInfo.full_blob_url || storedCompanyInfo.blob_name || '') + '</a>';
+            html += '</div>';
+            html += '<div><strong>Records:</strong> ' + (storedCompanyInfo.record_count || 0) + ' of ' + (storedCompanyInfo.total_records_in_file || 0) + ' total';
             if (showDecrypted) {
                 html += ' | <span style="color: #6f42c1; font-weight: bold;">&#128275; DECRYPTED VIEW</span>';
             }
-            html += '</div>';
+            html += '</div></div>';
             
             if (storedCompanyRecords && storedCompanyRecords.length > 0) {
+                // Scrollable table container
+                html += '<div style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 6px;">';
                 html += '<table id="companyRecordsTable" style="width: 100%; border-collapse: collapse; background: white;">';
-                html += '<thead><tr style="background: ' + (showDecrypted ? '#6f42c1' : '#495057') + '; color: white;">';
-                html += '<th style="padding: 10px; text-align: left;">#</th>';
+                html += '<thead style="position: sticky; top: 0; z-index: 1;"><tr style="background: ' + (showDecrypted ? '#6f42c1' : '#495057') + '; color: white;">';
+                html += '<th style="padding: 10px; text-align: left;">ID</th>';
                 html += '<th style="padding: 10px; text-align: left;">Timestamp</th>';
                 html += '<th style="padding: 10px; text-align: left;">Name' + (showDecrypted ? '' : ' (Encrypted)') + '</th>';
                 html += '<th style="padding: 10px; text-align: left;">Phone' + (showDecrypted ? '' : ' (Encrypted)') + '</th>';
                 html += '</tr></thead><tbody>';
                 
+                // Get current company to highlight own records
+                var currentCompany = storedCompanyInfo.company ? storedCompanyInfo.company.toLowerCase() : '';
+                
                 storedCompanyRecords.forEach(function(record, index) {
                     var nameDisplay = '';
                     var phoneDisplay = '';
+                    var unableToDecrypt = false;
+                    var recordCompany = record.company || 'unknown';
+                    var isOwnRecord = recordCompany.toLowerCase() === currentCompany;
                     
                     if (showDecrypted) {
                         // Show decrypted values (stored during decrypt operation)
-                        nameDisplay = escapeHtml(record.name_decrypted || '') || '<em style="color:#999;">empty</em>';
-                        phoneDisplay = escapeHtml(record.phone_decrypted || '') || '<em style="color:#999;">empty</em>';
+                        var nameVal = record.name_decrypted || '';
+                        var phoneVal = record.phone_decrypted || '';
+                        
+                        // Check if this record couldn't be decrypted
+                        var nameEncrypted = (nameVal === '(encrypted - no key available)');
+                        var phoneEncrypted = (phoneVal === '(encrypted - no key available)');
+                        
+                        if (nameEncrypted || phoneEncrypted) {
+                            // At least one field couldn't be decrypted - show as single row
+                            unableToDecrypt = true;
+                        } else {
+                            nameDisplay = nameVal ? escapeHtml(nameVal) : '<em style="color:#999;">empty</em>';
+                            phoneDisplay = phoneVal ? escapeHtml(phoneVal) : '<em style="color:#999;">empty</em>';
+                        }
                     } else {
                         // Show encrypted (truncated)
                         nameDisplay = '<code style="font-size: 0.75em; word-break: break-all;">' + truncateText(record.name_encrypted, 40) + '</code>';
                         phoneDisplay = '<code style="font-size: 0.75em; word-break: break-all;">' + truncateText(record.phone_encrypted, 40) + '</code>';
                     }
                     
-                    html += '<tr style="border-bottom: 1px solid #dee2e6; background: ' + (showDecrypted ? '#f8f5ff' : 'white') + ';">';
-                    html += '<td style="padding: 10px;">' + (index + 1) + '</td>';
-                    html += '<td style="padding: 10px; font-size: 0.85em;">' + escapeHtml(record.timestamp || 'N/A') + '</td>';
-                    html += '<td style="padding: 10px;">' + nameDisplay + '</td>';
-                    html += '<td style="padding: 10px;">' + phoneDisplay + '</td>';
-                    html += '</tr>';
+                    if (unableToDecrypt) {
+                        // Show single row spanning name and phone columns - other company's data
+                        html += '<tr style="border-bottom: 1px solid #dee2e6; background: #f8d7da;">';
+                        html += '<td style="padding: 10px; font-weight: bold; color: #495057;">' + (record.line_number || (index + 1)) + '</td>';
+                        html += '<td style="padding: 10px; font-size: 0.85em; color: #6c757d;">' + escapeHtml(record.timestamp || 'N/A') + '</td>';
+                        html += '<td colspan="2" style="padding: 10px; text-align: center;"><em style="color: #dc3545; font-weight: bold;">&#128274; Unable to Decrypt Contents</em></td>';
+                        html += '</tr>';
+                    } else {
+                        // Show normal row - own company's data
+                        var rowBg = showDecrypted ? (isOwnRecord ? '#f8f5ff' : '#f8d7da') : (isOwnRecord ? '#d4edda' : 'white');
+                        html += '<tr style="border-bottom: 1px solid #dee2e6; background: ' + rowBg + ';">';
+                        html += '<td style="padding: 10px; font-weight: bold; color: #495057;">' + (record.line_number || (index + 1)) + '</td>';
+                        html += '<td style="padding: 10px; font-size: 0.85em;">' + escapeHtml(record.timestamp || 'N/A') + '</td>';
+                        html += '<td style="padding: 10px;">' + nameDisplay + '</td>';
+                        html += '<td style="padding: 10px;">' + phoneDisplay + '</td>';
+                        html += '</tr>';
+                    }
                 });
                 
                 html += '</tbody></table>';
+                html += '</div>'; // Close scrollable container
                 
                 if (showDecrypted) {
                     html += '<p style="margin-top: 15px; padding: 10px; background: #e2d9f3; border-radius: 6px; color: #6f42c1; font-size: 0.9em;">';
@@ -1910,7 +1954,7 @@
                         decryptField(record.name_encrypted).then(function(plaintext) {
                             storedCompanyRecords[index].name_decrypted = plaintext;
                         }).catch(function() {
-                            storedCompanyRecords[index].name_decrypted = '[decrypt failed]';
+                            storedCompanyRecords[index].name_decrypted = '(encrypted - no key available)';
                         })
                     );
                 } else {
@@ -1921,7 +1965,7 @@
                         decryptField(record.phone_encrypted).then(function(plaintext) {
                             storedCompanyRecords[index].phone_decrypted = plaintext;
                         }).catch(function() {
-                            storedCompanyRecords[index].phone_decrypted = '[decrypt failed]';
+                            storedCompanyRecords[index].phone_decrypted = '(encrypted - no key available)';
                         })
                     );
                 } else {
@@ -2125,6 +2169,7 @@
         
         var snooperRefreshInterval = null;
         var SNOOPER_REFRESH_SECONDS = 5;
+        var consolidatedBlobName = 'consolidated-records.json'; // Default, will be updated from /storage/config
         
         function initializeSnooperMode() {
             // Show snooper-specific elements
@@ -2132,6 +2177,9 @@
             document.getElementById('autoRefreshIndicator').style.display = 'block';
             document.getElementById('snooperRecordsView').style.display = 'block';
             document.getElementById('refreshInterval').textContent = SNOOPER_REFRESH_SECONDS;
+            
+            // Update the blob name in the header
+            document.getElementById('snooperBlobName').textContent = consolidatedBlobName;
             
             // Open the blob storage section by default for snooper
             document.getElementById('blobStorageSection').setAttribute('open', '');
@@ -2151,8 +2199,8 @@
                           String(now.getSeconds()).padStart(2, '0');
             document.getElementById('lastRefreshTime').textContent = timeStr;
             
-            // Fetch consolidated-records.json
-            fetch('/storage/download/consolidated-records.json')
+            // Fetch consolidated records using dynamic blob name
+            fetch('/storage/download/' + encodeURIComponent(consolidatedBlobName))
                 .then(response => response.json())
                 .then(data => {
                     renderSnooperRecordsTable(data);
@@ -2167,7 +2215,7 @@
             var tableDiv = document.getElementById('snooperRecordsTable');
             
             if (data.status !== 'success') {
-                tableDiv.innerHTML = '<p style="color: #ffc107;"><em>&#128269; No consolidated-records.json found yet. Companies need to populate their data first.</em></p>';
+                tableDiv.innerHTML = '<p style="color: #ffc107;"><em>&#128269; No ' + escapeHtml(consolidatedBlobName) + ' found yet. Companies need to populate their data first.</em></p>';
                 return;
             }
             
@@ -2192,18 +2240,14 @@
             html += '<table style="width: 100%; border-collapse: collapse; color: #f8f8f2;">';
             html += '<thead><tr style="background: #343a40;">';
             html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dc3545;">#</th>';
-            html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dc3545;">Company</th>';
             html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dc3545;">Name (Encrypted)</th>';
             html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dc3545;">Phone (Encrypted)</th>';
             html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dc3545;">Timestamp</th>';
             html += '</tr></thead><tbody>';
             
             records.forEach(function(record, index) {
-                var companyColor = record.company === 'contoso' ? '#17a2b8' : (record.company === 'fabrikam' ? '#e83e8c' : '#6c757d');
-                
                 html += '<tr style="border-bottom: 1px solid #495057;">';
                 html += '<td style="padding: 10px;">' + (index + 1) + '</td>';
-                html += '<td style="padding: 10px;"><span style="background: ' + companyColor + '; padding: 2px 8px; border-radius: 4px; font-size: 0.85em;">' + escapeHtml(record.company || 'unknown').toUpperCase() + '</span></td>';
                 html += '<td style="padding: 10px; font-family: monospace; font-size: 0.75em; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="' + escapeHtml(record.name_encrypted || '') + '">';
                 html += '<span style="color: #ff6b6b;">&#128274;</span> ' + truncateText(record.name_encrypted || 'null', 30);
                 html += '</td>';

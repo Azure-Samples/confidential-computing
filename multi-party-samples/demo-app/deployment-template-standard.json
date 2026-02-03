@@ -79,6 +79,13 @@
       "metadata": {
         "description": "Azure Storage connection string with SAS token for external blob access"
       }
+    },
+    "resourceGroupName": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().name]",
+      "metadata": {
+        "description": "Resource group name for unique blob naming"
+      }
     }
   },
   "resources": [
@@ -117,6 +124,10 @@
                 {
                   "name": "AZURE_STORAGE_CONNECTION_STRING",
                   "secureValue": "[parameters('storageConnectionString')]"
+                },
+                {
+                  "name": "RESOURCE_GROUP_NAME",
+                  "value": "[parameters('resourceGroupName')]"
                 }
               ],
               "resources": {

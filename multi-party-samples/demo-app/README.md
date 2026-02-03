@@ -1,60 +1,74 @@
-# Azure Confidential Container Attestation Demo
+# Multi-Party Confidential Computing Demo
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
 **Last Updated:** February 2026
 
-A demonstration of Azure Container Instances (ACI) with AMD SEV-SNP confidential computing and remote attestation via Microsoft Azure Attestation (MAA).
+A demonstration of Azure Confidential Container Instances (ACI) with AMD SEV-SNP hardware protection, showing how multiple parties can securely collaborate while protecting their data from each other and from infrastructure operators.
 
 ## Overview
 
-This project deploys a Python Flask web application to Azure Container Instances with optional hardware-based Trusted Execution Environment (TEE) protection. When deployed in confidential mode, the container runs on AMD SEV-SNP hardware and can request cryptographic attestation tokens that prove the container's integrity.
+This project deploys **three containers** running identical code to demonstrate multi-party confidential computing:
 
-### Features
+| Container | SKU | Hardware | Can Attest? | Can Release Keys? |
+|-----------|-----|----------|-------------|-------------------|
+| **Contoso** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only |
+| **Fabrikam** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only |
+| **Snooper** | Standard | None | ❌ No | ❌ No keys |
 
-- **Single Container Architecture** - Combined Flask app and SKR attestation service in one container
-- **Interactive Web UI** - Modern interface demonstrating attestation capabilities with real-time status indicators
-- **Remote Attestation** - Request JWT tokens from Microsoft Azure Attestation (MAA)
-- **Secure Key Release (SKR)** - Demonstrate Azure Key Vault releasing keys only to verified confidential containers
-- **Real-time Encryption** - Encrypt text using released SKR keys with RSA-OAEP-SHA256 algorithm
-- **Hardware Security** - AMD SEV-SNP memory encryption and isolation
-- **Security Policy Enforcement** - Cryptographic verification of container configuration with layer hash validation
-- **Multi-Stage Docker Build** - Extracts SKR binary from `mcr.microsoft.com/aci/skr:2.13`
-- **Key Vault Integration** - Premium SKU Key Vault with HSM-backed exportable keys and release policies
-- **Live Diagnostics** - Real-time attestation status and error reporting
-- **Service Logs Display** - When attestation fails, view SKR, Flask, and Supervisord logs directly in the UI
-- **TEE Hardware Detection** - Automatic detection and display of AMD SEV-SNP device (`/dev/sev-guest`) availability
+### Key Features
 
-## Attestation Results Comparison
+- **Multi-Party Isolation** - Each company has separate Key Vault keys bound to their container identity
+- **Hardware-Based Security** - AMD SEV-SNP memory encryption at the CPU level
+- **Remote Attestation** - Cryptographic proof via Microsoft Azure Attestation (MAA)
+- **Secure Key Release (SKR)** - Keys only released to attested confidential containers
+- **Cross-Company Protection** - Contoso cannot access Fabrikam's key, and vice versa
+- **Attacker Visualization** - Snooper container shows what an attacker sees (encrypted data only)
+- **Interactive Web UI** - Real-time demonstration of attestation and encryption
+- **Unique Per-Deployment Storage** - Each deployment uses `consolidated-records-{resource_group}.json`
 
-The screenshot below shows the attestation demo running side-by-side: with AMD SEV-SNP hardware protection (Confidential SKU) on the left, and without hardware protection (Standard SKU) on the right. **Both deployments use the exact same container image** — the only difference is the ACI SKU and hardware platform.
+## Architecture
 
-![Attestation Side by Side Comparison](AttestationSideBySide.png)
+![Multi-Party Architecture](MultiPartyArchitecture.svg)
 
-**With ACC Hardware (Left):**
-- Attestation succeeds and returns a valid JWT token from MAA
-- Security features show as verified (TEE, memory encryption, policy enforcement)
-- Container is cryptographically proven to be running in a trusted environment
+The demo deploys:
+- **2 Confidential Containers** (Contoso, Fabrikam) - Running on AMD SEV-SNP hardware with TEE protection
+- **1 Standard Container** (Snooper) - Running without TEE hardware to demonstrate attack scenarios
+- **2 Key Vaults** - Separate Premium HSM-backed vaults for each company's encryption keys
+- **Shared Blob Storage** - Contains encrypted data from all parties
 
-**Without ACC Protection (Right):**
-- Same container image deployed with Standard SKU (`-NoAcc` flag)
-- Attestation fails with detailed error diagnostics
-- Security features show as unavailable (no TEE hardware)
-- Service logs panel auto-expands showing SKR logs and `/dev/sev-guest` status
-- Demonstrates what happens when the same workload runs without AMD SEV-SNP
+## Encrypted Data Flow
+
+![Data Flow Diagram](DataFlowDiagram.svg)
+
+### How It Works
+
+1. **Encrypted Data at Rest** - All company data is stored encrypted in Azure Blob Storage
+2. **Attestation First** - Before decryption, the container must prove it's running in a genuine AMD SEV-SNP TEE
+3. **Key Release** - Azure Key Vault only releases the decryption key after verifying the attestation JWT
+4. **Decryption Inside TEE** - The key is released directly into TEE-protected memory; decryption happens inside the hardware-isolated enclave
+5. **Plaintext Never Leaves TEE** - Decrypted data exists only in encrypted memory, protected from even infrastructure operators
+
+### Why Attackers Cannot Decrypt
+
+| Attack Vector | Protection |
+|--------------|------------|
+| **Compromise Storage** | Data is encrypted; no key available outside TEE |
+| **Compromise Network** | TLS + encrypted payloads; key never transmitted |
+| **Compromise Container** | Standard containers cannot attest; no key release |
+| **Compromise Hypervisor** | SEV-SNP encrypts memory at CPU level |
+| **Infrastructure Operator** | Cannot read TEE memory; attestation blocks access |
 
 ## Prerequisites
 
 - **Azure CLI** (v2.50+) - [Install Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
 - **Azure Subscription** - With permissions to create Container Instances, Container Registry, and Key Vault
-- **Docker Desktop** - [Download Docker Desktop](https://www.docker.com/products/docker-desktop/) (required for confidential mode policy generation)
+- **Docker Desktop** - [Download Docker Desktop](https://www.docker.com/products/docker-desktop/) (required for confidential container policy generation)
 - **PowerShell** - Version 5.1 or later ([PowerShell 7+ recommended](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell))
 
 ### Azure CLI Extensions
 
-The confidential mode requires the `confcom` extension for security policy generation. See the [az confcom documentation](https://learn.microsoft.com/en-us/cli/azure/confcom) for more details.
-
 ```powershell
-# Install or update the confcom extension
+# Install or update the confcom extension (required for security policy generation)
 az extension add --name confcom --upgrade
 
 # Verify installation
@@ -63,101 +77,52 @@ az confcom --help
 
 ## Quick Start
 
-All operations are performed using a single script: `Deploy-AttestationDemo.ps1`
-
 ### Step 1: Build the Container Image
 
 ```powershell
-.\Deploy-AttestationDemo.ps1 -Build
+.\Deploy-MultiParty.ps1 -Build
 ```
 
 This creates:
 - **Azure Resource Group** - Named `sgall<registryname>-rg` in East US
 - **Azure Container Registry (ACR)** - Basic SKU with admin enabled
-- **Azure Key Vault (Premium SKU)** - Stores ACR credentials and SKR-protected key
-- **SKR Key** - RSA-HSM exportable key with release policy for confidential computing
-- **Container Image** - Built and pushed to ACR using `az acr build`
-- **Configuration File** - `acr-config.json` with registry details (no secrets stored locally)
+- **Contoso Key Vault** - Premium HSM with `contoso-secret-key`
+- **Fabrikam Key Vault** - Premium HSM with `fabrikam-secret-key`
+- **Managed Identities** - Separate identity for each company's container
+- **Container Image** - Built and pushed to ACR
 
-### Step 2: Deploy to Azure Container Instances
-
-#### Confidential Mode (Default)
+### Step 2: Deploy All Containers
 
 ```powershell
-.\Deploy-AttestationDemo.ps1 -Deploy
+.\Deploy-MultiParty.ps1 -Deploy
 ```
 
-Deploys with:
-- **Single Container** - Combined Flask app and SKR attestation service
-- **Confidential SKU** - AMD SEV-SNP hardware protection with encrypted memory
-- **Security Policy** - Generated via `az confcom` with `--disable-stdio` (blocks shell access)
-- **Hardened Configuration** - No elevated privileges, no stack dumps, encrypted scratch storage
-- **Layer Hash Validation** - Each container layer hash is verified against the policy
+Deploys three containers:
+- **Contoso** - Confidential SKU with AMD SEV-SNP TEE
+- **Fabrikam** - Confidential SKU with AMD SEV-SNP TEE  
+- **Snooper** - Standard SKU (no TEE hardware)
 
-> ⚠️ **Requires Docker to be running** for security policy generation. The `az confcom` tool pulls container images locally to analyze their layers.
-
-#### Non-Confidential Mode (Testing/Development)
-
-```powershell
-.\Deploy-AttestationDemo.ps1 -Deploy -NoAcc
-```
-
-Deploys with:
-- **Same Container Image** - Identical combined container (Flask + SKR)
-- **Standard SKU** - No hardware TEE protection
-- **No Security Policy** - No confidential compute enforcement policy applied
-- **Faster Deployment** - No Docker or policy generation required
-- **SKR Fails Gracefully** - Attestation endpoints return detailed error diagnostics
-
-> ℹ️ **Use this mode for testing the UI layout and basic functionality.** The SKR service will fail to generate attestation reports since there is no TEE hardware available.
-
-### Side-by-Side Comparison Mode
-
-```powershell
-.\Deploy-AttestationDemo.ps1 -Compare
-```
-
-Deploys **two containers simultaneously** for comparison:
-- **Confidential Container** - AMD SEV-SNP hardware with CCE policy enforcement
-- **Standard Container** - No TEE hardware protection
-
-Opens a split-screen browser view showing both containers side-by-side. This is the best way to demonstrate the difference between confidential and standard deployments:
-
-| Left Pane (Confidential) | Right Pane (Standard) |
-|--------------------------|----------------------|
-| ✅ Attestation succeeds | ❌ Attestation fails |
-| TEE hardware available | No TEE hardware |
-| CCE policy enforced | No policy |
-| `/dev/sev-guest` present | Device not found |
-
-When you close the browser, both containers are automatically cleaned up.
+> ⚠️ **Requires Docker to be running** for security policy generation.
 
 ### Combined Build and Deploy
 
 ```powershell
-.\Deploy-AttestationDemo.ps1 -Build -Deploy
+.\Deploy-MultiParty.ps1 -Build -Deploy
 ```
 
 ### Cleanup All Resources
 
 ```powershell
-.\Deploy-AttestationDemo.ps1 -Cleanup
+.\Deploy-MultiParty.ps1 -Cleanup
 ```
-
-> 💡 **Interactive Cleanup**: After deployment, the script prompts for cleanup options:
-> - `d` - Delete container only (preserve ACR and Key Vault for future deployments)
-> - `a` - Delete ALL resources (entire resource group)
-> - `k` - Keep everything running
 
 ## Command Reference
 
 | Parameter | Description |
 |-----------|-------------|
-| `-Build` | Build and push container image to ACR (creates RG, ACR, Key Vault) |
-| `-Deploy` | Deploy container to ACI (requires prior `-Build`) |
-| `-Compare` | Deploy BOTH Confidential and Standard containers side-by-side for comparison |
+| `-Build` | Build and push container image to ACR (creates RG, ACR, Key Vaults) |
+| `-Deploy` | Deploy all 3 containers (Contoso, Fabrikam, Snooper) |
 | `-Cleanup` | Delete all Azure resources in the resource group |
-| `-NoAcc` | Use Standard SKU (faster, no Docker required, attestation will fail) |
 | `-SkipBrowser` | Don't open Microsoft Edge browser after deployment |
 | `-RegistryName <name>` | Custom ACR name (default: random 8-character string) |
 
@@ -167,295 +132,115 @@ When you close the browser, both containers are automatically cleaned up.
 
 ```powershell
 # Show help and current configuration
-.\Deploy-AttestationDemo.ps1
+.\Deploy-MultiParty.ps1
 
 # Build with custom registry name
-.\Deploy-AttestationDemo.ps1 -Build -RegistryName "myregistry"
-
-# Deploy both Confidential and Standard side-by-side
-.\Deploy-AttestationDemo.ps1 -Compare
+.\Deploy-MultiParty.ps1 -Build -RegistryName "myregistry"
 
 # Deploy and skip browser
-.\Deploy-AttestationDemo.ps1 -Deploy -SkipBrowser
+.\Deploy-MultiParty.ps1 -Deploy -SkipBrowser
 
-# Full workflow: build, deploy confidential, cleanup when done
-.\Deploy-AttestationDemo.ps1 -Build -Deploy
+# Full workflow: build and deploy
+.\Deploy-MultiParty.ps1 -Build -Deploy
+
+# Delete all resources
+.\Deploy-MultiParty.ps1 -Cleanup
 ```
 
-## Architecture
+## What You'll See
 
-The demo uses a **single combined container** that includes both the Flask web application and the SKR (Secure Key Release) attestation service. This is achieved using a multi-stage Docker build that extracts the SKR binary from Microsoft's sidecar image and runs both services via supervisord.
-
-### Confidential Mode
+After deployment, a browser opens with a 3-pane comparison view:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                Azure Container Instance                  │
-│                   (Confidential SKU)                     │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │           Combined Container (supervisord)         │  │
-│  │  ┌─────────────────────┐  ┌────────────────────┐  │  │
-│  │  │   Flask Web App     │  │   SKR Service      │  │  │
-│  │  │     (Port 80)       │  │   (Port 8080)      │  │  │
-│  │  │                     │  │                    │  │  │
-│  │  │  /attest/maa ──────────► /attest/maa        │  │  │
-│  │  │  /attest/raw ──────────► /attest/raw        │  │  │
-│  │  └─────────────────────┘  └─────────┬──────────┘  │  │
-│  └─────────────────────────────────────┼─────────────┘  │
-│                                        │                 │
-│               AMD SEV-SNP TEE          │                 │
-└────────────────────────────────────────┼─────────────────┘
-                                         │
-                                         ▼
-                           ┌─────────────────────────┐
-                           │  Microsoft Azure        │
-                           │  Attestation (MAA)      │
-                           │  sharedeus.eus.attest.  │
-                           │  azure.net              │
-                           └─────────────────────────┘
++---------------------------+---------------------------+
+|        CONTOSO            |        FABRIKAM           |
+|    (Confidential TEE)     |    (Confidential TEE)     |
+|                           |                           |
+|  ✅ Attestation: Success  |  ✅ Attestation: Success  |
+|  ✅ Key Release: Works    |  ✅ Key Release: Works    |
+|  ✅ Encryption: Works     |  ✅ Encryption: Works     |
+|  ✅ Decrypts own data     |  ✅ Decrypts own data     |
++---------------------------+---------------------------+
+|                 SNOOPER                               |
+|              (Standard - No TEE)                      |
+|                                                       |
+|  ❌ Attestation: FAILED (no TEE hardware)            |
+|  ❌ Key Release: DENIED (not attested)               |
+|  👁️ Shows encrypted data only                        |
++-------------------------------------------------------+
 ```
 
-### Standard Mode
+## Demo Script
+
+### Basic Attestation Demo
+
+1. **Show Contoso**: Expand "Remote Attestation" → Click "Get Raw Report" → Success
+2. **Show Fabrikam**: Same actions → Also succeeds
+3. **Show Snooper**: Same actions → Fails with detailed error
+
+### Secure Key Release Demo
+
+4. **Release Key on Contoso**: Expand "Secure Key Release" → Click release → Key obtained
+5. **Try on Snooper**: Same actions → Key release denied
+6. **Cross-Company Test**: Expand "Cross-Company Key Access" → Shows both companies cannot access each other's keys
+
+### Data Protection Demo
+
+7. **Expand "Protect Data"**: CSV automatically imported and encrypted
+8. **List Records**: Shows encrypted data in table
+9. **Press Decrypt**: Own company data decrypts successfully
+10. **View Snooper**: Shows attacker view with all data encrypted
+
+## Security Model
+
+### Per-Company Key Vault Keys
+
+Each company has a separate Key Vault with an SKR-protected key:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                Azure Container Instance                  │
-│                    (Standard SKU)                        │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │           Combined Container (supervisord)         │  │
-│  │  ┌─────────────────────┐  ┌────────────────────┐  │  │
-│  │  │   Flask Web App     │  │   SKR Service      │  │  │
-│  │  │     (Port 80)       │  │   (Port 8080)      │  │  │
-│  │  └─────────────────────┘  └─────────┬──────────┘  │  │
-│  └─────────────────────────────────────┼─────────────┘  │
-│                                        │                 │
-│               No TEE (Standard)        │                 │
-└────────────────────────────────────────┼─────────────────┘
-                                         │
-                                         ▼
-                           ┌─────────────────────────┐
-                           │  Attestation Fails      │
-                           │  (No SNP hardware)      │
-                           └─────────────────────────┘
+Contoso Key Vault: kv<registry>a
+├── Key: contoso-secret-key (RSA-HSM, exportable)
+└── Release Policy: sevsnpvm attestation required
+
+Fabrikam Key Vault: kv<registry>b  
+├── Key: fabrikam-secret-key (RSA-HSM, exportable)
+└── Release Policy: sevsnpvm attestation required
 ```
-
-## Project Structure
-
-```
-├── Deploy-AttestationDemo.ps1      # Main script (build, deploy, cleanup)
-├── app.py                          # Flask web application
-├── Dockerfile                      # Multi-stage build (Flask + SKR)
-├── supervisord.conf                # Process supervisor configuration
-├── requirements.txt                # Python dependencies
-├── templates/
-│   └── index.html                  # Web UI template
-├── deployment-template-original.json   # ARM template (confidential)
-├── deployment-template-standard.json   # ARM template (standard)
-└── acr-config.json                 # Generated config (no secrets)
-```
-
-## Web Application Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Interactive demo UI with real-time attestation controls |
-| `/attest/maa` | POST | Request MAA attestation token (forwards to SKR on port 8080) |
-| `/attest/raw` | POST | Request raw AMD SEV-SNP attestation report |
-| `/skr/release` | POST | Test Secure Key Release - request protected key from Azure Key Vault |
-| `/skr/config` | GET | Get current SKR configuration (key vault, key name, MAA endpoint) |
-| `/skr/key-status` | GET | Check if a key has been released and is available for encryption |
-| `/encrypt` | POST | Encrypt plaintext using the released SKR key (RSA-OAEP-SHA256) |
-| `/sidecar/status` | GET | Check SKR service availability |
-| `/info` | GET | Live deployment info with attestation status and diagnostics |
-| `/health` | GET | Health check endpoint for container monitoring |
-| `/container/info` | GET | Container image metadata, checksums, and SKR service status |
-
-## Secure Key Release (SKR)
-
-Secure Key Release allows Azure Key Vault to release cryptographic keys **only** to containers running in a verified confidential computing environment. The key is protected by a release policy that requires attestation proof.
-
-### How SKR Works
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Confidential Container (AMD SEV-SNP)                                    │
-│                                                                          │
-│  1. Container requests key from Key Vault                               │
-│  2. Key Vault requires attestation proof                                │
-│  3. SKR service generates attestation report from TEE hardware         │
-│  4. Attestation sent to MAA for validation                              │
-│  5. Key Vault validates MAA token against release policy                │
-│  6. If valid, key is released to container in JWK format               │
-└─────────────────────────────────────────────────────────────────────────┘
-              │                                    ▲
-              ▼                                    │
-┌─────────────────────────┐       ┌───────────────────────────────────────┐
-│  Azure Key Vault        │       │  Microsoft Azure Attestation (MAA)    │
-│  (Premium SKU)          │       │                                       │
-│                         │       │  Validates:                           │
-│  Release Policy:        │◄──────│  - x-ms-compliance-status =          │
-│  "x-ms-compliance-      │       │    azure-compliant-cvm                │
-│   status = azure-       │       │  - Hardware attestation report        │
-│   compliant-cvm"        │       │                                       │
-└─────────────────────────┘       └───────────────────────────────────────┘
-```
-
-### SKR Demo Features
-
-The demo includes:
-- **Azure Key Vault Premium** - Automatically created with HSM-backed keys during build
-- **Exportable RSA-HSM Key** - Created with a release policy requiring confidential attestation
-- **Test Button in UI** - Click "Test Secure Key Release" to see if the key can be released
-- **Success Display** - Shows the released key in JWK format with a green checkmark
-- **Real-time Encryption** - After key release, encrypt text using the RSA key with live feedback
-- **Failure Diagnostics** - Shows detailed error including key vault name, MAA endpoint, and logs
-
-## Real-time Encryption
-
-After successfully releasing a key via SKR, the demo enables real-time encryption capabilities:
-
-### How It Works
-
-1. **Key Release** - Click "Test Secure Key Release" to obtain the RSA public key from Azure Key Vault
-2. **Key Storage** - The released key is stored in server memory (cleared on restart)
-3. **Live Encryption** - Type text in the plaintext box to encrypt it in real-time
-4. **Algorithm** - Uses RSA-OAEP with SHA-256 padding (industry standard)
-5. **Decryption** - Only the private key holder (Azure Key Vault HSM) can decrypt
-
-### Security Properties
-
-| Property | Description |
-|----------|-------------|
-| **Key Protection** | Private key never leaves the HSM |
-| **Attestation Required** | Key only released to verified TEE |
-| **Forward Secrecy** | Each container restart requires re-attestation |
-| **Memory Safety** | Key stored only in encrypted TEE memory |
 
 ### Release Policy
-
-The key is created with this release policy:
 
 ```json
 {
   "version": "1.0.0",
-  "anyOf": [
-    {
-      "authority": "https://sharedeus.eus.attest.azure.net",
-      "allOf": [
-        {
-          "claim": "x-ms-attestation-type",
-          "equals": "sevsnpvm"
-        }
-      ]
-    }
-  ]
+  "anyOf": [{
+    "authority": "https://sharedeus.eus.attest.azure.net",
+    "allOf": [{
+      "claim": "x-ms-attestation-type",
+      "equals": "sevsnpvm"
+    }]
+  }]
 }
 ```
 
-This ensures the key is only released when:
-1. The container is running on AMD SEV-SNP hardware (Confidential SKU)
-2. MAA validates the hardware attestation report
-3. The attestation claims include `x-ms-attestation-type: sevsnpvm`
+This ensures:
+- Only containers with valid AMD SEV-SNP attestation can release keys
+- Snooper cannot fake attestation (hardware-enforced)
+- Each company's key has its own policy
 
-### SKR Demo Outcomes
+## Files
 
-| Deployment Mode | SKR Result |
-|-----------------|------------|
-| Confidential (`-Deploy`) | ✅ Key released successfully |
-| Standard (`-Deploy -NoAcc`) | ❌ Key release fails - no TEE hardware |
-| Compare (`-Compare`) | ✅/❌ Left shows success, right shows failure |
-
-## Attestation Token Claims
-
-When attestation succeeds, the JWT token includes claims such as:
-
-| Claim | Description |
-|-------|-------------|
-| `x-ms-isolation-tee` | TEE isolation details |
-| `x-ms-sevsnpvm-is-debuggable` | Debug mode status (should be false) |
-| `x-ms-compliance-status` | Azure compliance status |
-| `x-ms-sevsnpvm-hostdata` | Security policy hash |
-| `x-ms-sevsnpvm-vmpl` | Virtual Machine Privilege Level |
-
-## Understanding CCE Policy
-
-The Confidential Computing Enforcement (CCE) policy is often misunderstood. Here's what it actually does:
-
-### What CCE Policy Controls
-
-| CCE Policy DOES Control | CCE Policy Does NOT Control |
-|-------------------------|-----------------------------|
-| Which container images can run in the TEE | Whether you deploy to Confidential SKU |
-| Allowed environment variables | Hardware selection |
-| Permitted mount points | Deployment target |
-| Command/entrypoint restrictions | Routing to ACC hardware |
-| Layer hash validation | |
-
-### The Enforcement Model
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Azure Resource Manager                                 │
-│  ├─ "sku": "Confidential" → Routes to SEV-SNP host     │
-│  └─ "sku": "Standard" → Routes to regular host         │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│  AMD SEV-SNP Hardware (Confidential SKU only)           │
-│  ├─ CCE Policy embedded in ARM template                 │
-│  ├─ Hardware validates container matches policy         │
-│  └─ Blocks execution if policy is violated              │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Key Insight
-
-**The CCE policy doesn't enforce WHERE the container runs — it enforces WHAT can run on ACC hardware.**
-
-To guarantee AMD SEV-SNP hardware, you must:
-1. Use `"sku": "Confidential"` in your ARM template (this routes to ACC hardware)
-2. The CCE policy then ensures only your approved container can run within that TEE
-
-This prevents an attacker from deploying a different (malicious) container to your confidential environment, even if they have deployment permissions.
-
-## Security
-
-- **No secrets in code** - ACR credentials stored in Azure Key Vault
-- **Hardware isolation** - AMD SEV-SNP encrypts memory
-- **Policy enforcement** - Container configuration cryptographically verified
-- **Attestation** - Prove workload integrity to remote parties
-
-## Diagnostic Features
-
-When attestation fails, the UI provides detailed diagnostics to help identify the issue:
-
-### Service Logs Panel
-
-The logs panel auto-expands on attestation failure and shows:
-
-| Log | Description |
-|-----|-------------|
-| **AMD SEV-SNP Device Status** | Shows if `/dev/sev-guest` is available (required for attestation) |
-| **SKR Service Log** | Output from the Secure Key Release service |
-| **SKR Error Log** | Any errors from the SKR attestation process |
-| **Flask App Log** | Web application logs |
-| **Flask Error Log** | Application errors |
-| **Supervisord Log** | Process manager status |
-
-### SEV-SNP Device Detection
-
-The diagnostic panel checks for:
-- `/dev/sev-guest` - Primary AMD SEV-SNP guest device
-- `/dev/sev` - Alternative SEV device
-- `/dev/sev0` - Legacy device path
-
-If no device is found, it means:
-- Container is NOT running in a TEE
-- Hardware attestation is not possible
-- The container was deployed with Standard SKU (not Confidential)
-
-**Solution:** Redeploy without the `-NoAcc` flag to use Confidential SKU.
+| File | Description |
+|------|-------------|
+| `Deploy-MultiParty.ps1` | Main deployment script |
+| `app.py` | Flask application with all API endpoints |
+| `Dockerfile` | Multi-stage build with SKR sidecar |
+| `templates/index.html` | Interactive web UI |
+| `contoso-data.csv` | Sample data for Contoso (9 records) |
+| `fabrikam-data.csv` | Sample data for Fabrikam (9 records) |
+| `deployment-template-original.json` | ARM template for Confidential SKU |
+| `deployment-template-standard.json` | ARM template for Standard SKU |
+| `MultiPartyArchitecture.svg` | High-level architecture diagram |
+| `DataFlowDiagram.svg` | Encrypted data flow diagram showing TEE decryption |
 
 ## Troubleshooting
 
@@ -463,44 +248,36 @@ If no device is found, it means:
 ```
 ERROR: Docker is not running. Required for security policy generation.
 ```
-**Solution:** Start Docker Desktop, or use `-NoAcc` mode for testing without security policy generation.
+**Solution:** Start Docker Desktop before running `-Deploy`.
 
 ### Policy generation fails
 ```
 Failed to generate security policy
 ```
-**Solution:** Ensure Docker is running and you're logged into ACR. Try running `docker login <registry>.azurecr.io` manually.
-
-### Attestation returns error
-```
-Attestation failed with status 500
-```
-**Solution:** This is expected in `-NoAcc` mode. The SKR service response will show details about why attestation failed (no SNP hardware). Check the `/info` endpoint for detailed diagnostics.
+**Solution:** Ensure Docker is running and you're logged into ACR.
 
 ### No configuration found
 ```
 acr-config.json not found. Run with -Build first.
 ```
-**Solution:** Run `.\Deploy-AttestationDemo.ps1 -Build` before deploying.
+**Solution:** Run `.\Deploy-MultiParty.ps1 -Build` before deploying.
 
-### SKR connection refused
+### Attestation fails on confidential container
 ```
-Attestation service not available. Connection refused.
+Attestation failed with status 500
 ```
-**Solution:** Wait for the container to fully start (can take 1-3 minutes). Check logs with:
+**Solution:** Check container logs for detailed error messages:
 ```powershell
-az container logs -g <resource-group> -n <container-name> --container-name attestation-demo
+az container logs -g <resource-group> -n <container-name>
 ```
 
-### Container not responding
-```
-Container did not respond within 3 minutes
-```
-**Solution:** Check container state and logs in the Azure Portal. Verify the security policy allows the container to start.
+### Key release denied
+**Solution:** Verify the managed identity has Key Vault permissions and the container is running on Confidential SKU.
 
 ## Additional Documentation
 
-For detailed technical information about attestation, see [ATTESTATION.md](ATTESTATION.md).
+- [ATTESTATION.md](ATTESTATION.md) - Technical details about attestation
+- [README-MultiParty.md](README-MultiParty.md) - Comprehensive multi-party demo documentation
 
 ## References
 
@@ -508,8 +285,7 @@ For detailed technical information about attestation, see [ATTESTATION.md](ATTES
 - [Azure Container Instances - Confidential Containers](https://learn.microsoft.com/en-us/azure/container-instances/container-instances-confidential-overview)
 - [Microsoft Azure Attestation](https://learn.microsoft.com/en-us/azure/attestation/overview)
 - [AMD SEV-SNP](https://www.amd.com/en/developer/sev.html)
-- [az confcom Extension Documentation](https://learn.microsoft.com/en-us/cli/azure/confcom)
-- [Confidential Computing on Azure](https://learn.microsoft.com/en-us/azure/confidential-computing/)
+- [az confcom Extension](https://learn.microsoft.com/en-us/cli/azure/confcom)
 
 ## License
 

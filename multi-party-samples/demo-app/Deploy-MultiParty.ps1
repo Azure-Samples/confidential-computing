@@ -453,6 +453,7 @@ function Invoke-Deploy {
             'skrAkvEndpoint' = @{ 'value' = $companyAConfig.skrAkvEndpoint }
             'identityResourceId' = @{ 'value' = $companyAConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
+            'resourceGroupName' = @{ 'value' = $resource_group }
         }
     }
     $params_companyA | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-contoso.json'
@@ -501,6 +502,7 @@ function Invoke-Deploy {
             'skrAkvEndpoint' = @{ 'value' = $companyBConfig.skrAkvEndpoint }
             'identityResourceId' = @{ 'value' = $companyBConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
+            'resourceGroupName' = @{ 'value' = $resource_group }
         }
     }
     $params_companyB | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-fabrikam.json'
@@ -547,6 +549,7 @@ function Invoke-Deploy {
             'skrAkvEndpoint' = @{ 'value' = $companyAConfig.skrAkvEndpoint }
             'identityResourceId' = @{ 'value' = $companyAConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
+            'resourceGroupName' = @{ 'value' = $resource_group }
         }
     }
     $params_snooper | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-snooper.json'
@@ -824,29 +827,30 @@ function Invoke-Cleanup {
         }
     }
     
-    # Delete consolidated-records.json from blob storage
+    # Delete consolidated-records blob from blob storage (unique per resource group)
     Write-Host ""
     Write-Host "Cleaning up blob storage..."
+    
+    # Construct the blob name that matches the deployment
+    $blobName = "consolidated-records-$resource_group.json"
     
     # Load storage connection string from .env file
     if (Test-Path ".env") {
         $envContent = Get-Content ".env" -Raw
-        if ($envContent -match 'AZURE_STORAGE_CONNECTION_STRING="([^"]+)"') {
-            $connectionString = $matches[1]
+        # Handle both quoted and unquoted values
+        if ($envContent -match 'AZURE_STORAGE_CONNECTION_STRING=([^\r\n]+)') {
+            $connectionString = $matches[1].Trim('"').Trim("'")
             
-            # Delete consolidated-records.json blob
-            Write-Host "  Deleting consolidated-records.json from blob storage..."
-            az storage blob delete `
-                --name "consolidated-records.json" `
+            # Delete consolidated records blob from external storage
+            Write-Host "  Deleting $blobName..."
+            $deleteResult = az storage blob delete `
+                --name $blobName `
                 --container-name "privateappdata" `
                 --connection-string $connectionString `
-                --only-show-errors 2>$null
+                --only-show-errors 2>&1
             
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "  Blob deleted successfully" -ForegroundColor Green
-            } else {
-                Write-Host "  Blob not found or already deleted" -ForegroundColor Yellow
-            }
+            # Any result is fine - either deleted or didn't exist
+            Write-Host "  Blob cleanup complete" -ForegroundColor Green
         } else {
             Write-Warning "Could not find storage connection string in .env file"
         }

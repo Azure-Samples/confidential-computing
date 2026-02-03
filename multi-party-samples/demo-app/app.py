@@ -141,7 +141,7 @@ def attest_maa():
                 'diagnosis': {
                     'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
                     'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
-                    'command': '.\\Deploy-AttestationDemo.ps1 -Build -Deploy'
+                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
                 },
                 'note': 'Attestation requires AMD SEV-SNP hardware (Confidential SKU). Standard SKU containers cannot generate valid attestation evidence.',
                 'logs': read_log_files()
@@ -360,7 +360,7 @@ def skr_release():
                     'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
                     'explanation': 'Secure Key Release requires hardware attestation to prove the container is running in a TEE. Without AMD SEV-SNP, the attestation fails and the key cannot be released.',
                     'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
-                    'command': '.\\Deploy-AttestationDemo.ps1 -Build -Deploy'
+                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
                 },
                 'note': 'SKR requires: 1) Confidential SKU with AMD SEV-SNP, 2) Key Vault Premium with HSM-backed key, 3) Release policy trusting the MAA endpoint',
                 'logs': read_log_files()
@@ -1041,7 +1041,7 @@ def container_info():
                     'This device is only available when running on AMD SEV-SNP hardware with Confidential SKU. '
                     'Without TEE hardware, the SKR binary may start but cannot perform any attestation operations.'
                 ),
-                'solution': 'Deploy with Confidential SKU: .\\Deploy-AttestationDemo.ps1 -Build -Deploy (without -NoAcc)',
+                'solution': 'Deploy with Confidential SKU: .\\Deploy-MultiParty.ps1 -Build -Deploy (without -NoAcc)',
                 'technical_detail': 'The SKR binary uses the SNP_GET_REPORT ioctl on /dev/sev-guest to request attestation reports from the AMD PSP.'
             }
         else:
@@ -1090,6 +1090,13 @@ def container_info():
 EXTERNAL_STORAGE_ACCOUNT = "orangeappstorezspo861"
 EXTERNAL_CONTAINER_NAME = "privateappdata"
 EXTERNAL_BLOB_ENDPOINT = f"https://{EXTERNAL_STORAGE_ACCOUNT}.blob.core.windows.net"
+
+def get_consolidated_blob_name():
+    """Get the consolidated records blob name, unique per resource group deployment"""
+    resource_group = os.environ.get('RESOURCE_GROUP_NAME', '')
+    if resource_group:
+        return f"consolidated-records-{resource_group}.json"
+    return "consolidated-records.json"
 
 def get_storage_sas_token():
     """Extract SAS token from connection string environment variable"""
@@ -1152,11 +1159,13 @@ def storage_config():
     """Return the external storage configuration"""
     has_sas = get_storage_sas_token() is not None
     expiry_info = get_sas_token_expiry()
+    blob_name = get_consolidated_blob_name()
     return jsonify({
         'storage_account': EXTERNAL_STORAGE_ACCOUNT,
         'container_name': EXTERNAL_CONTAINER_NAME,
         'blob_endpoint': EXTERNAL_BLOB_ENDPOINT,
         'container_url': f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}",
+        'consolidated_blob_name': blob_name,
         'authenticated': has_sas,
         'auth_method': 'SAS Token' if has_sas else 'Anonymous (public access only)',
         'sas_expiry': expiry_info
@@ -1423,7 +1432,7 @@ def save_company_data():
         }
         
         # Read existing data from consolidated file (if exists)
-        blob_name = "consolidated-records.json"
+        blob_name = get_consolidated_blob_name()
         existing_data = []
         
         try:
@@ -1555,7 +1564,7 @@ def populate_from_csv():
             })
         
         # Read existing consolidated records (if any)
-        blob_name = "consolidated-records.json"
+        blob_name = get_consolidated_blob_name()
         existing_data = []
         
         try:
@@ -1644,7 +1653,7 @@ def list_company_data():
                 }), 400
         
         # Read from consolidated-records.json and filter by company
-        blob_name = "consolidated-records.json"
+        blob_name = get_consolidated_blob_name()
         
         # Read from blob storage
         base_url = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}/{blob_name}"
@@ -1654,21 +1663,32 @@ def list_company_data():
         
         if response.status_code == 200:
             all_data = response.json()
-            # Filter records by company
+            # Add line numbers to all records (1-based index in the full file)
             if isinstance(all_data, list):
-                company_records = [r for r in all_data if r.get('company', '').lower() == company.lower()]
+                for i, record in enumerate(all_data):
+                    record['line_number'] = i + 1
+                # Return ALL records - let the frontend show which can/cannot be decrypted
+                all_records = all_data
+                # Count how many belong to this company
+                company_record_count = len([r for r in all_data if r.get('company', '').lower() == company.lower()])
             else:
-                company_records = [all_data] if all_data.get('company', '').lower() == company.lower() else []
+                all_data['line_number'] = 1
+                all_records = [all_data]
+                company_record_count = 1 if all_data.get('company', '').lower() == company.lower() else 0
+            
+            # Full blob URL (without SAS for display)
+            full_blob_url = base_url
             
             return jsonify({
                 'status': 'success',
                 'company': company,
                 'blob_name': blob_name,
-                'record_count': len(company_records),
-                'total_records_in_file': len(all_data) if isinstance(all_data, list) else 1,
-                'records': company_records,
+                'full_blob_url': full_blob_url,
+                'record_count': company_record_count,
+                'total_records_in_file': len(all_records),
+                'records': all_records,
                 'key_released': _released_key is not None,
-                'note': 'Data is encrypted. The ciphertext can only be decrypted by the private key in Azure Key Vault HSM.'
+                'note': 'Data is encrypted. Records from other companies will show as "Unable to Decrypt".'
             })
         elif response.status_code == 404:
             return jsonify({

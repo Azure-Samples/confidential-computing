@@ -15,6 +15,26 @@ Remote attestation allows a relying party to verify that:
 2. **The workload hasn't been tampered with** - Security policy enforcement
 3. **The environment is properly configured** - No debugging, correct firmware
 
+## Encrypted Data Flow
+
+![Data Flow Diagram](DataFlowDiagram.svg)
+
+The key security principle: **data is encrypted at rest and in transit; decryption ONLY happens inside the TEE**.
+
+| Zone | Data State | Who Can Access |
+|------|-----------|----------------|
+| **Blob Storage** | Encrypted (RSA-OAEP-256) | Anyone (but useless without key) |
+| **Network Transit** | Encrypted (TLS + payload encryption) | Cannot be decrypted |
+| **Standard Container** | Encrypted (no key access) | Cannot decrypt - attestation fails |
+| **TEE Memory** | Decrypted (hardware-protected) | Only the TEE workload |
+
+### Why TEE Decryption is Secure
+
+1. **Hardware Memory Encryption**: AMD SEV-SNP encrypts all memory at the CPU level
+2. **Key Isolation**: Decryption keys exist only in TEE-protected memory
+3. **Attestation Binding**: Keys are only released after hardware attestation proves TEE integrity
+4. **Hypervisor Excluded**: Even the cloud infrastructure cannot read TEE memory
+
 ### Attestation Flow
 
 The demo uses a single container with both Flask and SKR (Secure Key Release) services managed by supervisord.
@@ -198,7 +218,7 @@ The web UI dynamically updates security feature indicators based on attestation 
 
 | File | Purpose |
 |------|---------|
-| `Deploy-AttestationDemo.ps1` | Main script for build, deploy, cleanup |
+| `Deploy-MultiParty.ps1` | Main script for build, deploy, cleanup |
 | `app.py` | Flask routes, forwards attestation requests to SKR |
 | `supervisord.conf` | Process supervisor config for Flask + SKR |
 | `templates/index.html` | Interactive UI with JavaScript for attestation |
@@ -236,9 +256,9 @@ az container show --name <name> --resource-group <rg> --query "sku"
 # Should return "Confidential"
 ```
 
-### Attestation fails in -NoAcc mode
+### Attestation fails on Snooper container
 
-This is expected. The SKR service is included but attestation will fail because there's no AMD SEV-SNP hardware on Standard SKU containers. The error response from the SKR service will be displayed in the UI.
+This is expected. The Snooper container is deployed with Standard SKU (no TEE hardware), so attestation will fail. The error response from the SKR service will be displayed in the UI, demonstrating what happens when a non-confidential container attempts to access protected resources.
 
 ## References
 

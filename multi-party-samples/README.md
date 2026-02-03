@@ -21,10 +21,17 @@ A comprehensive demonstration of multi-party confidential computing that deploys
 - **Secure Key Release**: Azure Key Vault HSM keys only released to TEE
 - **Company Isolation**: Each party's data protected from others
 - **Attacker Visualization**: See what a malicious actor would observe
+- **TEE-Only Decryption**: Data encrypted at rest, decrypted only inside hardware TEE
 
 #### Architecture
 
 ![Architecture Diagram](demo-app/MultiPartyArchitecture.svg)
+
+#### Encrypted Data Flow
+
+![Data Flow Diagram](demo-app/DataFlowDiagram.svg)
+
+**Key Insight:** Data remains encrypted in storage and transit. Decryption **only** occurs inside the AMD SEV-SNP TEE, where memory is hardware-encrypted. Even infrastructure operators cannot access plaintext.
 
 #### Quick Start
 
