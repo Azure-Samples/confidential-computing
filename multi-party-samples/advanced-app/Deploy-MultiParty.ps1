@@ -3,22 +3,21 @@
     Deploy multi-party confidential computing demonstration.
 
 .DESCRIPTION
-    Deploys four containers to demonstrate multy-party confidential computing:
+    Deploys three confidential containers to demonstrate multi-party confidential computing:
     - Contoso: Confidential container (AMD SEV-SNP) - Can attest and access secrets
     - Fabrikam: Confidential container (AMD SEV-SNP) - Can attest and access secrets  
     - Woodgrove-Bank: Confidential container (AMD SEV-SNP) - Can attest and access partner secrets
-    - snooper: Standard container (no TEE) - Cannot attest, cannot access secrets
 
-    This demonstrates how confidential computing protects data even from 
-    infrastructure operators, showing that only attested containers can 
-    release cryptographic keys.
+    This demonstrates how confidential computing enables secure multi-party data sharing,
+    where each company's secrets are protected by hardware attestation and only accessible
+    by verified confidential containers.
 
 .PARAMETER Build
     Build and push the container image to Azure Container Registry.
     Creates ACR and Key Vault if they don't exist.
 
 .PARAMETER Deploy
-    Deploy all four containers (Contoso, Fabrikam, Woodgrove-Bank, snooper).
+    Deploy all three confidential containers (Contoso, Fabrikam, Woodgrove-Bank).
     Requires a previous build (acr-config.json must exist).
 
 .PARAMETER Cleanup
@@ -105,6 +104,121 @@ function Get-Config {
 function Save-Config {
     param($Config)
     $Config | ConvertTo-Json | Out-File -FilePath "acr-config.json" -Encoding UTF8
+}
+
+function Test-DockerRunning {
+    <#
+    .SYNOPSIS
+        Checks if Docker is running, attempts to start it if not, and exits with helpful error if it fails.
+    
+    .DESCRIPTION
+        Docker is required for generating the confidential computing security policy (ccepolicy).
+        This function checks if Docker daemon is running, attempts to start Docker Desktop if not,
+        and provides helpful error messages if Docker cannot be started.
+    #>
+    
+    Write-Host "Checking Docker status..." -ForegroundColor Cyan
+    
+    # Check if docker command exists
+    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $dockerCmd) {
+        Write-Host ""
+        Write-Host "ERROR: Docker is not installed!" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Docker is required to generate the confidential computing security policy." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Recommended actions:" -ForegroundColor Cyan
+        Write-Host "  1. Download Docker Desktop from: https://www.docker.com/products/docker-desktop/" -ForegroundColor White
+        Write-Host "  2. Install Docker Desktop" -ForegroundColor White
+        Write-Host "  3. Restart your terminal and run this script again" -ForegroundColor White
+        Write-Host ""
+        exit 1
+    }
+    
+    # Check if Docker daemon is running
+    $dockerInfo = docker info 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Docker is running" -ForegroundColor Green
+        return
+    }
+    
+    Write-Host "Docker is not running. Attempting to start Docker Desktop..." -ForegroundColor Yellow
+    
+    # Try to find and start Docker Desktop
+    $dockerDesktopPaths = @(
+        "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
+        "${env:ProgramFiles(x86)}\Docker\Docker\Docker Desktop.exe",
+        "$env:LOCALAPPDATA\Docker\Docker Desktop.exe"
+    )
+    
+    $dockerDesktopPath = $null
+    foreach ($path in $dockerDesktopPaths) {
+        if (Test-Path $path) {
+            $dockerDesktopPath = $path
+            break
+        }
+    }
+    
+    if (-not $dockerDesktopPath) {
+        Write-Host ""
+        Write-Host "ERROR: Could not find Docker Desktop executable!" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Docker Desktop appears to be installed but the executable was not found." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Recommended actions:" -ForegroundColor Cyan
+        Write-Host "  1. Start Docker Desktop manually from the Start menu" -ForegroundColor White
+        Write-Host "  2. Wait for it to fully initialize (check the system tray icon)" -ForegroundColor White
+        Write-Host "  3. Run this script again" -ForegroundColor White
+        Write-Host ""
+        exit 1
+    }
+    
+    # Start Docker Desktop
+    Write-Host "Starting Docker Desktop from: $dockerDesktopPath" -ForegroundColor Cyan
+    Start-Process -FilePath $dockerDesktopPath
+    
+    # Wait for Docker to start (check every 5 seconds, timeout after 120 seconds)
+    $maxWaitSeconds = 120
+    $waitInterval = 5
+    $elapsed = 0
+    
+    Write-Host "Waiting for Docker daemon to start (timeout: ${maxWaitSeconds}s)..." -ForegroundColor Cyan
+    
+    while ($elapsed -lt $maxWaitSeconds) {
+        Start-Sleep -Seconds $waitInterval
+        $elapsed += $waitInterval
+        
+        # Check if Docker is now running
+        $dockerInfo = docker info 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Docker started successfully after ${elapsed} seconds" -ForegroundColor Green
+            return
+        }
+        
+        # Show progress
+        $remaining = $maxWaitSeconds - $elapsed
+        Write-Host "  Still waiting... (${remaining}s remaining)" -ForegroundColor Gray
+    }
+    
+    # Docker didn't start in time
+    Write-Host ""
+    Write-Host "ERROR: Docker failed to start within ${maxWaitSeconds} seconds!" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Docker is required to generate the confidential computing security policy." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Recommended actions:" -ForegroundColor Cyan
+    Write-Host "  1. Check if Docker Desktop is starting in the system tray" -ForegroundColor White
+    Write-Host "  2. If Docker shows an error, restart Docker Desktop manually" -ForegroundColor White
+    Write-Host "  3. Ensure Windows Subsystem for Linux (WSL 2) is properly installed:" -ForegroundColor White
+    Write-Host "       wsl --install" -ForegroundColor Gray
+    Write-Host "       wsl --update" -ForegroundColor Gray
+    Write-Host "  4. Try restarting your computer if Docker continues to fail" -ForegroundColor White
+    Write-Host "  5. Check Docker Desktop settings - ensure WSL 2 backend is enabled" -ForegroundColor White
+    Write-Host "  6. Once Docker is running, run this script again" -ForegroundColor White
+    Write-Host ""
+    Write-Host "For more troubleshooting, see: https://docs.docker.com/desktop/troubleshoot/overview/" -ForegroundColor Gray
+    Write-Host ""
+    exit 1
 }
 
 # ============================================================================
@@ -501,17 +615,14 @@ function Invoke-Deploy {
     $container_companyA = "aci-contoso-$timestamp"
     $container_companyB = "aci-fabrikam-$timestamp"
     $container_companyC = "aci-woodgrove-$timestamp"
-    $container_snooper = "aci-snooper-$timestamp"
     $dns_companyA = "contoso-$timestamp"
     $dns_companyB = "fabrikam-$timestamp"
     $dns_companyC = "woodgrove-$timestamp"
-    $dns_snooper = "snooper-$timestamp"
     
     Write-Host "Container Names:"
     Write-Host "  Contoso:        $container_companyA"
     Write-Host "  Fabrikam:       $container_companyB"
     Write-Host "  Woodgrove-Bank: $container_companyC"
-    Write-Host "  snooper:        $container_snooper"
     Write-Host ""
     
     # Check Docker for confidential deployments
@@ -691,60 +802,17 @@ function Invoke-Deploy {
     }
     Write-Success "Woodgrove-Bank container deployed!"
     
-    # ========== Deploy snooper (Standard - No TEE) ==========
-    Write-Header "Deploying snooper (Standard - No TEE)"
-    
-    # Snooper uses Contoso's config but won't be able to release keys (no TEE)
-    Write-Host "Snooper will try to access Contoso's key but will FAIL (no TEE)" -ForegroundColor Yellow
-    
-    $params_snooper = @{
-        '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
-        'contentVersion' = '1.0.0.0'
-        'parameters' = @{
-            'containerGroupName' = @{ 'value' = $container_snooper }
-            'location' = @{ 'value' = $Location }
-            'appImage' = @{ 'value' = $FULL_IMAGE }
-            'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
-            'registryUsername' = @{ 'value' = $ACR_USERNAME }
-            'registryPassword' = @{ 'value' = $ACR_PASSWORD }
-            'dnsNameLabel' = @{ 'value' = $dns_snooper }
-            'skrKeyName' = @{ 'value' = $companyAConfig.skrKeyName }
-            'skrMaaEndpoint' = @{ 'value' = $config.skrMaaEndpoint }
-            'skrAkvEndpoint' = @{ 'value' = $companyAConfig.skrAkvEndpoint }
-            'identityResourceId' = @{ 'value' = $companyAConfig.identityResourceId }
-            'storageConnectionString' = @{ 'value' = $StorageConnectionString }
-            'resourceGroupName' = @{ 'value' = $resource_group }
-        }
-    }
-    $params_snooper | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-snooper.json'
-    
-    # Use standard template (no security policy, no confidential SKU)
-    Copy-Item -Path "deployment-template-standard.json" -Destination "deployment-template-snooper.json" -Force
-    
-    Write-Host "Deploying snooper container (no security policy needed)..."
-    az deployment group create `
-        --resource-group $resource_group `
-        --template-file deployment-template-snooper.json `
-        --parameters '@deployment-params-snooper.json' | Out-Null
-    
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to deploy snooper container"
-    }
-    Write-Success "snooper container deployed!"
-    
     # ========== Wait for All Containers ==========
     Write-Header "Waiting for All Containers to Start"
     
     $fqdn_companyA = az container show --resource-group $resource_group --name $container_companyA --query "ipAddress.fqdn" --output tsv
     $fqdn_companyB = az container show --resource-group $resource_group --name $container_companyB --query "ipAddress.fqdn" --output tsv
     $fqdn_companyC = az container show --resource-group $resource_group --name $container_companyC --query "ipAddress.fqdn" --output tsv
-    $fqdn_snooper = az container show --resource-group $resource_group --name $container_snooper --query "ipAddress.fqdn" --output tsv
     
     Write-Host "FQDNs:"
     Write-Host "  Contoso:        http://$fqdn_companyA" -ForegroundColor Green
     Write-Host "  Fabrikam:       http://$fqdn_companyB" -ForegroundColor Green
     Write-Host "  Woodgrove-Bank: http://$fqdn_companyC" -ForegroundColor Green
-    Write-Host "  snooper:        http://$fqdn_snooper" -ForegroundColor Red
     Write-Host ""
     
     $timeout_seconds = 300
@@ -752,9 +820,8 @@ function Invoke-Deploy {
     $companyA_ready = $false
     $companyB_ready = $false
     $companyC_ready = $false
-    $snooper_ready = $false
     
-    while ($elapsed_seconds -lt $timeout_seconds -and (-not $companyA_ready -or -not $companyB_ready -or -not $companyC_ready -or -not $snooper_ready)) {
+    while ($elapsed_seconds -lt $timeout_seconds -and (-not $companyA_ready -or -not $companyB_ready -or -not $companyC_ready)) {
         if (-not $companyA_ready) {
             try {
                 $response = Invoke-WebRequest -Uri "http://$fqdn_companyA" -Method Head -TimeoutSec 5 -ErrorAction SilentlyContinue
@@ -785,44 +852,31 @@ function Invoke-Deploy {
             } catch { }
         }
         
-        if (-not $snooper_ready) {
-            try {
-                $response = Invoke-WebRequest -Uri "http://$fqdn_snooper" -Method Head -TimeoutSec 5 -ErrorAction SilentlyContinue
-                if ($response.StatusCode -eq 200) { 
-                    $snooper_ready = $true
-                    Write-Success "snooper is ready!"
-                }
-            } catch { }
-        }
-        
-        if (-not $companyA_ready -or -not $companyB_ready -or -not $companyC_ready -or -not $snooper_ready) {
+        if (-not $companyA_ready -or -not $companyB_ready -or -not $companyC_ready) {
             $status = "Waiting... ($elapsed_seconds/$timeout_seconds sec) - "
-            $status += "A: $(if ($companyA_ready) { 'Ready' } else { '...' }), "
-            $status += "B: $(if ($companyB_ready) { 'Ready' } else { '...' }), "
-            $status += "C: $(if ($companyC_ready) { 'Ready' } else { '...' }), "
-            $status += "Snooper: $(if ($snooper_ready) { 'Ready' } else { '...' })"
+            $status += "Contoso: $(if ($companyA_ready) { 'Ready' } else { '...' }), "
+            $status += "Fabrikam: $(if ($companyB_ready) { 'Ready' } else { '...' }), "
+            $status += "Woodgrove: $(if ($companyC_ready) { 'Ready' } else { '...' })"
             Write-Host $status
             Start-Sleep -Seconds 5
             $elapsed_seconds += 5
         }
     }
     
-    if (-not $companyA_ready -or -not $companyB_ready -or -not $companyC_ready -or -not $snooper_ready) {
+    if (-not $companyA_ready -or -not $companyB_ready -or -not $companyC_ready) {
         Write-Warning "Some containers did not start in time"
         if (-not $companyA_ready) { Write-Warning "  - Contoso not ready" }
         if (-not $companyB_ready) { Write-Warning "  - Fabrikam not ready" }
         if (-not $companyC_ready) { Write-Warning "  - Woodgrove-Bank not ready" }
-        if (-not $snooper_ready) { Write-Warning "  - snooper not ready" }
     }
     
     # ========== Open Edge with Multi-Party View ==========
     Write-Header "Opening Multi-Party Comparison View"
     
     Write-Host "Creating multi-party comparison view..."
-    Write-Host "  Top Left:      Contoso (Confidential) - http://$fqdn_companyA"
-    Write-Host "  Top Right:     Fabrikam (Confidential) - http://$fqdn_companyB"
-    Write-Host "  Bottom Left:   Woodgrove-Bank (Confidential) - http://$fqdn_companyC"
-    Write-Host "  Bottom Right:  snooper (Standard) - http://$fqdn_snooper"
+    Write-Host "  Left:    Contoso (Confidential) - http://$fqdn_companyA"
+    Write-Host "  Center:  Fabrikam (Confidential) - http://$fqdn_companyB"
+    Write-Host "  Right:   Woodgrove-Bank (Confidential + Cross-company) - http://$fqdn_companyC"
     Write-Host ""
     
     # Get key names for display
@@ -906,11 +960,11 @@ function Invoke-Deploy {
     <div class="legend">
         <div class="legend-item">
             <div class="legend-dot green"></div>
-            <span>Confidential containers can attest and release keys</span>
+            <span>All containers run in AMD SEV-SNP confidential environment with hardware attestation</span>
         </div>
         <div class="legend-item">
-            <div class="legend-dot red"></div>
-            <span>Standard containers cannot attest - key release fails</span>
+            <div class="legend-dot green"></div>
+            <span>Woodgrove Bank has cross-company access to partner keys for joint analytics</span>
         </div>
     </div>
     <div class="container" id="container">
@@ -933,13 +987,6 @@ function Invoke-Deploy {
                 ✅ WOODGROVE BANK (Confidential) <span class="subtitle">AMD SEV-SNP TEE • Key Vault: $kvNameC • Cross-company access</span> <span class="key-name">🔑 $keyNameC + Partners</span>
             </div>
             <iframe src="http://$fqdn_companyC" title="Woodgrove Bank - Confidential Container"></iframe>
-        </div>
-        <div class="resizer" data-pane="2"></div>
-        <div class="pane" id="pane3" style="flex: 1;">
-            <div class="label standard">
-                ❌ SNOOPER (Standard - No TEE) <span class="subtitle">Cannot attest • Tries to access: $kvNameA</span> <span class="key-name" style="background: rgba(0,0,0,0.2);">🔒 ACCESS DENIED</span>
-            </div>
-            <iframe src="http://$fqdn_snooper" title="Snooper - Standard Container (No TEE)"></iframe>
         </div>
     </div>
     <script>
@@ -1011,9 +1058,10 @@ function Invoke-Deploy {
     $multiPartyHtmlPath = Join-Path $PSScriptRoot "multiparty-view-$resource_group.html"
     $multiPartyHtml | Out-File -FilePath $multiPartyHtmlPath -Encoding UTF8
     
+    $edgeProcess = $null
     if (-not $SkipBrowser) {
-        # Open the multi-party view HTML in Edge
-        Start-Process "msedge" -ArgumentList "--new-window `"file:///$($multiPartyHtmlPath.Replace('\', '/'))`"" -Wait
+        # Open the multi-party view HTML in Edge and capture the process
+        $edgeProcess = Start-Process "msedge" -ArgumentList "--new-window `"file:///$($multiPartyHtmlPath.Replace('\', '/'))`"" -PassThru
     } else {
         Write-Host "Browser skipped. Open manually:"
         Write-Host "  file:///$($multiPartyHtmlPath.Replace('\', '/'))"
@@ -1026,21 +1074,31 @@ function Invoke-Deploy {
     
     Write-Header "Cleanup Multi-Party Containers"
     
+    # Prompt to close the Edge window if we opened it
+    if ($edgeProcess -and -not $edgeProcess.HasExited) {
+        $closeBrowser = Read-Host "Close the browser window? (Y/n)"
+        if ($closeBrowser -ne 'n' -and $closeBrowser -ne 'N') {
+            Write-Host "Closing browser window..."
+            try {
+                $edgeProcess | Stop-Process -Force -ErrorAction SilentlyContinue
+            } catch {
+                # Ignore errors - user may have already closed the window
+            }
+        }
+    }
+    
     Write-Host "Deleting all containers..."
     az container delete --resource-group $resource_group --name $container_companyA --yes 2>&1 | Out-Null
     az container delete --resource-group $resource_group --name $container_companyB --yes 2>&1 | Out-Null
     az container delete --resource-group $resource_group --name $container_companyC --yes 2>&1 | Out-Null
-    az container delete --resource-group $resource_group --name $container_snooper --yes 2>&1 | Out-Null
     
     # Cleanup temp files
     Remove-Item -Path "deployment-params-contoso.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "deployment-params-fabrikam.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "deployment-params-woodgrove.json" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "deployment-params-snooper.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "deployment-template-contoso.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "deployment-template-fabrikam.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "deployment-template-woodgrove.json" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "deployment-template-snooper.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "multiparty-view-$resource_group.html" -Force -ErrorAction SilentlyContinue
     
     Write-Success "All containers deleted. ACR and Key Vault preserved."
@@ -1145,17 +1203,16 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
     Write-Host "Multi-Party Confidential Computing Demo (Advanced)" -ForegroundColor Cyan
     Write-Host "==================================================="
     Write-Host ""
-    Write-Host "This script deploys 4 containers to demonstrate multi-party"
-    Write-Host "confidential computing:"
+    Write-Host "This script deploys 3 confidential containers to demonstrate multi-party"
+    Write-Host "confidential computing with cross-company data sharing:"
     Write-Host ""
     Write-Host "  Contoso:        Confidential (AMD SEV-SNP) - CAN attest" -ForegroundColor Green
     Write-Host "  Fabrikam:       Confidential (AMD SEV-SNP) - CAN attest" -ForegroundColor Green
     Write-Host "  Woodgrove-Bank: Confidential (AMD SEV-SNP) - CAN attest + cross-company access" -ForegroundColor Green
-    Write-Host "  snooper:        Standard (No TEE)          - CANNOT attest" -ForegroundColor Red
     Write-Host ""
     Write-Host "Usage:"
     Write-Host "  .\Deploy-MultiParty.ps1 -Build              # Build container image"
-    Write-Host "  .\Deploy-MultiParty.ps1 -Deploy             # Deploy all 4 containers"
+    Write-Host "  .\Deploy-MultiParty.ps1 -Deploy             # Deploy all 3 containers"
     Write-Host "  .\Deploy-MultiParty.ps1 -Build -Deploy      # Build and deploy"
     Write-Host "  .\Deploy-MultiParty.ps1 -Cleanup            # Delete all resources"
     Write-Host ""
@@ -1179,6 +1236,11 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
 
 # Execute requested actions
 try {
+    # Docker is required for Build (container image) and Deploy (security policy generation)
+    if ($Build -or $Deploy) {
+        Test-DockerRunning
+    }
+    
     if ($Build) {
         $config = Invoke-Build -RegistryName $RegistryName
     }

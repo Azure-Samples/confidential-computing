@@ -648,85 +648,6 @@
                 </div>
             </details>
             
-            <details class="section" id="blobStorageSection">
-                <summary style="cursor: pointer;"><h2 style="display: inline;">&#128193; External Blob Storage Access</h2></summary>
-                <div class="attestation-box" style="border-left-color: #fd7e14; margin-top: 15px;">
-                    
-                    <!-- Snooper Attacker Explainer - Only shown for non-confidential containers -->
-                    <div id="snooperExplainer" style="display: none; margin-bottom: 20px; padding: 20px; background: #2d2d2d; border-radius: 8px; border: 3px solid #dc3545;">
-                        <h4 style="color: #dc3545; margin-bottom: 15px;">&#128373; Attacker's View - What a Snooper Sees</h4>
-                        <p style="color: #f8f8f2; margin-bottom: 15px;">This container represents a <strong style="color: #ff6b6b;">potential attacker</strong> or untrusted party who has gained access to the storage system. They can:</p>
-                        <ul style="color: #f8f8f2; margin-left: 20px; margin-bottom: 15px;">
-                            <li style="margin-bottom: 8px;">&#10004; <strong>List all files</strong> in the storage container</li>
-                            <li style="margin-bottom: 8px;">&#10004; <strong>Download any file</strong> including consolidated-records.json</li>
-                            <li style="margin-bottom: 8px;">&#10004; <strong>See all encrypted data</strong> from Contoso and Fabrikam</li>
-                            <li style="margin-bottom: 8px;">&#10060; <strong style="color: #ff6b6b;">CANNOT decrypt any data</strong> - No access to SKR keys!</li>
-                        </ul>
-                        <div style="padding: 15px; background: #198754; border-radius: 6px;">
-                            <p style="color: white; margin: 0;"><strong>&#128274; Key Insight:</strong> You can use a <em>completely untrusted storage location</em> to host sensitive data, as long as encryption keys are only released to verified TEE environments. Even if attackers compromise the storage, they see only meaningless ciphertext.</p>
-                        </div>
-                    </div>
-                    
-                    <!-- Auto-refresh indicator for snooper -->
-                    <div id="autoRefreshIndicator" style="display: none; margin-bottom: 15px; padding: 10px 15px; background: #343a40; border-radius: 6px; color: #f8f9fa;">
-                        <span style="color: #28a745;">&#9679;</span> Auto-refreshing every <span id="refreshInterval">5</span> seconds | Last update: <span id="lastRefreshTime">--:--:--</span>
-                    </div>
-                    
-                    <div style="margin-bottom: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4;">
-                        <h4 style="color: #0078d4; margin-bottom: 10px;">&#128737; Azure Confidential Computing Data Protection Model</h4>
-                        <p style="color: #495057; margin-bottom: 10px;">This section demonstrates how <strong>Azure Confidential Computing (ACC)</strong> can protect sensitive data even when stored in shared environments you don't fully control - or even completely public data stores.</p>
-                        <p style="color: #495057; margin-bottom: 10px;"><strong>The key insight:</strong> Anyone can access the encrypted data below, but <em>decryption keys are only ever released when your application proves (via hardware attestation) that it is running inside a Trusted Execution Environment (TEE)</em>.</p>
-                        <ul style="color: #495057; margin-left: 20px; margin-bottom: 10px;">
-                            <li><strong>Keys never leave the TEE</strong> - Secure Key Release ensures cryptographic keys are only available to attested, confidential workloads</li>
-                            <li><strong>Sealed/Blackbox Deployments</strong> - Confidential computing enforcement policies block interactive access to your application containers</li>
-                            <li><strong>Zero-trust data sharing</strong> - Store encrypted data anywhere; only your verified confidential containers can decrypt it</li>
-                            <li><strong>Multi-party collaboration</strong> - Multiple parties can share a data store while each protects their own secrets</li>
-                        </ul>
-                        <p style="color: #0078d4; font-size: 0.9em;"><strong>&#128272; Result:</strong> Even if attackers gain access to your storage, cloud infrastructure, or container orchestration - they cannot decrypt your data without compromising the hardware TEE itself.</p>
-                    </div>
-                    
-                    <div id="storageConfigInfo" style="margin: 20px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border: 2px solid #fd7e14;">
-                        <p style="color: #856404;"><em>Loading storage configuration...</em></p>
-                    </div>
-                    
-                    <div class="button-group">
-                        <button id="listBlobsBtn" onclick="listBlobStorage()" style="background: #fd7e14;">
-                            📂 List Blob Contents
-                        </button>
-                        <button id="refreshBlobsBtn" onclick="listBlobStorage()" style="background: #6c757d;" disabled>
-                            🔄 Refresh
-                        </button>
-                    </div>
-                    
-                    <div id="blobListResult" style="margin-top: 20px;"></div>
-                    
-                    <!-- Snooper's view of consolidated records -->
-                    <div id="snooperRecordsView" style="display: none; margin-top: 20px;">
-                        <h4 id="snooperRecordsHeader" style="color: #dc3545; margin-bottom: 15px;">&#128373; Intercepted Encrypted Records (<span id="snooperBlobName">consolidated-records.json</span>)</h4>
-                        <div id="snooperRecordsTable" style="background: #1e1e1e; padding: 20px; border-radius: 8px; border: 2px solid #dc3545;">
-                            <p style="color: #f8f8f2;"><em>Loading intercepted data...</em></p>
-                        </div>
-                    </div>
-                    
-                    <div id="blobContentViewer" style="margin-top: 20px; display: none;">
-                        <h4 style="color: #495057; margin-bottom: 10px;">📄 Blob Content Viewer</h4>
-                        <div style="background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 6px; max-height: 300px; overflow: auto;">
-                            <pre id="blobContentPre" style="margin: 0; white-space: pre-wrap; word-wrap: break-word;"></pre>
-                        </div>
-                    </div>
-                    
-                    <div style="margin-top: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">
-                        <h4 style="color: #721c24; margin-bottom: 10px;">&#9888;&#65039; Demo: What Happens Without TEE Protection</h4>
-                        <ul style="color: #721c24; margin-left: 20px;">
-                            <li><strong>Encrypted data is visible to all</strong> - The snooper container CAN list and download encrypted blobs</li>
-                            <li><strong>But decryption is impossible</strong> - Without passing attestation, the snooper CANNOT obtain the SKR keys needed to decrypt</li>
-                            <li><strong>Confidential enforcement policy</strong> - Even if attackers deploy their own container, it won't match the signed policy hash</li>
-                            <li><strong>Compare the containers</strong> - Contoso/Fabrikam can decrypt their data; the snooper sees only ciphertext</li>
-                        </ul>
-                    </div>
-                </div>
-            </details>
-            
             <details class="section">
                 <summary style="cursor: pointer;"><h2 style="display: inline;">&#128202; Deployment Information</h2></summary>
                 <div id="deploymentInfo" style="margin-top: 15px;">
@@ -1604,164 +1525,6 @@
             });
         }
         
-        // ============================================================================
-        // External Blob Storage Functions
-        // ============================================================================
-        
-        function loadStorageConfig() {
-            fetch('/storage/config')
-                .then(response => response.json())
-                .then(data => {
-                    // Store the consolidated blob name for snooper mode
-                    if (data.consolidated_blob_name) {
-                        consolidatedBlobName = data.consolidated_blob_name;
-                    }
-                    
-                    const configDiv = document.getElementById('storageConfigInfo');
-                    let html = '<div style="text-align: center;">';
-                    html += '<p style="color: #856404; font-size: 0.9em; margin-bottom: 5px;">EXTERNAL BLOB STORAGE (PUBLIC ACCESS)</p>';
-                    html += '<p style="color: #fd7e14; font-size: 1.2em; font-weight: bold; font-family: monospace;">' + escapeHtml(data.storage_account) + '</p>';
-                    html += '<p style="color: #856404; font-size: 0.9em;">Container: <strong>' + escapeHtml(data.container_name) + '</strong></p>';
-                    
-                    // Display SAS token expiry information
-                    if (data.sas_expiry && !data.sas_expiry.error) {
-                        const expiry = data.sas_expiry;
-                        let expiryColor = '#198754'; // green
-                        let expiryIcon = '&#9989;'; // checkmark
-                        
-                        if (expiry.is_expired) {
-                            expiryColor = '#dc3545'; // red
-                            expiryIcon = '&#10060;'; // X
-                        } else if (expiry.is_expiring_soon) {
-                            expiryColor = '#fd7e14'; // orange
-                            expiryIcon = '&#9888;'; // warning
-                        }
-                        
-                        html += '<div style="margin-top: 10px; padding: 10px; background: rgba(255,255,255,0.5); border-radius: 6px;">';
-                        html += '<p style="color: ' + expiryColor + '; font-size: 0.85em; margin-bottom: 5px;">SAS Token Expiry:</p>';
-                        html += '<p style="color: ' + expiryColor + '; font-weight: bold;">' + expiryIcon + ' ' + escapeHtml(expiry.expiry_formatted) + '</p>';
-                        
-                        if (expiry.is_expired) {
-                            html += '<p style="color: #dc3545; font-size: 0.9em; font-weight: bold;">&#128683; EXPIRED ' + Math.abs(expiry.days_remaining) + ' days ago</p>';
-                        } else {
-                            html += '<p style="color: ' + expiryColor + '; font-size: 0.9em;">' + expiry.days_remaining + ' days remaining</p>';
-                        }
-                        html += '</div>';
-                    } else if (data.sas_expiry && data.sas_expiry.error) {
-                        html += '<p style="color: #6c757d; font-size: 0.8em; margin-top: 5px;">Could not parse SAS expiry</p>';
-                    } else if (!data.authenticated) {
-                        html += '<p style="color: #6c757d; font-size: 0.8em; margin-top: 5px;">No SAS token configured</p>';
-                    }
-                    
-                    html += '</div>';
-                    configDiv.innerHTML = html;
-                })
-                .catch(error => {
-                    document.getElementById('storageConfigInfo').innerHTML = 
-                        '<p style="color: #856404;"><em>⚠️ Could not load storage configuration</em></p>';
-                });
-        }
-        
-        function listBlobStorage() {
-            const btn = document.getElementById('listBlobsBtn');
-            const refreshBtn = document.getElementById('refreshBlobsBtn');
-            const resultDiv = document.getElementById('blobListResult');
-            
-            btn.disabled = true;
-            btn.innerHTML = '📂 Loading<span class="loading"></span>';
-            
-            fetch('/storage/list')
-                .then(response => response.json())
-                .then(data => {
-                    btn.disabled = false;
-                    btn.innerHTML = '📂 List Blob Contents';
-                    refreshBtn.disabled = false;
-                    
-                    if (data.status === 'success') {
-                        let html = '<div style="padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745; margin-bottom: 15px;">';
-                        html += '<p style="color: #155724;"><strong>✓ Successfully accessed external storage!</strong></p>';
-                        html += '<p style="color: #155724; font-size: 0.9em;">' + escapeHtml(data.security_note) + '</p>';
-                        html += '</div>';
-                        
-                        if (data.blob_count === 0) {
-                            html += '<div style="padding: 20px; background: #f8f9fa; border-radius: 8px; text-align: center;">';
-                            html += '<p style="color: #6c757d;">📭 No blobs found in container</p>';
-                            html += '<p style="color: #6c757d; font-size: 0.9em;">Upload files using Azure CLI or Storage Explorer</p>';
-                            html += '</div>';
-                        } else {
-                            html += '<table style="width: 100%; border-collapse: collapse; margin-top: 10px;">';
-                            html += '<thead><tr style="background: #f8f9fa;">';
-                            html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">Name</th>';
-                            html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">Size</th>';
-                            html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">Type</th>';
-                            html += '<th style="padding: 10px; text-align: center; border-bottom: 2px solid #dee2e6;">Actions</th>';
-                            html += '</tr></thead><tbody>';
-                            
-                            data.blobs.forEach(function(blob) {
-                                html += '<tr style="border-bottom: 1px solid #dee2e6;">';
-                                html += '<td style="padding: 10px;"><code>' + escapeHtml(blob.name) + '</code></td>';
-                                html += '<td style="padding: 10px;">' + formatBytes(parseInt(blob.size || 0)) + '</td>';
-                                html += '<td style="padding: 10px;">' + escapeHtml(blob.content_type || 'unknown') + '</td>';
-                                html += '<td style="padding: 10px; text-align: center;">';
-                                html += '<button onclick="viewBlob(\'' + escapeHtml(blob.name) + '\')" style="padding: 5px 10px; font-size: 0.85em;">👁️ View</button>';
-                                html += '</td>';
-                                html += '</tr>';
-                            });
-                            
-                            html += '</tbody></table>';
-                            html += '<p style="margin-top: 10px; color: #6c757d; font-size: 0.85em;">Found ' + data.blob_count + ' blob(s)</p>';
-                        }
-                        
-                        resultDiv.innerHTML = html;
-                    } else {
-                        let html = '<div style="padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
-                        html += '<p style="color: #721c24;"><strong>✗ ' + escapeHtml(data.message) + '</strong></p>';
-                        if (data.hint) {
-                            html += '<p style="color: #721c24; font-size: 0.9em; margin-top: 10px;">💡 ' + escapeHtml(data.hint) + '</p>';
-                        }
-                        html += '</div>';
-                        resultDiv.innerHTML = html;
-                    }
-                })
-                .catch(error => {
-                    btn.disabled = false;
-                    btn.innerHTML = '📂 List Blob Contents';
-                    resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Error:</strong> ' + escapeHtml(error.message) + '</p>';
-                });
-        }
-        
-        function viewBlob(blobName) {
-            const viewerDiv = document.getElementById('blobContentViewer');
-            const contentPre = document.getElementById('blobContentPre');
-            
-            viewerDiv.style.display = 'block';
-            contentPre.textContent = 'Loading ' + blobName + '...';
-            
-            fetch('/storage/download/' + encodeURIComponent(blobName))
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        contentPre.innerHTML = '<span style="color: #6c757d;">// File: ' + escapeHtml(data.blob_name) + 
-                            ' (' + formatBytes(data.size) + ')</span>\n' +
-                            '<span style="color: #fd7e14;">// ' + escapeHtml(data.security_note) + '</span>\n\n' +
-                            escapeHtml(data.content);
-                    } else {
-                        contentPre.textContent = 'Error: ' + data.message;
-                    }
-                })
-                .catch(error => {
-                    contentPre.textContent = 'Error loading blob: ' + error.message;
-                });
-        }
-        
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-        
         // =====================================================
         // Company Secure Data Entry Functions
         // =====================================================
@@ -2201,6 +1964,56 @@
         var isConfidentialContainer = true; // Default, updated on page load
         var partnerConfigs = null; // For Woodgrove Bank partner analysis
         
+        // Company branding configuration
+        var companyBranding = {
+            woodgrove: {
+                gradient: 'linear-gradient(135deg, #198754 0%, #146c43 100%)',
+                bodyGradient: 'linear-gradient(135deg, #20c997 0%, #198754 100%)',
+                icon: '🏦',
+                title: 'Woodgrove Bank',
+                subtitle: 'Secure Financial Analytics Platform'
+            },
+            contoso: {
+                gradient: 'linear-gradient(135deg, #6c757d 0%, #495057 100%)',
+                bodyGradient: 'linear-gradient(135deg, #adb5bd 0%, #6c757d 100%)',
+                icon: '🏢',
+                title: 'Contoso Corporation',
+                subtitle: 'Enterprise Data Protection'
+            },
+            fabrikam: {
+                gradient: 'linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%)',
+                bodyGradient: 'linear-gradient(135deg, #6ea8fe 0%, #0d6efd 100%)',
+                icon: '🏭',
+                title: 'Fabrikam Industries',
+                subtitle: 'Manufacturing Data Security'
+            }
+        };
+        
+        function applyCompanyBranding(companyName) {
+            const header = document.querySelector('.header');
+            const headerH1 = header.querySelector('h1');
+            const headerP = header.querySelector('p');
+            
+            let branding = null;
+            const name = (companyName || '').toLowerCase();
+            
+            if (name.includes('woodgrove')) {
+                branding = companyBranding.woodgrove;
+            } else if (name.includes('contoso')) {
+                branding = companyBranding.contoso;
+            } else if (name.includes('fabrikam')) {
+                branding = companyBranding.fabrikam;
+            }
+            
+            if (branding) {
+                header.style.background = branding.gradient;
+                headerH1.innerHTML = branding.icon + ' ' + branding.title;
+                headerP.textContent = branding.subtitle;
+                document.body.style.background = branding.bodyGradient;
+                document.title = branding.title + ' - Confidential Computing';
+            }
+        }
+        
         function initializePageConfig() {
             // Fetch SKR config to get company name and container type
             fetch('/skr/config')
@@ -2209,6 +2022,8 @@
                     // Update company name in encryption section
                     if (data.company_name) {
                         document.getElementById('encryptionCompanyName').textContent = data.company_name;
+                        // Apply company-specific branding
+                        applyCompanyBranding(data.company_name);
                     }
                     
                     // Store container type for later use
@@ -2533,123 +2348,11 @@
         setInterval(updatePageTimer, 1000);
         updatePageTimer(); // Initial call
         
-        // =====================================================
-        // Snooper Auto-Refresh Functionality
-        // =====================================================
-        
-        var snooperRefreshInterval = null;
-        var SNOOPER_REFRESH_SECONDS = 5;
-        var consolidatedBlobName = 'consolidated-records.json'; // Default, will be updated from /storage/config
-        
-        function initializeSnooperMode() {
-            // Show snooper-specific elements
-            document.getElementById('snooperExplainer').style.display = 'block';
-            document.getElementById('autoRefreshIndicator').style.display = 'block';
-            document.getElementById('snooperRecordsView').style.display = 'block';
-            document.getElementById('refreshInterval').textContent = SNOOPER_REFRESH_SECONDS;
-            
-            // Update the blob name in the header
-            document.getElementById('snooperBlobName').textContent = consolidatedBlobName;
-            
-            // Open the blob storage section by default for snooper
-            document.getElementById('blobStorageSection').setAttribute('open', '');
-            
-            // Start auto-refresh
-            refreshSnooperRecords();
-            snooperRefreshInterval = setInterval(refreshSnooperRecords, SNOOPER_REFRESH_SECONDS * 1000);
-            
-            console.log('Snooper mode activated - auto-refreshing every ' + SNOOPER_REFRESH_SECONDS + ' seconds');
-        }
-        
-        function refreshSnooperRecords() {
-            // Update last refresh time
-            var now = new Date();
-            var timeStr = String(now.getHours()).padStart(2, '0') + ':' + 
-                          String(now.getMinutes()).padStart(2, '0') + ':' + 
-                          String(now.getSeconds()).padStart(2, '0');
-            document.getElementById('lastRefreshTime').textContent = timeStr;
-            
-            // Fetch consolidated records using dynamic blob name
-            fetch('/storage/download/' + encodeURIComponent(consolidatedBlobName))
-                .then(response => response.json())
-                .then(data => {
-                    renderSnooperRecordsTable(data);
-                })
-                .catch(error => {
-                    document.getElementById('snooperRecordsTable').innerHTML = 
-                        '<p style="color: #ff6b6b;">Error fetching records: ' + escapeHtml(error.message) + '</p>';
-                });
-        }
-        
-        function renderSnooperRecordsTable(data) {
-            var tableDiv = document.getElementById('snooperRecordsTable');
-            
-            if (data.status !== 'success') {
-                tableDiv.innerHTML = '<p style="color: #ffc107;"><em>&#128269; No ' + escapeHtml(consolidatedBlobName) + ' found yet. Companies need to populate their data first.</em></p>';
-                return;
-            }
-            
-            var records;
-            try {
-                records = JSON.parse(data.content);
-                if (!Array.isArray(records)) {
-                    records = [records];
-                }
-            } catch (e) {
-                tableDiv.innerHTML = '<p style="color: #ff6b6b;">Could not parse records: ' + escapeHtml(e.message) + '</p>';
-                return;
-            }
-            
-            if (records.length === 0) {
-                tableDiv.innerHTML = '<p style="color: #ffc107;"><em>No records found in file.</em></p>';
-                return;
-            }
-            
-            var html = '<p style="color: #28a745; margin-bottom: 15px;">&#10004; Successfully intercepted <strong>' + records.length + '</strong> encrypted records!</p>';
-            
-            html += '<table style="width: 100%; border-collapse: collapse; color: #f8f8f2;">';
-            html += '<thead><tr style="background: #343a40;">';
-            html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dc3545;">#</th>';
-            html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dc3545;">Name (Encrypted)</th>';
-            html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dc3545;">Phone (Encrypted)</th>';
-            html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #dc3545;">Timestamp</th>';
-            html += '</tr></thead><tbody>';
-            
-            records.forEach(function(record, index) {
-                html += '<tr style="border-bottom: 1px solid #495057;">';
-                html += '<td style="padding: 10px;">' + (index + 1) + '</td>';
-                html += '<td style="padding: 10px; font-family: monospace; font-size: 0.75em; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="' + escapeHtml(record.name_encrypted || '') + '">';
-                html += '<span style="color: #ff6b6b;">&#128274;</span> ' + truncateText(record.name_encrypted || 'null', 30);
-                html += '</td>';
-                html += '<td style="padding: 10px; font-family: monospace; font-size: 0.75em; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="' + escapeHtml(record.phone_encrypted || '') + '">';
-                html += '<span style="color: #ff6b6b;">&#128274;</span> ' + truncateText(record.phone_encrypted || 'null', 30);
-                html += '</td>';
-                html += '<td style="padding: 10px; font-size: 0.8em; color: #adb5bd;">' + escapeHtml(record.timestamp || 'N/A') + '</td>';
-                html += '</tr>';
-            });
-            
-            html += '</tbody></table>';
-            
-            html += '<div style="margin-top: 15px; padding: 10px; background: #dc3545; border-radius: 6px;">';
-            html += '<p style="color: white; margin: 0; text-align: center;"><strong>&#128683; No access to keys to decrypt data</strong> - This snooper cannot access the SKR keys needed to reveal the plaintext!</p>';
-            html += '</div>';
-            
-            tableDiv.innerHTML = html;
-        }
-        
-        // Load storage config on page load
+        // Page initialization
         document.addEventListener('DOMContentLoaded', function() {
             initializePageConfig();
-            loadStorageConfig();
             // Check company data access after a short delay (to allow SKR status to load)
             setTimeout(checkCompanyDataAccess, 1000);
-            
-            // Check if this is a snooper (non-confidential) container and activate snooper mode
-            setTimeout(function() {
-                if (!isConfidentialContainer) {
-                    initializeSnooperMode();
-                }
-            }, 1500);
             
             // Auto-populate from CSV when "Protect Data" section is expanded
             const companyDataSection = document.getElementById('companyDataSection');

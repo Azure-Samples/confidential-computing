@@ -2,6 +2,8 @@ from flask import Flask, jsonify, request, render_template
 import requests
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 app = Flask(__name__)
 
@@ -643,17 +645,39 @@ def get_generation(age):
     else:
         return 'Silent Generation'
 
-def decrypt_all_fields(record, key):
-    """Decrypt all encrypted fields in a record"""
+def decrypt_all_fields(record, key, cached_private_key=None):
+    """Decrypt all encrypted fields in a record using parallel decryption for better performance.
+    
+    RSA decryption releases the GIL when calling into OpenSSL, so threading provides
+    real speedup. With 10 fields per record, parallel decryption can be 3-5x faster.
+    
+    Performance optimizations:
+    1. Uses cached private key object if available (avoids key reconstruction overhead)
+    2. Parallel field decryption with thread pool (RSA releases GIL in OpenSSL)
+    3. Increased thread count to 8 to match higher CPU allocation
+    
+    Args:
+        record: The encrypted record dict
+        key: The JWK key data (used if no cached key)
+        cached_private_key: Pre-computed RSAPrivateKey object (faster path)
+    """
     decrypted = {}
     fields = ['name', 'phone', 'address', 'postal_code', 'city', 'country', 'age', 'salary', 'eye_color', 'favorite_color']
     
+    # Collect fields that need decryption
+    fields_to_decrypt = []
     for field in fields:
         encrypted_field = f'{field}_encrypted'
         if record.get(encrypted_field):
-            value, err = decrypt_data_with_key(record[encrypted_field], key)
+            fields_to_decrypt.append((field, record[encrypted_field]))
+        else:
+            decrypted[field] = None
+    
+    # If only a few fields, use sequential decryption (thread overhead not worth it)
+    if len(fields_to_decrypt) <= 2:
+        for field, encrypted_value in fields_to_decrypt:
+            value, err = decrypt_data_with_key(encrypted_value, key, cached_private_key)
             if not err:
-                # Convert numeric fields
                 if field in ['age', 'salary']:
                     try:
                         decrypted[field] = int(value)
@@ -663,10 +687,63 @@ def decrypt_all_fields(record, key):
                     decrypted[field] = value
             else:
                 decrypted[field] = None
-        else:
-            decrypted[field] = None
+        return decrypted
+    
+    # Use thread pool for parallel decryption (RSA releases GIL in OpenSSL)
+    def decrypt_field(field_data):
+        field, encrypted_value = field_data
+        value, err = decrypt_data_with_key(encrypted_value, key, cached_private_key)
+        if not err:
+            if field in ['age', 'salary']:
+                try:
+                    return (field, int(value))
+                except:
+                    return (field, value)
+            return (field, value)
+        return (field, None)
+    
+    # Use 8 threads - optimized for 4 CPU cores (2 threads per core is typical for I/O-bound work)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(decrypt_field, fd): fd[0] for fd in fields_to_decrypt}
+        for future in as_completed(futures):
+            field, value = future.result()
+            decrypted[field] = value
     
     return decrypted
+
+def decrypt_records_batch(records, key, source_name, batch_size=10, cached_private_key=None):
+    """Decrypt multiple records in parallel batches for better throughput.
+    
+    Uses a thread pool to decrypt multiple records simultaneously.
+    RSA decryption releases the GIL, so threading provides real speedup.
+    
+    Args:
+        records: List of encrypted records
+        key: The decryption key (JWK format)
+        source_name: 'Contoso' or 'Fabrikam' to tag records
+        batch_size: Number of records to process in parallel (default 10)
+        cached_private_key: Pre-computed RSAPrivateKey object (faster path)
+    
+    Returns:
+        List of decrypted records with source and generation tags
+    """
+    def decrypt_single_record(record):
+        decrypted = decrypt_all_fields(record, key, cached_private_key)
+        decrypted['source'] = source_name
+        if decrypted.get('age'):
+            decrypted['generation'] = get_generation(decrypted['age'])
+        return decrypted
+    
+    # Use thread pool for record-level parallelism
+    # Combined with field-level parallelism in decrypt_all_fields, this provides
+    # significant speedup without reducing security
+    decrypted_records = []
+    with ThreadPoolExecutor(max_workers=batch_size) as executor:
+        futures = [executor.submit(decrypt_single_record, record) for record in records]
+        for future in as_completed(futures):
+            decrypted_records.append(future.result())
+    
+    return decrypted_records
 
 @app.route('/partner/analyze', methods=['POST'])
 def partner_analyze():
@@ -885,9 +962,11 @@ def partner_analyze_stream():
         contoso_url = os.environ.get('PARTNER_CONTOSO_URL', '')
         fabrikam_url = os.environ.get('PARTNER_FABRIKAM_URL', '')
         
-        # Get stored partner keys
+        # Get stored partner keys and cached private key objects for faster decryption
         contoso_key = get_partner_key('contoso')
         fabrikam_key = get_partner_key('fabrikam')
+        contoso_cached_key = get_cached_private_key('contoso')
+        fabrikam_cached_key = get_cached_private_key('fabrikam')
         
         all_records = []
         contoso_records = []
@@ -942,41 +1021,44 @@ def partner_analyze_stream():
             yield f"data: {json.dumps({'type': 'error', 'message': 'No encrypted records found', 'errors': errors})}\n\n"
             return
         
-        yield f"data: {json.dumps({'type': 'status', 'phase': 'decrypt', 'message': f'Starting decryption of {total_encrypted} records...', 'total': total_encrypted})}\n\n"
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'decrypt', 'message': f'Starting parallel decryption of {total_encrypted} records...', 'total': total_encrypted})}\n\n"
         
-        # Phase 2: Decrypt Contoso records with progress
-        for i, record in enumerate(contoso_encrypted):
-            decrypted = decrypt_all_fields(record, contoso_key)
-            decrypted['source'] = 'Contoso'
-            if decrypted.get('age'):
-                decrypted['generation'] = get_generation(decrypted['age'])
-            contoso_records.append(decrypted)
-            all_records.append(decrypted)
-            decrypted_count += 1
+        # Phase 2: Decrypt Contoso records with parallel processing
+        # Process in batches for progress reporting while maintaining parallelism
+        # Increased batch size to 20 to better utilize 4 CPUs
+        batch_size = 20
+        for batch_start in range(0, len(contoso_encrypted), batch_size):
+            batch_end = min(batch_start + batch_size, len(contoso_encrypted))
+            batch = contoso_encrypted[batch_start:batch_end]
             
-            # Send progress update every 5 records or on last record
-            if (i + 1) % 5 == 0 or i == len(contoso_encrypted) - 1:
-                elapsed = time.time() - start_time
-                rate = decrypted_count / elapsed if elapsed > 0 else 0
-                remaining = (total_encrypted - decrypted_count) / rate if rate > 0 else 0
-                yield f"data: {json.dumps({'type': 'progress', 'decrypted': decrypted_count, 'total': total_encrypted, 'percent': round(100 * decrypted_count / total_encrypted, 1), 'elapsed': round(elapsed, 1), 'remaining': round(remaining, 1), 'current_partner': 'Contoso'})}\n\n"
+            # Decrypt batch in parallel using cached private key for speed
+            batch_decrypted = decrypt_records_batch(batch, contoso_key, 'Contoso', batch_size=len(batch), cached_private_key=contoso_cached_key)
+            contoso_records.extend(batch_decrypted)
+            all_records.extend(batch_decrypted)
+            decrypted_count += len(batch_decrypted)
+            
+            # Send progress update after each batch
+            elapsed = time.time() - start_time
+            rate = decrypted_count / elapsed if elapsed > 0 else 0
+            remaining = (total_encrypted - decrypted_count) / rate if rate > 0 else 0
+            yield f"data: {json.dumps({'type': 'progress', 'decrypted': decrypted_count, 'total': total_encrypted, 'percent': round(100 * decrypted_count / total_encrypted, 1), 'elapsed': round(elapsed, 1), 'remaining': round(remaining, 1), 'current_partner': 'Contoso'})}\n\n"
         
-        # Phase 3: Decrypt Fabrikam records with progress
-        for i, record in enumerate(fabrikam_encrypted):
-            decrypted = decrypt_all_fields(record, fabrikam_key)
-            decrypted['source'] = 'Fabrikam'
-            if decrypted.get('age'):
-                decrypted['generation'] = get_generation(decrypted['age'])
-            fabrikam_records.append(decrypted)
-            all_records.append(decrypted)
-            decrypted_count += 1
+        # Phase 3: Decrypt Fabrikam records with parallel processing
+        for batch_start in range(0, len(fabrikam_encrypted), batch_size):
+            batch_end = min(batch_start + batch_size, len(fabrikam_encrypted))
+            batch = fabrikam_encrypted[batch_start:batch_end]
             
-            # Send progress update every 5 records or on last record
-            if (i + 1) % 5 == 0 or i == len(fabrikam_encrypted) - 1:
-                elapsed = time.time() - start_time
-                rate = decrypted_count / elapsed if elapsed > 0 else 0
-                remaining = (total_encrypted - decrypted_count) / rate if rate > 0 else 0
-                yield f"data: {json.dumps({'type': 'progress', 'decrypted': decrypted_count, 'total': total_encrypted, 'percent': round(100 * decrypted_count / total_encrypted, 1), 'elapsed': round(elapsed, 1), 'remaining': round(remaining, 1), 'current_partner': 'Fabrikam'})}\n\n"
+            # Decrypt batch in parallel using cached private key for speed
+            batch_decrypted = decrypt_records_batch(batch, fabrikam_key, 'Fabrikam', batch_size=len(batch), cached_private_key=fabrikam_cached_key)
+            fabrikam_records.extend(batch_decrypted)
+            all_records.extend(batch_decrypted)
+            decrypted_count += len(batch_decrypted)
+            
+            # Send progress update after each batch
+            elapsed = time.time() - start_time
+            rate = decrypted_count / elapsed if elapsed > 0 else 0
+            remaining = (total_encrypted - decrypted_count) / rate if rate > 0 else 0
+            yield f"data: {json.dumps({'type': 'progress', 'decrypted': decrypted_count, 'total': total_encrypted, 'percent': round(100 * decrypted_count / total_encrypted, 1), 'elapsed': round(elapsed, 1), 'remaining': round(remaining, 1), 'current_partner': 'Fabrikam'})}\n\n"
         
         # Phase 4: Compute analytics
         yield f"data: {json.dumps({'type': 'status', 'phase': 'analyze', 'message': 'Computing analytics...'})}\n\n"
@@ -1994,224 +2076,6 @@ def container_info():
     return jsonify(info)
 
 # ============================================================================
-# External Storage Access - Demonstrates data access from blob storage
-# ============================================================================
-
-# Configuration for the external storage account (created by Create-StorageAccount.ps1)
-# Connection string should be stored in environment variable AZURE_STORAGE_CONNECTION_STRING
-# or in a .env file (which is gitignored)
-EXTERNAL_STORAGE_ACCOUNT = "orangeappstorezspo861"
-EXTERNAL_CONTAINER_NAME = "privateappdata"
-EXTERNAL_BLOB_ENDPOINT = f"https://{EXTERNAL_STORAGE_ACCOUNT}.blob.core.windows.net"
-
-def get_consolidated_blob_name():
-    """Get the consolidated records blob name, unique per resource group deployment"""
-    resource_group = os.environ.get('RESOURCE_GROUP_NAME', '')
-    if resource_group:
-        return f"consolidated-records-{resource_group}.json"
-    return "consolidated-records.json"
-
-def get_storage_sas_token():
-    """Extract SAS token from connection string environment variable"""
-    conn_str = os.environ.get('AZURE_STORAGE_CONNECTION_STRING', '')
-    if not conn_str:
-        return None
-    # Parse the SAS token from connection string
-    # Format: ...;SharedAccessSignature=sv=...
-    if 'SharedAccessSignature=' in conn_str:
-        sas_part = conn_str.split('SharedAccessSignature=')[-1]
-        return sas_part
-    return None
-
-def get_sas_token_expiry():
-    """Parse the SAS token to extract expiry date (se parameter)"""
-    from urllib.parse import parse_qs
-    from datetime import datetime, timezone
-    
-    sas_token = get_storage_sas_token()
-    if not sas_token:
-        return None
-    
-    try:
-        # Parse the SAS token query parameters
-        params = parse_qs(sas_token)
-        
-        # 'se' is the signed expiry parameter
-        expiry_str = params.get('se', [None])[0]
-        if not expiry_str:
-            return None
-        
-        # Parse the ISO 8601 date format (e.g., 2026-02-10T00:00:00Z)
-        expiry_dt = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
-        now = datetime.now(timezone.utc)
-        
-        # Calculate days remaining
-        delta = expiry_dt - now
-        days_remaining = delta.days
-        
-        return {
-            'expiry_date': expiry_str,
-            'expiry_formatted': expiry_dt.strftime('%Y-%m-%d %H:%M:%S UTC'),
-            'days_remaining': days_remaining,
-            'is_expired': days_remaining < 0,
-            'is_expiring_soon': 0 <= days_remaining <= 7
-        }
-    except Exception as e:
-        return {'error': str(e)}
-
-def get_storage_url_with_sas(base_url):
-    """Append SAS token to URL if available"""
-    sas_token = get_storage_sas_token()
-    if sas_token:
-        separator = '&' if '?' in base_url else '?'
-        return f"{base_url}{separator}{sas_token}"
-    return base_url
-
-@app.route('/storage/config')
-def storage_config():
-    """Return the external storage configuration"""
-    has_sas = get_storage_sas_token() is not None
-    expiry_info = get_sas_token_expiry()
-    blob_name = get_consolidated_blob_name()
-    return jsonify({
-        'storage_account': EXTERNAL_STORAGE_ACCOUNT,
-        'container_name': EXTERNAL_CONTAINER_NAME,
-        'blob_endpoint': EXTERNAL_BLOB_ENDPOINT,
-        'container_url': f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}",
-        'consolidated_blob_name': blob_name,
-        'authenticated': has_sas,
-        'auth_method': 'SAS Token' if has_sas else 'Anonymous (public access only)',
-        'sas_expiry': expiry_info
-    })
-
-@app.route('/storage/list')
-def list_blobs():
-    """
-    List blobs in the external storage container.
-    Uses SAS token from environment variable if available.
-    """
-    try:
-        # Azure Blob Storage supports listing via REST API with restype=container&comp=list
-        base_url = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}?restype=container&comp=list"
-        list_url = get_storage_url_with_sas(base_url)
-        
-        response = requests.get(list_url, timeout=10)
-        
-        if response.status_code == 200:
-            # Parse the XML response
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(response.text)
-            
-            blobs = []
-            for blob in root.findall('.//Blob'):
-                blob_info = {
-                    'name': blob.find('Name').text if blob.find('Name') is not None else 'Unknown',
-                }
-                # Get properties if available
-                props = blob.find('Properties')
-                if props is not None:
-                    blob_info['size'] = props.find('Content-Length').text if props.find('Content-Length') is not None else '0'
-                    blob_info['content_type'] = props.find('Content-Type').text if props.find('Content-Type') is not None else 'unknown'
-                    blob_info['last_modified'] = props.find('Last-Modified').text if props.find('Last-Modified') is not None else 'unknown'
-                    blob_info['url'] = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}/{blob_info['name']}"
-                blobs.append(blob_info)
-            
-            return jsonify({
-                'status': 'success',
-                'storage_account': EXTERNAL_STORAGE_ACCOUNT,
-                'container': EXTERNAL_CONTAINER_NAME,
-                'blob_count': len(blobs),
-                'blobs': blobs,
-                'message': 'Successfully listed blobs from external storage',
-                'security_note': 'Data accessed using SAS token authentication' if get_storage_sas_token() else 'This data is publicly accessible - no attestation required!',
-                'authenticated': get_storage_sas_token() is not None
-            })
-        elif response.status_code == 404:
-            return jsonify({
-                'status': 'error',
-                'message': 'Container not found. The storage account or container may not exist yet.',
-                'storage_account': EXTERNAL_STORAGE_ACCOUNT,
-                'container': EXTERNAL_CONTAINER_NAME,
-                'hint': 'Run Create-StorageAccount.ps1 to create the storage account and container.'
-            }), 404
-        elif response.status_code == 403:
-            return jsonify({
-                'status': 'error',
-                'message': 'Access denied. The container may not have public access enabled.',
-                'storage_account': EXTERNAL_STORAGE_ACCOUNT,
-                'container': EXTERNAL_CONTAINER_NAME
-            }), 403
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Unexpected response from storage: HTTP {response.status_code}',
-                'response_text': response.text[:500]
-            }), response.status_code
-            
-    except requests.exceptions.ConnectionError as e:
-        return jsonify({
-            'status': 'error',
-            'message': 'Cannot connect to storage account. Network may be unavailable.',
-            'error': str(e)
-        }), 503
-    except requests.exceptions.Timeout:
-        return jsonify({
-            'status': 'error',
-            'message': 'Request to storage account timed out.'
-        }), 504
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e),
-            'exception_type': type(e).__name__
-        }), 500
-
-@app.route('/storage/download/<path:blob_name>')
-def download_blob(blob_name):
-    """
-    Download a specific blob and return its contents.
-    Uses SAS token from environment variable if available.
-    """
-    try:
-        base_url = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}/{blob_name}"
-        blob_url = get_storage_url_with_sas(base_url)
-        response = requests.get(blob_url, timeout=30)
-        
-        if response.status_code == 200:
-            # Try to decode as text, fallback to base64 for binary
-            try:
-                content = response.text
-                is_text = True
-            except:
-                import base64
-                content = base64.b64encode(response.content).decode('utf-8')
-                is_text = False
-            
-            return jsonify({
-                'status': 'success',
-                'blob_name': blob_name,
-                'content': content,
-                'is_text': is_text,
-                'size': len(response.content),
-                'content_type': response.headers.get('Content-Type', 'unknown'),
-                'security_note': 'Data accessed using SAS token authentication' if get_storage_sas_token() else 'This data was accessed WITHOUT attestation - it is publicly readable!',
-                'authenticated': get_storage_sas_token() is not None
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Failed to download blob: HTTP {response.status_code}',
-                'blob_name': blob_name
-            }), response.status_code
-            
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e),
-            'blob_name': blob_name
-        }), 500
-
-# ============================================================================
 # Company Data Management - Encrypted data storage per company
 # ============================================================================
 
@@ -2280,9 +2144,49 @@ def encrypt_data_with_key(plaintext):
     
     return base64.b64encode(ciphertext).decode('utf-8'), None
 
-def decrypt_data_with_key(ciphertext_b64, key_data=None):
-    """Decrypt data using the released key's private components"""
+def decrypt_with_cached_key(ciphertext_b64, private_key):
+    """Fast decryption using a pre-computed RSA private key object.
+    
+    This is significantly faster than decrypt_data_with_key because it skips
+    the expensive key reconstruction step (parsing large base64 integers and
+    building the RSAPrivateKey object).
+    
+    Args:
+        ciphertext_b64: Base64-encoded ciphertext
+        private_key: A cryptography RSAPrivateKey object (from cache)
+    
+    Returns:
+        (plaintext, None) on success, (None, error_message) on failure
+    """
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import hashes
+    import base64
+    
+    try:
+        ciphertext = base64.b64decode(ciphertext_b64)
+        plaintext_bytes = private_key.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        return plaintext_bytes.decode('utf-8'), None
+    except Exception as e:
+        return None, f"Decryption failed: {str(e)}"
+
+def decrypt_data_with_key(ciphertext_b64, key_data=None, cached_private_key=None):
+    """Decrypt data using the released key's private components.
+    
+    If cached_private_key is provided, uses the fast path (skips key reconstruction).
+    Otherwise, reconstructs the key from JWK components (slower but still works).
+    """
     global _released_key
+    
+    # Fast path: use cached private key if available
+    if cached_private_key is not None:
+        return decrypt_with_cached_key(ciphertext_b64, cached_private_key)
     
     from cryptography.hazmat.primitives.asymmetric import padding
     from cryptography.hazmat.primitives import hashes
@@ -2368,16 +2272,77 @@ def decrypt_data_with_key(ciphertext_b64, key_data=None):
 
 # Store partner keys for Woodgrove's cross-company analytics
 _partner_keys = {}  # {'contoso': key_data, 'fabrikam': key_data}
+_partner_private_key_cache = {}  # {'contoso': RSAPrivateKey, 'fabrikam': RSAPrivateKey} - cached key objects
+
+def _build_private_key(key_data):
+    """Build a cryptography RSAPrivateKey object from JWK key data.
+    
+    This is expensive (involves parsing large integers), so we cache the result.
+    """
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateNumbers, RSAPublicNumbers
+    import base64
+    
+    if isinstance(key_data, dict) and 'key' in key_data:
+        key_data = key_data['key']
+    
+    n_b64 = key_data.get('n', '')
+    e_b64 = key_data.get('e', '')
+    d_b64 = key_data.get('d', '')
+    p_b64 = key_data.get('p', '')
+    q_b64 = key_data.get('q', '')
+    dp_b64 = key_data.get('dp', '')
+    dq_b64 = key_data.get('dq', '')
+    qi_b64 = key_data.get('qi', '')
+    
+    if not all([n_b64, e_b64, d_b64, p_b64, q_b64]):
+        return None
+    
+    def b64url_to_int(b64url):
+        padding_needed = 4 - len(b64url) % 4
+        if padding_needed != 4:
+            b64url += '=' * padding_needed
+        b64 = b64url.replace('-', '+').replace('_', '/')
+        data = base64.b64decode(b64)
+        return int.from_bytes(data, byteorder='big')
+    
+    n = b64url_to_int(n_b64)
+    e = b64url_to_int(e_b64)
+    d = b64url_to_int(d_b64)
+    p = b64url_to_int(p_b64)
+    q = b64url_to_int(q_b64)
+    
+    dp = b64url_to_int(dp_b64) if dp_b64 else d % (p - 1)
+    dq = b64url_to_int(dq_b64) if dq_b64 else d % (q - 1)
+    qi = b64url_to_int(qi_b64) if qi_b64 else pow(q, -1, p)
+    
+    public_numbers = RSAPublicNumbers(e, n)
+    private_numbers = RSAPrivateNumbers(p, q, d, dp, dq, qi, public_numbers)
+    return private_numbers.private_key(default_backend())
 
 def store_partner_key(partner_name, key_data):
-    """Store a partner's released key for later use"""
-    global _partner_keys
-    _partner_keys[partner_name.lower()] = key_data
+    """Store a partner's released key for later use and pre-compute the private key object"""
+    global _partner_keys, _partner_private_key_cache
+    partner_lower = partner_name.lower()
+    _partner_keys[partner_lower] = key_data
+    # Pre-compute and cache the private key object for faster decryption
+    try:
+        private_key = _build_private_key(key_data)
+        if private_key:
+            _partner_private_key_cache[partner_lower] = private_key
+            print(f"[PERF] Cached private key object for {partner_name}")
+    except Exception as e:
+        print(f"[PERF] Could not cache private key for {partner_name}: {e}")
 
 def get_partner_key(partner_name):
     """Get a stored partner key"""
     global _partner_keys
     return _partner_keys.get(partner_name.lower())
+
+def get_cached_private_key(partner_name):
+    """Get a cached private key object for faster decryption"""
+    global _partner_private_key_cache
+    return _partner_private_key_cache.get(partner_name.lower())
 
 @app.route('/company/info')
 def company_info():
@@ -2394,7 +2359,7 @@ def company_info():
 @app.route('/company/save', methods=['POST'])
 def save_company_data():
     """
-    Save encrypted data to company-specific blob storage file.
+    Save encrypted data to company-specific local storage file.
     Appends to existing data or creates new file.
     """
     global _released_key
@@ -2443,60 +2408,42 @@ def save_company_data():
             'phone_encrypted': encrypted_phone
         }
         
-        # Read existing data from consolidated file (if exists)
-        blob_name = get_consolidated_blob_name()
-        existing_data = []
+        # Use local storage for encrypted data
+        local_data_dir = '/app/encrypted-data'
+        os.makedirs(local_data_dir, exist_ok=True)
+        local_file = f'{local_data_dir}/{company}-encrypted.json'
         
+        # Read existing data from local file (if exists)
+        existing_data = []
         try:
-            base_url = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}/{blob_name}"
-            read_url = get_storage_url_with_sas(base_url)
-            response = requests.get(read_url, timeout=10)
-            if response.status_code == 200:
-                existing_data = response.json()
-                if not isinstance(existing_data, list):
-                    existing_data = [existing_data]
+            if os.path.exists(local_file):
+                with open(local_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    if not isinstance(existing_data, list):
+                        existing_data = [existing_data]
         except:
             existing_data = []
         
         # Append new record
         existing_data.append(new_record)
         
-        # Upload to blob storage
-        sas_token = get_storage_sas_token()
-        if not sas_token:
-            return jsonify({
-                'status': 'error',
-                'message': 'No storage SAS token configured. Cannot save data.'
-            }), 500
-        
-        upload_url = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}/{blob_name}?{sas_token}"
-        headers = {
-            'Content-Type': 'application/json',
-            'x-ms-blob-type': 'BlockBlob'
-        }
-        
-        upload_response = requests.put(
-            upload_url,
-            data=json.dumps(existing_data, indent=2),
-            headers=headers,
-            timeout=30
-        )
-        
-        if upload_response.status_code in [200, 201]:
+        # Write to local file
+        try:
+            with open(local_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, indent=2)
+            
             return jsonify({
                 'status': 'success',
-                'message': f'Data saved to {blob_name}',
+                'message': f'Data saved to {local_file}',
                 'company': company,
-                'blob_name': blob_name,
                 'record_count': len(existing_data),
                 'note': 'Data is encrypted with company-specific key. Only this company can decrypt it.'
             })
-        else:
+        except Exception as write_err:
             return jsonify({
                 'status': 'error',
-                'message': f'Failed to upload: HTTP {upload_response.status_code}',
-                'response': upload_response.text[:500]
-            }), upload_response.status_code
+                'message': f'Failed to write local file: {str(write_err)}'
+            }), 500
             
     except Exception as e:
         return jsonify({
