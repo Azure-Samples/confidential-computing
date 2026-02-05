@@ -3,6 +3,10 @@
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
 **Last Updated:** February 2026
 
+## 🤖 AI-Generated Content
+
+> **Note:** This entire multi-party demonstration was **created using AI-assisted development** with GitHub Copilot powered by Claude. This showcases the capabilities of modern AI models for developing complex security-focused applications. While functional, AI-generated code should always be reviewed by qualified security professionals before use in production scenarios.
+
 This demonstration shows how Azure Confidential Containers enable secure multi-party computation where each party's data remains protected, even from other parties and infrastructure operators.
 
 ## Architecture Overview

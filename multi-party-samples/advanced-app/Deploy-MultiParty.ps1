@@ -1008,7 +1008,7 @@ function Invoke-Deploy {
 </html>
 "@
     
-    $multiPartyHtmlPath = Join-Path $PSScriptRoot "multiparty-view.html"
+    $multiPartyHtmlPath = Join-Path $PSScriptRoot "multiparty-view-$resource_group.html"
     $multiPartyHtml | Out-File -FilePath $multiPartyHtmlPath -Encoding UTF8
     
     if (-not $SkipBrowser) {
@@ -1041,7 +1041,7 @@ function Invoke-Deploy {
     Remove-Item -Path "deployment-template-fabrikam.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "deployment-template-woodgrove.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "deployment-template-snooper.json" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "multiparty-view.html" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "multiparty-view-$resource_group.html" -Force -ErrorAction SilentlyContinue
     
     Write-Success "All containers deleted. ACR and Key Vault preserved."
     Write-Host "Run -Cleanup to delete all resources including ACR and Key Vault."

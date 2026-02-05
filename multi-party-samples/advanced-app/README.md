@@ -4,7 +4,15 @@
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
 **Last Updated:** February 2026
 
+## 🤖 AI-Generated Content
+
+> **Note:** This entire multi-party demonstration was **created using AI-assisted development** with GitHub Copilot powered by Claude. This showcases the capabilities of modern AI models for developing complex security-focused applications. While functional, AI-generated code should always be reviewed by qualified security professionals before use in production scenarios.
+
 A demonstration of Azure Confidential Container Instances (ACI) with AMD SEV-SNP hardware protection, showing how multiple parties can securely collaborate while protecting their data from each other and from infrastructure operators.
+
+## High-Level Topology
+
+![Multi-Party Topology](MultiPartyTopology.svg)
 
 ## Overview
 
@@ -25,6 +33,8 @@ This project deploys **four containers** running identical code to demonstrate m
 - **Remote Attestation** - Cryptographic proof via Microsoft Azure Attestation (MAA)
 - **Secure Key Release (SKR)** - Keys only released to attested confidential containers
 - **Cross-Company Protection** - Contoso cannot access Fabrikam's key, and vice versa
+- **Real-time Progress** - SSE streaming with progress bars and time estimates
+- **Demographics Analysis** - Top 10 countries with top 3 cities, generational breakdowns, salary averages
 - **Attacker Visualization** - Snooper container shows what an attacker sees (encrypted data only)
 - **Interactive Web UI** - Real-time demonstration of attestation and encryption
 - **Unique Per-Deployment Storage** - Each deployment uses `consolidated-records-{resource_group}.json`
@@ -273,12 +283,13 @@ This ensures:
 | `app.py` | Flask application with all API endpoints |
 | `Dockerfile` | Multi-stage build with SKR sidecar |
 | `templates/index.html` | Interactive web UI |
-| `contoso-data.csv` | Sample data for Contoso (9 records) |
-| `fabrikam-data.csv` | Sample data for Fabrikam (9 records) |
+| `contoso-data.csv` | Sample data for Contoso (50 records) |
+| `fabrikam-data.csv` | Sample data for Fabrikam (50 records) |
 | `deployment-template-original.json` | ARM template for Confidential SKU |
 | `deployment-template-woodgrove-base.json` | ARM template for Woodgrove with partner env vars |
 | `deployment-template-standard.json` | ARM template for Standard SKU |
-| `MultiPartyArchitecture.svg` | High-level architecture diagram |
+| `MultiPartyTopology.svg` | High-level topology diagram |
+| `MultiPartyArchitecture.svg` | Detailed architecture diagram |
 | `DataFlowDiagram.svg` | Encrypted data flow diagram showing TEE decryption |
 
 ## API Endpoints
@@ -346,6 +357,19 @@ SKR sidecar not available
 - [Microsoft Azure Attestation](https://learn.microsoft.com/en-us/azure/attestation/overview)
 - [AMD SEV-SNP](https://www.amd.com/en/developer/sev.html)
 - [az confcom Extension](https://learn.microsoft.com/en-us/cli/azure/confcom)
+
+## ⚠️ Disclaimer
+
+This code is provided for **educational and demonstration purposes only**.
+
+- **No Warranty:** Provided "AS IS" without warranty of any kind, express or implied
+- **Not Production-Ready:** Requires thorough review and modification before production use
+- **User Responsibility:** Users are solely responsible for:
+  - Security review of all code before deployment
+  - Compliance with organizational security policies
+  - Validating cryptographic implementations
+  - Proper key management and secret handling
+  - Any data processed using these samples
 
 ## License
 
