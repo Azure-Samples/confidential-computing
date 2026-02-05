@@ -627,15 +627,63 @@ def skr_release_partner_key():
             'message': str(e)
         }), 500
 
+def get_generation(age):
+    """Determine generation based on age (as of 2026)"""
+    birth_year = 2026 - age
+    if birth_year >= 2013:
+        return 'Gen Alpha'
+    elif birth_year >= 1997:
+        return 'Gen Z'
+    elif birth_year >= 1981:
+        return 'Millennials'
+    elif birth_year >= 1965:
+        return 'Gen X'
+    elif birth_year >= 1946:
+        return 'Baby Boomers'
+    else:
+        return 'Silent Generation'
+
+def decrypt_all_fields(record, key):
+    """Decrypt all encrypted fields in a record"""
+    decrypted = {}
+    fields = ['name', 'phone', 'address', 'postal_code', 'city', 'country', 'age', 'salary', 'eye_color', 'favorite_color']
+    
+    for field in fields:
+        encrypted_field = f'{field}_encrypted'
+        if record.get(encrypted_field):
+            value, err = decrypt_data_with_key(record[encrypted_field], key)
+            if not err:
+                # Convert numeric fields
+                if field in ['age', 'salary']:
+                    try:
+                        decrypted[field] = int(value)
+                    except:
+                        decrypted[field] = value
+                else:
+                    decrypted[field] = value
+            else:
+                decrypted[field] = None
+        else:
+            decrypted[field] = None
+    
+    return decrypted
+
 @app.route('/partner/analyze', methods=['POST'])
 def partner_analyze():
     """
     Fetch encrypted data from partner containers (Contoso and Fabrikam),
-    decrypt using the released partner keys, and return combined demographic analysis.
+    decrypt ALL fields using the released partner keys, and return comprehensive demographic analysis.
     
-    This is the real implementation - it fetches encrypted CSVs from partner containers
-    and decrypts them using the keys released via SKR (Secure Key Release).
+    Analytics include:
+    - Top 10 countries with top 3 cities in each
+    - Generation breakdown (Gen Alpha, Gen Z, Millennials, Gen X, Baby Boomers)
+    - Staff count per company
+    - Average salary per company
+    - Eye color distribution (most and least common)
+    - Top 3 favorite colors
     """
+    from collections import Counter, defaultdict
+    
     try:
         our_key_name = os.environ.get('SKR_KEY_NAME', '')
         
@@ -657,38 +705,26 @@ def partner_analyze():
         fabrikam_key = get_partner_key('fabrikam')
         
         all_records = []
-        contoso_count = 0
-        fabrikam_count = 0
+        contoso_records = []
+        fabrikam_records = []
         errors = []
         
         # Process Contoso data
         if contoso_key:
             if contoso_url:
                 try:
-                    # Fetch encrypted data from Contoso container
                     response = requests.get(f'{contoso_url}/company/list', timeout=30)
                     if response.status_code == 200:
                         contoso_data = response.json()
                         encrypted_records = contoso_data.get('records', [])
                         
                         for record in encrypted_records:
-                            decrypted_record = {'source': 'Contoso'}
-                            
-                            # Decrypt name and phone fields
-                            if record.get('name_encrypted'):
-                                name, err = decrypt_data_with_key(record['name_encrypted'], contoso_key)
-                                decrypted_record['name'] = name if not err else f'[Decryption Error: {err}]'
-                            else:
-                                decrypted_record['name'] = '[No encrypted name]'
-                            
-                            if record.get('phone_encrypted'):
-                                phone, err = decrypt_data_with_key(record['phone_encrypted'], contoso_key)
-                                decrypted_record['phone'] = phone if not err else '[Decryption Error]'
-                            else:
-                                decrypted_record['phone'] = '[No encrypted phone]'
-                            
-                            all_records.append(decrypted_record)
-                            contoso_count += 1
+                            decrypted = decrypt_all_fields(record, contoso_key)
+                            decrypted['source'] = 'Contoso'
+                            if decrypted.get('age'):
+                                decrypted['generation'] = get_generation(decrypted['age'])
+                            contoso_records.append(decrypted)
+                            all_records.append(decrypted)
                     else:
                         errors.append(f'Contoso: HTTP {response.status_code}')
                 except requests.exceptions.RequestException as e:
@@ -702,30 +738,18 @@ def partner_analyze():
         if fabrikam_key:
             if fabrikam_url:
                 try:
-                    # Fetch encrypted data from Fabrikam container
                     response = requests.get(f'{fabrikam_url}/company/list', timeout=30)
                     if response.status_code == 200:
                         fabrikam_data = response.json()
                         encrypted_records = fabrikam_data.get('records', [])
                         
                         for record in encrypted_records:
-                            decrypted_record = {'source': 'Fabrikam'}
-                            
-                            # Decrypt name and phone fields
-                            if record.get('name_encrypted'):
-                                name, err = decrypt_data_with_key(record['name_encrypted'], fabrikam_key)
-                                decrypted_record['name'] = name if not err else f'[Decryption Error: {err}]'
-                            else:
-                                decrypted_record['name'] = '[No encrypted name]'
-                            
-                            if record.get('phone_encrypted'):
-                                phone, err = decrypt_data_with_key(record['phone_encrypted'], fabrikam_key)
-                                decrypted_record['phone'] = phone if not err else '[Decryption Error]'
-                            else:
-                                decrypted_record['phone'] = '[No encrypted phone]'
-                            
-                            all_records.append(decrypted_record)
-                            fabrikam_count += 1
+                            decrypted = decrypt_all_fields(record, fabrikam_key)
+                            decrypted['source'] = 'Fabrikam'
+                            if decrypted.get('age'):
+                                decrypted['generation'] = get_generation(decrypted['age'])
+                            fabrikam_records.append(decrypted)
+                            all_records.append(decrypted)
                     else:
                         errors.append(f'Fabrikam: HTTP {response.status_code}')
                 except requests.exceptions.RequestException as e:
@@ -735,25 +759,298 @@ def partner_analyze():
         else:
             errors.append('Fabrikam: Key not released')
         
-        # Calculate unique names
-        unique_names = len(set(r.get('name', '') for r in all_records if not r.get('name', '').startswith('[')))
+        # ===== COMPUTE ANALYTICS =====
+        
+        # 1. Top 10 countries with top 3 cities in each
+        country_city_data = defaultdict(list)
+        for r in all_records:
+            if r.get('country') and r.get('city'):
+                country_city_data[r['country']].append(r['city'])
+        
+        country_counts = Counter(r.get('country') for r in all_records if r.get('country'))
+        top_10_countries = []
+        for country, count in country_counts.most_common(10):
+            city_counts = Counter(country_city_data[country])
+            top_3_cities = [{'city': city, 'count': cnt} for city, cnt in city_counts.most_common(3)]
+            top_10_countries.append({
+                'country': country,
+                'count': count,
+                'top_cities': top_3_cities
+            })
+        
+        # 2. Generation breakdown
+        generation_counts = Counter(r.get('generation') for r in all_records if r.get('generation'))
+        generations = []
+        gen_order = ['Gen Alpha', 'Gen Z', 'Millennials', 'Gen X', 'Baby Boomers', 'Silent Generation']
+        for gen in gen_order:
+            if gen in generation_counts:
+                generations.append({'generation': gen, 'count': generation_counts[gen]})
+        
+        # 3. Staff count per company
+        company_staff = {
+            'Contoso': len(contoso_records),
+            'Fabrikam': len(fabrikam_records),
+            'Total': len(all_records)
+        }
+        
+        # 4. Average salary per company
+        contoso_salaries = [r['salary'] for r in contoso_records if r.get('salary')]
+        fabrikam_salaries = [r['salary'] for r in fabrikam_records if r.get('salary')]
+        all_salaries = contoso_salaries + fabrikam_salaries
+        
+        avg_salaries = {
+            'Contoso': round(sum(contoso_salaries) / len(contoso_salaries)) if contoso_salaries else 0,
+            'Fabrikam': round(sum(fabrikam_salaries) / len(fabrikam_salaries)) if fabrikam_salaries else 0,
+            'Combined': round(sum(all_salaries) / len(all_salaries)) if all_salaries else 0
+        }
+        
+        # 5. Eye color distribution
+        eye_colors = Counter(r.get('eye_color') for r in all_records if r.get('eye_color'))
+        eye_color_list = eye_colors.most_common()
+        most_common_eye = eye_color_list[0] if eye_color_list else ('N/A', 0)
+        least_common_eye = eye_color_list[-1] if eye_color_list else ('N/A', 0)
+        
+        # 6. Top 3 favorite colors
+        fav_colors = Counter(r.get('favorite_color') for r in all_records if r.get('favorite_color'))
+        top_3_fav_colors = [{'color': color, 'count': cnt} for color, cnt in fav_colors.most_common(3)]
+        
+        # Build sample records for display (first 10 from each)
+        sample_records = []
+        for r in contoso_records[:10]:
+            sample_records.append({
+                'source': 'Contoso',
+                'name': r.get('name', 'N/A'),
+                'city': r.get('city', 'N/A'),
+                'country': r.get('country', 'N/A'),
+                'generation': r.get('generation', 'N/A')
+            })
+        for r in fabrikam_records[:10]:
+            sample_records.append({
+                'source': 'Fabrikam',
+                'name': r.get('name', 'N/A'),
+                'city': r.get('city', 'N/A'),
+                'country': r.get('country', 'N/A'),
+                'generation': r.get('generation', 'N/A')
+            })
         
         return jsonify({
             'status': 'success' if all_records else 'partial',
-            'contoso_count': contoso_count,
-            'fabrikam_count': fabrikam_count,
+            'contoso_count': len(contoso_records),
+            'fabrikam_count': len(fabrikam_records),
             'total_count': len(all_records),
-            'unique_names': unique_names,
-            'records': all_records,
+            
+            # Analytics
+            'top_10_countries': top_10_countries,
+            'generations': generations,
+            'company_staff': company_staff,
+            'avg_salaries': avg_salaries,
+            'eye_colors': {
+                'most_common': {'color': most_common_eye[0], 'count': most_common_eye[1]},
+                'least_common': {'color': least_common_eye[0], 'count': least_common_eye[1]},
+                'all': [{'color': c, 'count': n} for c, n in eye_color_list]
+            },
+            'top_3_favorite_colors': top_3_fav_colors,
+            
             'errors': errors if errors else None,
-            'note': 'Real decrypted data from partner containers' if all_records else 'No data could be retrieved'
+            'note': 'Comprehensive analytics from decrypted partner data'
         })
         
     except Exception as e:
+        import traceback
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': str(e),
+            'traceback': traceback.format_exc()
         }), 500
+
+@app.route('/partner/analyze-stream')
+def partner_analyze_stream():
+    """
+    Stream progress updates for partner data analysis using Server-Sent Events (SSE).
+    Provides real-time decryption progress with record counts and time estimates.
+    """
+    from flask import Response
+    from collections import Counter, defaultdict
+    import time
+    
+    def generate():
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+        
+        # Only Woodgrove Bank can use this endpoint
+        if 'woodgrove' not in our_key_name.lower():
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Only Woodgrove Bank can perform partner analysis'})}\n\n"
+            return
+        
+        # Get partner container URLs from environment
+        contoso_url = os.environ.get('PARTNER_CONTOSO_URL', '')
+        fabrikam_url = os.environ.get('PARTNER_FABRIKAM_URL', '')
+        
+        # Get stored partner keys
+        contoso_key = get_partner_key('contoso')
+        fabrikam_key = get_partner_key('fabrikam')
+        
+        all_records = []
+        contoso_records = []
+        fabrikam_records = []
+        errors = []
+        
+        total_encrypted = 0
+        decrypted_count = 0
+        start_time = time.time()
+        
+        # Phase 1: Fetch encrypted data counts
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'fetch', 'message': 'Fetching encrypted records from partners...'})}\n\n"
+        
+        contoso_encrypted = []
+        fabrikam_encrypted = []
+        
+        if contoso_key and contoso_url:
+            try:
+                response = requests.get(f'{contoso_url}/company/list', timeout=30)
+                if response.status_code == 200:
+                    contoso_data = response.json()
+                    contoso_encrypted = contoso_data.get('records', [])
+                    yield f"data: {json.dumps({'type': 'fetch', 'partner': 'Contoso', 'count': len(contoso_encrypted)})}\n\n"
+                else:
+                    errors.append(f'Contoso: HTTP {response.status_code}')
+            except Exception as e:
+                errors.append(f'Contoso: {str(e)}')
+        elif not contoso_key:
+            errors.append('Contoso: Key not released')
+        else:
+            errors.append('Contoso: URL not configured')
+        
+        if fabrikam_key and fabrikam_url:
+            try:
+                response = requests.get(f'{fabrikam_url}/company/list', timeout=30)
+                if response.status_code == 200:
+                    fabrikam_data = response.json()
+                    fabrikam_encrypted = fabrikam_data.get('records', [])
+                    yield f"data: {json.dumps({'type': 'fetch', 'partner': 'Fabrikam', 'count': len(fabrikam_encrypted)})}\n\n"
+                else:
+                    errors.append(f'Fabrikam: HTTP {response.status_code}')
+            except Exception as e:
+                errors.append(f'Fabrikam: {str(e)}')
+        elif not fabrikam_key:
+            errors.append('Fabrikam: Key not released')
+        else:
+            errors.append('Fabrikam: URL not configured')
+        
+        total_encrypted = len(contoso_encrypted) + len(fabrikam_encrypted)
+        
+        if total_encrypted == 0:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'No encrypted records found', 'errors': errors})}\n\n"
+            return
+        
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'decrypt', 'message': f'Starting decryption of {total_encrypted} records...', 'total': total_encrypted})}\n\n"
+        
+        # Phase 2: Decrypt Contoso records with progress
+        for i, record in enumerate(contoso_encrypted):
+            decrypted = decrypt_all_fields(record, contoso_key)
+            decrypted['source'] = 'Contoso'
+            if decrypted.get('age'):
+                decrypted['generation'] = get_generation(decrypted['age'])
+            contoso_records.append(decrypted)
+            all_records.append(decrypted)
+            decrypted_count += 1
+            
+            # Send progress update every 5 records or on last record
+            if (i + 1) % 5 == 0 or i == len(contoso_encrypted) - 1:
+                elapsed = time.time() - start_time
+                rate = decrypted_count / elapsed if elapsed > 0 else 0
+                remaining = (total_encrypted - decrypted_count) / rate if rate > 0 else 0
+                yield f"data: {json.dumps({'type': 'progress', 'decrypted': decrypted_count, 'total': total_encrypted, 'percent': round(100 * decrypted_count / total_encrypted, 1), 'elapsed': round(elapsed, 1), 'remaining': round(remaining, 1), 'current_partner': 'Contoso'})}\n\n"
+        
+        # Phase 3: Decrypt Fabrikam records with progress
+        for i, record in enumerate(fabrikam_encrypted):
+            decrypted = decrypt_all_fields(record, fabrikam_key)
+            decrypted['source'] = 'Fabrikam'
+            if decrypted.get('age'):
+                decrypted['generation'] = get_generation(decrypted['age'])
+            fabrikam_records.append(decrypted)
+            all_records.append(decrypted)
+            decrypted_count += 1
+            
+            # Send progress update every 5 records or on last record
+            if (i + 1) % 5 == 0 or i == len(fabrikam_encrypted) - 1:
+                elapsed = time.time() - start_time
+                rate = decrypted_count / elapsed if elapsed > 0 else 0
+                remaining = (total_encrypted - decrypted_count) / rate if rate > 0 else 0
+                yield f"data: {json.dumps({'type': 'progress', 'decrypted': decrypted_count, 'total': total_encrypted, 'percent': round(100 * decrypted_count / total_encrypted, 1), 'elapsed': round(elapsed, 1), 'remaining': round(remaining, 1), 'current_partner': 'Fabrikam'})}\n\n"
+        
+        # Phase 4: Compute analytics
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'analyze', 'message': 'Computing analytics...'})}\n\n"
+        
+        # Top 10 countries with top 3 cities
+        country_city_data = defaultdict(list)
+        for r in all_records:
+            if r.get('country') and r.get('city'):
+                country_city_data[r['country']].append(r['city'])
+        
+        country_counts = Counter(r.get('country') for r in all_records if r.get('country'))
+        top_10_countries = []
+        for country, count in country_counts.most_common(10):
+            city_counts = Counter(country_city_data[country])
+            top_3_cities = [{'city': city, 'count': cnt} for city, cnt in city_counts.most_common(3)]
+            top_10_countries.append({'country': country, 'count': count, 'top_cities': top_3_cities})
+        
+        # Generation breakdown
+        generation_counts = Counter(r.get('generation') for r in all_records if r.get('generation'))
+        generations = []
+        gen_order = ['Gen Alpha', 'Gen Z', 'Millennials', 'Gen X', 'Baby Boomers', 'Silent Generation']
+        for gen in gen_order:
+            if gen in generation_counts:
+                generations.append({'generation': gen, 'count': generation_counts[gen]})
+        
+        # Salaries
+        contoso_salaries = [r['salary'] for r in contoso_records if r.get('salary')]
+        fabrikam_salaries = [r['salary'] for r in fabrikam_records if r.get('salary')]
+        all_salaries = contoso_salaries + fabrikam_salaries
+        
+        avg_salaries = {
+            'Contoso': round(sum(contoso_salaries) / len(contoso_salaries)) if contoso_salaries else 0,
+            'Fabrikam': round(sum(fabrikam_salaries) / len(fabrikam_salaries)) if fabrikam_salaries else 0,
+            'Combined': round(sum(all_salaries) / len(all_salaries)) if all_salaries else 0
+        }
+        
+        # Eye colors
+        eye_colors = Counter(r.get('eye_color') for r in all_records if r.get('eye_color'))
+        eye_color_list = eye_colors.most_common()
+        most_common_eye = eye_color_list[0] if eye_color_list else ('N/A', 0)
+        least_common_eye = eye_color_list[-1] if eye_color_list else ('N/A', 0)
+        
+        # Favorite colors
+        fav_colors = Counter(r.get('favorite_color') for r in all_records if r.get('favorite_color'))
+        top_3_fav_colors = [{'color': color, 'count': cnt} for color, cnt in fav_colors.most_common(3)]
+        
+        total_time = time.time() - start_time
+        
+        # Send final results
+        result = {
+            'type': 'complete',
+            'status': 'success',
+            'contoso_count': len(contoso_records),
+            'fabrikam_count': len(fabrikam_records),
+            'total_count': len(all_records),
+            'total_time': round(total_time, 2),
+            'top_10_countries': top_10_countries,
+            'generations': generations,
+            'avg_salaries': avg_salaries,
+            'eye_colors': {
+                'most_common': {'color': most_common_eye[0], 'count': most_common_eye[1]},
+                'least_common': {'color': least_common_eye[0], 'count': least_common_eye[1]},
+                'all': [{'color': c, 'count': n} for c, n in eye_color_list]
+            },
+            'top_3_favorite_colors': top_3_fav_colors,
+            'errors': errors if errors else None
+        }
+        yield f"data: {json.dumps(result)}\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+    })
 
 @app.route('/analytics/partner-demographics', methods=['POST'])
 def partner_demographics_analysis():

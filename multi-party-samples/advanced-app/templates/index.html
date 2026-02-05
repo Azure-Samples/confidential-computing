@@ -441,31 +441,87 @@
                         </button>
                     </div>
                     
+                    <!-- Progress Bar Section -->
+                    <div id="progressSection" style="display: none; margin-top: 20px;">
+                        <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; border: 2px solid #1a472a;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <span id="progressStatus" style="font-weight: bold; color: #1a472a;">Initializing...</span>
+                                <span id="progressPercent" style="font-weight: bold; color: #1a472a;">0%</span>
+                            </div>
+                            <div style="background: #dee2e6; border-radius: 10px; height: 24px; overflow: hidden;">
+                                <div id="progressBar" style="background: linear-gradient(90deg, #1a472a 0%, #28a745 100%); height: 100%; width: 0%; transition: width 0.3s ease; border-radius: 10px;"></div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 12px; color: #6c757d;">
+                                <span id="progressDecrypted">0 / 0 records</span>
+                                <span id="progressTime">Elapsed: 0s | Remaining: --</span>
+                            </div>
+                            <div id="progressPartner" style="margin-top: 8px; font-size: 12px; color: #495057;"></div>
+                        </div>
+                    </div>
+                    
                     <div id="partnerAnalysisResult" style="margin-top: 20px;"></div>
                     
                     <!-- Demographics Summary -->
                     <div id="demographicsSummary" style="display: none; margin-top: 25px;">
                         <h4 style="color: #1a472a; margin-bottom: 15px;">&#128202; Aggregate Demographics Summary</h4>
-                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px;">
+                        
+                        <!-- Staff Count Cards -->
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
                             <div style="padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; text-align: center; color: white;">
                                 <div style="font-size: 32px; font-weight: bold;" id="statContosoRecords">0</div>
-                                <div style="font-size: 12px; opacity: 0.9;">Contoso Records</div>
+                                <div style="font-size: 12px; opacity: 0.9;">Contoso Staff</div>
                             </div>
                             <div style="padding: 20px; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); border-radius: 8px; text-align: center; color: white;">
                                 <div style="font-size: 32px; font-weight: bold;" id="statFabrikamRecords">0</div>
-                                <div style="font-size: 12px; opacity: 0.9;">Fabrikam Records</div>
-                            </div>
-                            <div style="padding: 20px; background: linear-gradient(135deg, #fc4a1a 0%, #f7b733 100%); border-radius: 8px; text-align: center; color: white;">
-                                <div style="font-size: 32px; font-weight: bold;" id="statTotalRecords">0</div>
-                                <div style="font-size: 12px; opacity: 0.9;">Total Records</div>
+                                <div style="font-size: 12px; opacity: 0.9;">Fabrikam Staff</div>
                             </div>
                             <div style="padding: 20px; background: linear-gradient(135deg, #1a472a 0%, #2d5a3d 100%); border-radius: 8px; text-align: center; color: white;">
-                                <div style="font-size: 32px; font-weight: bold;" id="statUniqueNames">0</div>
-                                <div style="font-size: 12px; opacity: 0.9;">Unique Names</div>
+                                <div style="font-size: 32px; font-weight: bold;" id="statTotalRecords">0</div>
+                                <div style="font-size: 12px; opacity: 0.9;">Total Combined</div>
                             </div>
                         </div>
                         
-                        <div id="demographicsTable" style="margin-top: 20px;"></div>
+                        <!-- Average Salaries -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">💰 Average Salaries</h5>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
+                            <div style="padding: 15px; background: #e8eaf6; border-radius: 8px; text-align: center; border: 2px solid #667eea;">
+                                <div style="font-size: 24px; font-weight: bold; color: #667eea;" id="avgSalaryContoso">$0</div>
+                                <div style="font-size: 12px; color: #495057;">Contoso Avg</div>
+                            </div>
+                            <div style="padding: 15px; background: #e0f2f1; border-radius: 8px; text-align: center; border: 2px solid #11998e;">
+                                <div style="font-size: 24px; font-weight: bold; color: #11998e;" id="avgSalaryFabrikam">$0</div>
+                                <div style="font-size: 12px; color: #495057;">Fabrikam Avg</div>
+                            </div>
+                            <div style="padding: 15px; background: #e8f5e9; border-radius: 8px; text-align: center; border: 2px solid #1a472a;">
+                                <div style="font-size: 24px; font-weight: bold; color: #1a472a;" id="avgSalaryCombined">$0</div>
+                                <div style="font-size: 12px; color: #495057;">Combined Avg</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Generation Breakdown -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">👥 Workforce by Generation</h5>
+                        <div id="generationBreakdown" style="margin-bottom: 20px;"></div>
+                        
+                        <!-- Eye Colors -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">👁️ Eye Color Distribution</h5>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                            <div style="padding: 15px; background: #d4edda; border-radius: 8px; border: 2px solid #28a745;">
+                                <div style="font-size: 14px; color: #155724; margin-bottom: 5px;">Most Common</div>
+                                <div style="font-size: 20px; font-weight: bold; color: #155724;" id="eyeColorMost">-</div>
+                            </div>
+                            <div style="padding: 15px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545;">
+                                <div style="font-size: 14px; color: #721c24; margin-bottom: 5px;">Least Common</div>
+                                <div style="font-size: 20px; font-weight: bold; color: #721c24;" id="eyeColorLeast">-</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Favorite Colors -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">🎨 Top 3 Favorite Colors</h5>
+                        <div id="favoriteColors" style="display: flex; gap: 15px; margin-bottom: 20px;"></div>
+                        
+                        <!-- Top 10 Countries with Cities -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">🌍 Top 10 Countries (with Top 3 Cities)</h5>
+                        <div id="countriesTable" style="margin-bottom: 20px;"></div>
                     </div>
                 </div>
             </details>
@@ -2271,96 +2327,162 @@
                 updateKeyStatus('fabrikam', 'error', 'Error: ' + e.message);
             }
             
-            // Step 3: Fetch and decrypt data from both companies
-            resultDiv.innerHTML += '<p>Fetching encrypted records from partner containers...</p>';
+            // Step 3: Stream decryption progress using SSE
+            resultDiv.innerHTML = '<p>Connecting to analysis stream...</p>';
             
-            try {
-                // Get partner container URLs from the config
-                const contosoUrl = partnerConfigs && partnerConfigs.contoso ? partnerConfigs.contoso.container_url : '';
-                const fabrikamUrl = partnerConfigs && partnerConfigs.fabrikam ? partnerConfigs.fabrikam.container_url : '';
+            // Show progress section
+            const progressSection = document.getElementById('progressSection');
+            progressSection.style.display = 'block';
+            
+            const eventSource = new EventSource('/partner/analyze-stream');
+            
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
                 
-                const dataResponse = await fetch('/partner/analyze', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contoso_key: contosoKey,
-                        fabrikam_key: fabrikamKey,
-                        contoso_url: contosoUrl,
-                        fabrikam_url: fabrikamUrl
-                    })
-                });
-                const analysisResult = await dataResponse.json();
-                
-                if (analysisResult.status === 'success') {
+                if (data.type === 'status') {
+                    document.getElementById('progressStatus').textContent = data.message;
+                    if (data.phase === 'fetch') {
+                        resultDiv.innerHTML = '<p>📥 ' + escapeHtml(data.message) + '</p>';
+                    } else if (data.phase === 'decrypt') {
+                        resultDiv.innerHTML = '<p>🔐 ' + escapeHtml(data.message) + '</p>';
+                    } else if (data.phase === 'analyze') {
+                        resultDiv.innerHTML = '<p>📊 ' + escapeHtml(data.message) + '</p>';
+                    }
+                }
+                else if (data.type === 'fetch') {
+                    resultDiv.innerHTML += '<p style="color: #495057; font-size: 13px;">✓ Found ' + data.count + ' encrypted records from ' + escapeHtml(data.partner) + '</p>';
+                }
+                else if (data.type === 'progress') {
+                    document.getElementById('progressBar').style.width = data.percent + '%';
+                    document.getElementById('progressPercent').textContent = data.percent + '%';
+                    document.getElementById('progressDecrypted').textContent = data.decrypted + ' / ' + data.total + ' records';
+                    document.getElementById('progressTime').textContent = 'Elapsed: ' + data.elapsed + 's | Remaining: ~' + data.remaining + 's';
+                    document.getElementById('progressPartner').textContent = '🔐 Decrypting ' + escapeHtml(data.current_partner) + ' records...';
+                    document.getElementById('progressStatus').textContent = 'Decrypting records...';
+                }
+                else if (data.type === 'complete') {
+                    eventSource.close();
+                    
+                    // Hide progress section
+                    progressSection.style.display = 'none';
+                    
                     // Show demographics summary
                     summaryDiv.style.display = 'block';
                     
-                    document.getElementById('statContosoRecords').textContent = analysisResult.contoso_count || 0;
-                    document.getElementById('statFabrikamRecords').textContent = analysisResult.fabrikam_count || 0;
-                    document.getElementById('statTotalRecords').textContent = analysisResult.total_count || 0;
-                    document.getElementById('statUniqueNames').textContent = analysisResult.unique_names || 0;
+                    // Staff counts
+                    document.getElementById('statContosoRecords').textContent = data.contoso_count || 0;
+                    document.getElementById('statFabrikamRecords').textContent = data.fabrikam_count || 0;
+                    document.getElementById('statTotalRecords').textContent = data.total_count || 0;
                     
-                    // Build demographics table
-                    let tableHtml = '<table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden;">';
-                    tableHtml += '<thead><tr style="background: #1a472a; color: white;">';
-                    tableHtml += '<th style="padding: 12px; text-align: left;">Source</th>';
-                    tableHtml += '<th style="padding: 12px; text-align: left;">Name</th>';
-                    tableHtml += '<th style="padding: 12px; text-align: left;">Phone</th>';
-                    tableHtml += '</tr></thead><tbody>';
+                    // Average salaries
+                    if (data.avg_salaries) {
+                        document.getElementById('avgSalaryContoso').textContent = '$' + (data.avg_salaries.Contoso || 0).toLocaleString();
+                        document.getElementById('avgSalaryFabrikam').textContent = '$' + (data.avg_salaries.Fabrikam || 0).toLocaleString();
+                        document.getElementById('avgSalaryCombined').textContent = '$' + (data.avg_salaries.Combined || 0).toLocaleString();
+                    }
                     
-                    if (analysisResult.records && analysisResult.records.length > 0) {
-                        analysisResult.records.forEach((record, index) => {
-                            const bgColor = index % 2 === 0 ? '#f8f9fa' : 'white';
-                            const sourceColor = record.source === 'Contoso' ? '#667eea' : '#11998e';
-                            tableHtml += '<tr style="background: ' + bgColor + ';">';
-                            tableHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6;"><span style="background: ' + sourceColor + '; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">' + escapeHtml(record.source) + '</span></td>';
-                            tableHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6;">' + escapeHtml(record.name) + '</td>';
-                            tableHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(record.phone) + '</td>';
-                            tableHtml += '</tr>';
+                    // Generation breakdown
+                    if (data.generations && data.generations.length > 0) {
+                        let genHtml = '<div style="display: flex; flex-wrap: wrap; gap: 10px;">';
+                        const genColors = {
+                            'Gen Alpha': '#ff6b6b',
+                            'Gen Z': '#4ecdc4',
+                            'Millennials': '#45b7d1',
+                            'Gen X': '#96ceb4',
+                            'Baby Boomers': '#ffeaa7',
+                            'Silent Generation': '#dfe6e9'
+                        };
+                        data.generations.forEach(g => {
+                            const color = genColors[g.generation] || '#dee2e6';
+                            genHtml += '<div style="padding: 10px 15px; background: ' + color + '; border-radius: 8px; text-align: center;">';
+                            genHtml += '<div style="font-size: 20px; font-weight: bold;">' + g.count + '</div>';
+                            genHtml += '<div style="font-size: 11px;">' + escapeHtml(g.generation) + '</div>';
+                            genHtml += '</div>';
                         });
-                    } else {
-                        tableHtml += '<tr><td colspan="3" style="padding: 20px; text-align: center; color: #6c757d;">No records found</td></tr>';
+                        genHtml += '</div>';
+                        document.getElementById('generationBreakdown').innerHTML = genHtml;
                     }
                     
-                    tableHtml += '</tbody></table>';
-                    document.getElementById('demographicsTable').innerHTML = tableHtml;
-                    
-                    // Show success message with any errors
-                    let resultMessage = '';
-                    if (analysisResult.records && analysisResult.records.length > 0) {
-                        resultMessage = '<p style="color: #155724;"><strong>✓ Partner analysis complete!</strong> Successfully decrypted and analyzed ' + analysisResult.total_count + ' records.</p>';
-                    } else {
-                        resultMessage = '<p style="color: #856404;"><strong>⚠ No records retrieved.</strong></p>';
+                    // Eye colors
+                    if (data.eye_colors) {
+                        const most = data.eye_colors.most_common;
+                        const least = data.eye_colors.least_common;
+                        document.getElementById('eyeColorMost').textContent = most.color + ' (' + most.count + ')';
+                        document.getElementById('eyeColorLeast').textContent = least.color + ' (' + least.count + ')';
                     }
+                    
+                    // Favorite colors
+                    if (data.top_3_favorite_colors && data.top_3_favorite_colors.length > 0) {
+                        let favHtml = '';
+                        const medals = ['🥇', '🥈', '🥉'];
+                        data.top_3_favorite_colors.forEach((fc, idx) => {
+                            favHtml += '<div style="padding: 12px 20px; background: #f8f9fa; border-radius: 8px; text-align: center; border: 2px solid #dee2e6;">';
+                            favHtml += '<div style="font-size: 20px;">' + medals[idx] + '</div>';
+                            favHtml += '<div style="font-size: 16px; font-weight: bold; color: #495057;">' + escapeHtml(fc.color) + '</div>';
+                            favHtml += '<div style="font-size: 12px; color: #6c757d;">' + fc.count + ' people</div>';
+                            favHtml += '</div>';
+                        });
+                        document.getElementById('favoriteColors').innerHTML = favHtml;
+                    }
+                    
+                    // Top 10 countries with cities
+                    if (data.top_10_countries && data.top_10_countries.length > 0) {
+                        let countryHtml = '<table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden;">';
+                        countryHtml += '<thead><tr style="background: #1a472a; color: white;">';
+                        countryHtml += '<th style="padding: 12px; text-align: left;">Rank</th>';
+                        countryHtml += '<th style="padding: 12px; text-align: left;">Country</th>';
+                        countryHtml += '<th style="padding: 12px; text-align: center;">Staff</th>';
+                        countryHtml += '<th style="padding: 12px; text-align: left;">Top 3 Cities</th>';
+                        countryHtml += '</tr></thead><tbody>';
+                        
+                        data.top_10_countries.forEach((c, idx) => {
+                            const bgColor = idx % 2 === 0 ? '#f8f9fa' : 'white';
+                            const citiesStr = c.top_cities.map(city => city.city + ' (' + city.count + ')').join(', ');
+                            countryHtml += '<tr style="background: ' + bgColor + ';">';
+                            countryHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6; font-weight: bold;">#' + (idx + 1) + '</td>';
+                            countryHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6;">🌍 ' + escapeHtml(c.country) + '</td>';
+                            countryHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6; text-align: center; font-weight: bold;">' + c.count + '</td>';
+                            countryHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6; font-size: 12px; color: #6c757d;">' + escapeHtml(citiesStr) + '</td>';
+                            countryHtml += '</tr>';
+                        });
+                        
+                        countryHtml += '</tbody></table>';
+                        document.getElementById('countriesTable').innerHTML = countryHtml;
+                    }
+                    
+                    // Show success message
+                    let resultMessage = '<p style="color: #155724;"><strong>✓ Partner analysis complete!</strong> Successfully decrypted and analyzed ' + data.total_count + ' records in ' + data.total_time + ' seconds.</p>';
                     
                     // Show any errors that occurred
-                    if (analysisResult.errors && analysisResult.errors.length > 0) {
-                        resultMessage += '<p style="color: #856404; font-size: 12px;"><strong>Notes:</strong><br>' + analysisResult.errors.map(e => '• ' + escapeHtml(e)).join('<br>') + '</p>';
+                    if (data.errors && data.errors.length > 0) {
+                        resultMessage += '<p style="color: #856404; font-size: 12px;"><strong>Notes:</strong><br>' + data.errors.map(e => '• ' + escapeHtml(e)).join('<br>') + '</p>';
                     }
                     
                     resultDiv.innerHTML = resultMessage;
-                } else if (analysisResult.status === 'partial') {
-                    // Partial success - show what we got
-                    summaryDiv.style.display = 'block';
-                    document.getElementById('statContosoRecords').textContent = analysisResult.contoso_count || 0;
-                    document.getElementById('statFabrikamRecords').textContent = analysisResult.fabrikam_count || 0;
-                    document.getElementById('statTotalRecords').textContent = analysisResult.total_count || 0;
-                    document.getElementById('statUniqueNames').textContent = analysisResult.unique_names || 0;
                     
-                    resultDiv.innerHTML = '<p style="color: #856404;"><strong>⚠ Partial results:</strong> Some data could not be retrieved.</p>';
-                    if (analysisResult.errors && analysisResult.errors.length > 0) {
-                        resultDiv.innerHTML += '<p style="color: #856404; font-size: 12px;">' + analysisResult.errors.map(e => '• ' + escapeHtml(e)).join('<br>') + '</p>';
-                    }
-                } else {
-                    resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Analysis failed:</strong> ' + escapeHtml(analysisResult.message || 'Unknown error') + '</p>';
+                    // Reset button
+                    btn.disabled = false;
+                    btn.innerHTML = '&#128202; Start Partner Demographic Analysis';
                 }
-            } catch (e) {
-                resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Error during analysis:</strong> ' + escapeHtml(e.message) + '</p>';
-            }
+                else if (data.type === 'error') {
+                    eventSource.close();
+                    progressSection.style.display = 'none';
+                    resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Analysis failed:</strong> ' + escapeHtml(data.message) + '</p>';
+                    if (data.errors) {
+                        resultDiv.innerHTML += '<p style="color: #856404; font-size: 12px;">' + data.errors.map(e => '• ' + escapeHtml(e)).join('<br>') + '</p>';
+                    }
+                    btn.disabled = false;
+                    btn.innerHTML = '&#128202; Start Partner Demographic Analysis';
+                }
+            };
             
-            // Reset button
-            btn.disabled = false;
-            btn.innerHTML = '&#128202; Start Partner Demographic Analysis';
+            eventSource.onerror = function(event) {
+                eventSource.close();
+                progressSection.style.display = 'none';
+                resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Connection error:</strong> Lost connection to server.</p>';
+                btn.disabled = false;
+                btn.innerHTML = '&#128202; Start Partner Demographic Analysis';
+            };
         }
         
         function updateKeyStatus(company, status, message) {
