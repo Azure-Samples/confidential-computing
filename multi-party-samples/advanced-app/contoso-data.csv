@@ -1,0 +1,101 @@
+name,phone,age,salary,eye_color,favorite_color,address,postal_code,city,country
+Khadija Abubakar,+234 824-424-9920,28,188141,Brown,Yellow,6110 High Court,84196,Warri,Nigeria
+Elsa Ivanov,+44 116-805-4161,62,107338,Hazel,Pink,2079 Oxford Drive,TO77 5TJ,Glasgow,United Kingdom
+Min Wang,+86 133-292-1599,23,78301,Green,Silver,2458 Cedar Boulevard,28684,Guangzhou,China
+Mohammed Haddad,+39 304-538-3938,55,106747,Brown,Gray,7264 King Drive,68874,Naples,Italy
+Rashid Bakhtiari,+39 822-551-6278,63,59964,Brown,Red,9734 Forest Court,84495,Milan,Italy
+Yuna Kumar,+86 254-856-5738,51,61657,Brown,Silver,4120 Oak Street,56278,Hangzhou,China
+Carlos Rivera,+1 723-761-3934,43,93485,Brown,Orange,3794 Market Lane,22892,Edmonton,Canada
+Ali Al-Rashid,+33 549-392-2742,27,64920,Brown,Silver,5827 Oxford Road,29766,Lille,France
+Amelia Smith,+46 774-602-8211,35,191150,Blue,Red,353 Albert Place,26527,Gothenburg,Sweden
+Fatima Tehrani,+34 288-895-7192,48,150627,Brown,Red,864 Windsor Lane,29875,Zaragoza,Spain
+Tariq Al-Hassan,+33 613-831-6014,56,87513,Brown,Blue,3922 Lake Court,15842,Toulouse,France
+James Martin,+52 383-446-8193,37,91059,Brown,White,314 Pine Lane,69054,Guadalajara,Mexico
+Babatunde Diallo,+1 747-741-5841,35,51326,Brown,Yellow,2982 Albert Street,89655,Vancouver,Canada
+David Johnson,+52 608-679-6349,30,31625,Brown,Black,9377 Maple Place,32211,Puebla,Mexico
+Lucia Martinez,+1 557-600-4908,63,159564,Brown,Burgundy,723 George Road,71426,New York,United States
+Sofia Lopez,+55 563-733-5999,50,107193,Brown,Purple,4632 Church Road,18321,Sao Paulo,Brazil
+Benjamin White,+27 351-744-8186,36,80656,Brown,Orange,19 River Place,83180,Pretoria,South Africa
+Aisha Okonkwo,+61 399-588-3097,25,189092,Brown,Orange,9084 Bridge Place,9687,Perth,Australia
+Alexander Walker,+61 820-513-9013,64,67053,Brown,Black,7658 Albert Boulevard,3541,Melbourne,Australia
+Emma Davis,+61 516-330-9429,28,55427,Brown,White,4468 Station Drive,6213,Brisbane,Australia
+Tariq Abboud,+31 660-620-2250,50,52616,Gray,Orange,4719 High Drive,72715,Breda,Netherlands
+Priya Patel,+86 887-179-8978,41,191872,Brown,Teal,3471 Elizabeth Circle,25098,Wuhan,China
+Matthew Harris,+1 363-519-1583,29,81836,Blue,Red,4047 Oxford Drive,98194,Calgary,Canada
+Anna Mueller,+61 605-158-8251,49,49690,Brown,Gold,143 Main Avenue,6710,Newcastle,Australia
+Michael Williams,+1 509-853-3479,52,137321,Brown,Yellow,6115 Bridge Court,84661,Denver,United States
+Joshua Davis,+39 482-616-6165,36,106595,Gray,Blue,2200 Victoria Court,51276,Rome,Italy
+Nguyen Kumar,+61 372-356-8203,47,142613,Brown,Gold,6597 High Place,7377,Adelaide,Australia
+Christopher Thompson,+234 214-885-7933,24,82596,Hazel,Black,7832 King Circle,62428,Ibadan,Nigeria
+Lin Yang,+971 812-683-7188,62,33802,Green,Green,6232 George Way,41613,Abu Dhabi,UAE
+Wei Yang,+65 569-267-3855,28,119135,Hazel,Red,1060 Elizabeth Circle,98438,Woodlands,Singapore
+Tran Wang,+81 602-715-8059,30,99817,Blue,Burgundy,5236 Cedar Way,713-3635,Yokohama,Japan
+Nguyen Liu,+971 994-757-7385,65,142307,Brown,Purple,9070 Bridge Boulevard,75707,Umm Al Quwain,UAE
+Chen Li,+65 969-913-9332,56,114291,Hazel,Teal,1184 Church Avenue,74042,Clementi,Singapore
+Ingrid Ivanov,+31 419-700-6823,31,80250,Brown,Navy,2989 Queen Lane,17929,Almere,Netherlands
+Yasmin Al-Rashid,+49 208-285-6991,61,53798,Brown,Gray,1503 Albert Drive,59005,Berlin,Germany
+Sekou Okoro,+1 857-302-1340,63,127532,Brown,Orange,2784 River Drive,60648,Calgary,Canada
+Dmitri Russo,+39 230-935-7613,39,96067,Brown,Silver,4903 Church Way,44376,Rome,Italy
+Lucia Rivera,+55 146-138-2535,30,99620,Brown,Gold,1734 King Avenue,21116,Belo Horizonte,Brazil
+Alexander Lewis,+1 102-177-9914,39,132429,Blue,Teal,1767 Garden Place,66870,Calgary,Canada
+Sophia Martin,+44 982-854-3443,62,84805,Brown,Gold,7004 George Drive,JP1 5WE,Sheffield,United Kingdom
+Lucia Morales,+1 936-785-6635,50,44172,Green,Navy,763 Windsor Boulevard,42893,Edmonton,Canada
+Klaus Martin,+33 280-226-1353,50,117023,Brown,Black,9111 Maple Boulevard,17305,Marseille,France
+Pham Suzuki,+91 918-853-7653,22,143815,Brown,Green,5983 Oxford Lane,95493,Delhi,India
+Michael Robinson,+61 324-253-3319,25,77674,Brown,Blue,7168 Maple Road,9831,Gold Coast,Australia
+Pablo Ramos,+44 126-938-4190,22,35007,Brown,Orange,8581 Forest Lane,WY13 9DY,Sheffield,United Kingdom
+Chen Zhang,+971 450-509-7418,44,82987,Brown,Navy,1693 Pine Drive,10070,Al Ain,UAE
+Abigail Smith,+27 720-146-4591,37,108183,Blue,Silver,9518 Church Place,65680,Kimberley,South Africa
+Mei Yamamoto,+81 655-478-9175,45,57523,Gray,Blue,5413 Victoria Street,679-1384,Kyoto,Japan
+Sato Suzuki,+61 913-767-1091,54,44636,Blue,Green,2814 Cedar Way,5779,Newcastle,Australia
+Fatima Abboud,+49 320-676-4780,45,38375,Brown,Pink,4697 Cedar Place,17168,Munich,Germany
+Chen Tanaka,+1 433-517-2067,60,81383,Blue,Teal,9757 Hill Avenue,57490,Edmonton,Canada
+Aminata Kimani,+234 576-698-3051,42,43396,Blue,Black,878 Lake Road,38031,Kaduna,Nigeria
+Mikael Schmidt,+39 639-227-2377,26,59795,Brown,Silver,3909 Oxford Road,88291,Florence,Italy
+Pham Suzuki,+65 662-428-6113,46,103183,Green,Black,2824 Market Court,60075,Singapore Central,Singapore
+Huda Tehrani,+971 844-338-2053,49,82356,Blue,Burgundy,931 Station Drive,27128,Umm Al Quwain,UAE
+Nguyen Suzuki,+81 350-729-7524,60,46765,Gray,Pink,6219 Elizabeth Road,776-1412,Kobe,Japan
+Hans Hansen,+49 868-300-2589,43,71445,Brown,Red,3090 Market Court,10278,Hanover,Germany
+Dmitri Bianchi,+34 372-609-1657,62,141874,Blue,White,5174 Bridge Lane,21061,Seville,Spain
+Alejandro Gutierrez,+61 290-593-6647,32,69817,Brown,Pink,2032 Market Place,9321,Canberra,Australia
+Hassan Nazari,+33 192-418-3361,30,99548,Hazel,Teal,13 Garden Place,51351,Nantes,France
+Ryu Tran,+86 766-365-6482,63,40862,Brown,Red,89 Maple Avenue,66184,Wuhan,China
+Aminata Okoro,+234 256-490-1788,48,91694,Blue,Red,5292 High Way,14500,Benin City,Nigeria
+Huda Khoury,+49 153-818-2641,58,38598,Brown,Pink,408 Victoria Boulevard,99880,Dusseldorf,Germany
+Mei Patel,+82 931-608-7116,55,64550,Brown,Navy,2173 Lake Drive,32556,Seoul,South Korea
+Erik Hansen,+46 574-333-4315,61,112951,Brown,Gray,5219 Church Drive,48229,Gothenburg,Sweden
+Anna Johansson,+46 303-309-2293,22,132777,Brown,Blue,6283 High Place,50078,Gothenburg,Sweden
+Diego Cruz,+44 269-222-8972,24,76442,Green,Burgundy,7424 Main Circle,QR10 2OE,Liverpool,United Kingdom
+Hiroshi Yamamoto,+82 288-625-4397,59,82086,Brown,Purple,8844 Station Way,69993,Suwon,South Korea
+Joshua Martin,+234 587-888-6536,36,51082,Brown,Orange,1945 Oak Way,63500,Lagos,Nigeria
+Amit Gupta,+61 373-966-9216,40,40429,Hazel,Orange,7682 High Street,7111,Newcastle,Australia
+Sara Al-Rashid,+39 742-275-4499,57,175498,Blue,Burgundy,2477 Windsor Road,80246,Genoa,Italy
+Raj Zhang,+1 148-664-3747,45,113636,Brown,Red,4282 Lake Court,76009,Los Angeles,United States
+Lee Patel,+65 634-251-3305,23,171333,Brown,Gold,990 Pine Avenue,20015,Queenstown,Singapore
+Pierre Nielsen,+46 816-630-2703,29,198375,Blue,Silver,7417 Bridge Road,23465,Vasteras,Sweden
+James Lee,+34 643-884-6190,50,79080,Brown,Burgundy,15 River Way,97200,Valencia,Spain
+Hana Huang,+82 528-835-8515,37,58142,Hazel,Red,8659 Hill Court,72832,Daejeon,South Korea
+Takeshi Patel,+82 334-442-7607,49,144415,Brown,Red,7447 Maple Circle,84103,Gwangju,South Korea
+Giulia Nielsen,+46 337-416-3961,58,72173,Brown,Blue,3344 Hill Way,66555,Jonkoping,Sweden
+Mei Tanaka,+65 494-375-3698,58,104302,Hazel,Red,8726 Cedar Way,51898,Singapore Central,Singapore
+Omar Osei,+1 275-246-4743,60,78489,Brown,Yellow,7456 Market Lane,74359,Winnipeg,Canada
+Amina Bakhtiari,+46 466-490-8166,28,43988,Amber,Navy,4114 Station Street,62001,Stockholm,Sweden
+Sakura Nguyen,+86 244-532-1505,33,43553,Gray,Yellow,8162 Lake Street,74366,Chengdu,China
+Emma Young,+234 373-576-8304,36,49749,Hazel,Silver,5403 George Drive,78179,Benin City,Nigeria
+Omar Nazari,+39 518-189-3717,31,214648,Brown,Yellow,8441 Pine Way,50318,Bologna,Italy
+Mia Harris,+33 757-547-9728,52,42473,Brown,Purple,8210 High Court,29174,Lille,France
+Ryu Liu,+86 868-756-1476,59,82216,Brown,Gold,3685 Station Place,50313,Guangzhou,China
+Fatima Abboud,+33 873-147-8222,27,109460,Blue,Purple,8387 Cambridge Street,16154,Strasbourg,France
+Yuna Huang,+971 750-541-8004,32,65495,Brown,Navy,3018 Hill Place,79901,Ajman,UAE
+Kim Kim,+91 322-483-5154,36,77299,Brown,Burgundy,2591 Oak Avenue,54057,Hyderabad,India
+Carmen Torres,+55 108-368-5373,27,101099,Brown,Navy,3445 Cambridge Road,42886,Recife,Brazil
+Tran Tanaka,+971 355-556-3916,57,42147,Brown,Silver,3630 Cedar Way,76232,Umm Al Quwain,UAE
+Brandon Robinson,+61 797-199-8375,50,41194,Blue,Gray,9725 Victoria Avenue,8868,Newcastle,Australia
+Natasha Nielsen,+61 999-338-1206,50,93573,Hazel,Orange,2080 Market Lane,9685,Hobart,Australia
+Kim Suzuki,+91 640-408-3400,57,47630,Brown,Blue,9574 George Boulevard,55116,Kolkata,India
+Oluwole Diallo,+27 963-424-4767,36,34589,Brown,Teal,8633 High Drive,66410,Port Elizabeth,South Africa
+Andrew Davis,+55 399-270-2494,33,54408,Brown,Teal,199 George Lane,78869,Brasilia,Brazil
+Mariana Torres,+61 134-464-8897,31,61842,Hazel,Gold,4211 Oxford Road,6321,Darwin,Australia
+Lin Kim,+91 580-464-3386,59,59267,Blue,Blue,6455 River Boulevard,33490,Delhi,India
+Chen Kumar,+91 961-191-2510,64,107178,Green,Orange,1952 Main Place,28404,Kolkata,India
+Lee Nguyen,+81 522-758-2198,45,63042,Brown,Black,9277 Windsor Road,165-6081,Hiroshima,Japan

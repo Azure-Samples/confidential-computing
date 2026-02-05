@@ -1,0 +1,247 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 750">
+  <defs>
+    <linearGradient id="teeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#28a745;stop-opacity:0.2"/>
+      <stop offset="100%" style="stop-color:#28a745;stop-opacity:0.1"/>
+    </linearGradient>
+    <linearGradient id="storageGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffc107;stop-opacity:0.2"/>
+      <stop offset="100%" style="stop-color:#ffc107;stop-opacity:0.1"/>
+    </linearGradient>
+    <linearGradient id="keyVaultGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0078d4;stop-opacity:0.2"/>
+      <stop offset="100%" style="stop-color:#0078d4;stop-opacity:0.1"/>
+    </linearGradient>
+    <linearGradient id="bankGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a472a;stop-opacity:0.2"/>
+      <stop offset="100%" style="stop-color:#1a472a;stop-opacity:0.1"/>
+    </linearGradient>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#28a745"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#0078d4"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#ffc107"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dc3545"/>
+    </marker>
+    <marker id="arrowBank" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#1a472a"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1100" height="750" fill="#fafafa"/>
+  
+  <!-- Title -->
+  <text x="550" y="30" text-anchor="middle" font-family="Segoe UI, Arial" font-size="22" font-weight="bold" fill="#333">Encrypted Data Flow - Multi-Party TEE Decryption Model</text>
+  <text x="550" y="50" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#666">4 Containers: Contoso, Fabrikam, Woodgrove Bank (Confidential) + Snooper (Standard)</text>
+  
+  <!-- ============ UNTRUSTED ZONE (Left) ============ -->
+  <rect x="25" y="70" width="280" height="560" rx="15" fill="#fff5f5" stroke="#dc3545" stroke-width="2" stroke-dasharray="8,4"/>
+  <text x="45" y="95" font-family="Segoe UI, Arial" font-size="13" fill="#dc3545" font-weight="bold">⚠️ UNTRUSTED ZONE</text>
+  <text x="45" y="112" font-family="Segoe UI, Arial" font-size="9" fill="#dc3545">Data always encrypted here</text>
+  
+  <!-- Azure Blob Storage -->
+  <g filter="url(#shadow)">
+    <rect x="45" y="130" width="240" height="130" rx="10" fill="url(#storageGrad)" stroke="#ffc107" stroke-width="2"/>
+    <rect x="45" y="130" width="240" height="28" rx="10" fill="#ffc107"/>
+    <text x="165" y="150" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#333" font-weight="bold">📦 Azure Blob Storage</text>
+    <text x="165" y="175" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">consolidated-records-{rg}.json</text>
+    
+    <!-- Encrypted records representation -->
+    <rect x="60" y="190" width="210" height="55" rx="5" fill="#2d2d2d"/>
+    <text x="75" y="208" font-family="Courier New, monospace" font-size="8" fill="#ff6b6b">🔒 {"name": "base64cipher..."}</text>
+    <text x="75" y="222" font-family="Courier New, monospace" font-size="8" fill="#ff6b6b">🔒 {"phone": "base64cipher..."}</text>
+    <text x="75" y="236" font-family="Courier New, monospace" font-size="8" fill="#888">// Anyone can read, nobody can decrypt</text>
+  </g>
+  
+  <!-- Snooper/Attacker -->
+  <g filter="url(#shadow)">
+    <rect x="45" y="280" width="240" height="100" rx="10" fill="#f8d7da" stroke="#dc3545" stroke-width="2"/>
+    <rect x="45" y="280" width="240" height="26" rx="10" fill="#dc3545"/>
+    <text x="165" y="298" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#fff" font-weight="bold">🕵️ Snooper / Attacker</text>
+    <text x="165" y="320" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#721c24">Standard Container (No TEE)</text>
+    <text x="165" y="338" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#721c24">❌ No /dev/sev-guest device</text>
+    <text x="165" y="356" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#721c24">❌ Cannot attest to Key Vault</text>
+    <text x="165" y="374" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#721c24">❌ Sees only encrypted gibberish</text>
+  </g>
+  
+  <!-- Network/Cloud Operator -->
+  <g filter="url(#shadow)">
+    <rect x="45" y="400" width="240" height="70" rx="10" fill="#fff3cd" stroke="#856404" stroke-width="2"/>
+    <rect x="45" y="400" width="240" height="24" rx="10" fill="#ffc107"/>
+    <text x="165" y="417" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333" font-weight="bold">☁️ Infrastructure Operator</text>
+    <text x="165" y="440" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#856404">Can see encrypted network traffic</text>
+    <text x="165" y="458" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#856404">Cannot decrypt - no TEE access</text>
+  </g>
+  
+  <!-- ============ TRUSTED ZONE (Right) ============ -->
+  <rect x="330" y="70" width="745" height="560" rx="15" fill="#f0fff0" stroke="#28a745" stroke-width="2"/>
+  <text x="350" y="95" font-family="Segoe UI, Arial" font-size="13" fill="#28a745" font-weight="bold">✅ TRUSTED ZONE (Hardware Protected)</text>
+  <text x="350" y="112" font-family="Segoe UI, Arial" font-size="9" fill="#28a745">Decryption only happens here, inside AMD SEV-SNP TEE</text>
+  
+  <!-- Key Vaults Row -->
+  <g filter="url(#shadow)">
+    <rect x="350" y="125" width="160" height="85" rx="8" fill="url(#keyVaultGrad)" stroke="#0078d4" stroke-width="2"/>
+    <rect x="350" y="125" width="160" height="22" rx="8" fill="#0078d4"/>
+    <text x="430" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🔐 Contoso Key Vault</text>
+    <text x="430" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;a</text>
+    <text x="430" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#0078d4">🔑 contoso-secret-key</text>
+    <text x="430" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sevsnpvm required</text>
+  </g>
+  
+  <g filter="url(#shadow)">
+    <rect x="530" y="125" width="160" height="85" rx="8" fill="url(#keyVaultGrad)" stroke="#0078d4" stroke-width="2"/>
+    <rect x="530" y="125" width="160" height="22" rx="8" fill="#0078d4"/>
+    <text x="610" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🔐 Fabrikam Key Vault</text>
+    <text x="610" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;b</text>
+    <text x="610" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#0078d4">🔑 fabrikam-secret-key</text>
+    <text x="610" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sevsnpvm required</text>
+  </g>
+  
+  <g filter="url(#shadow)">
+    <rect x="710" y="125" width="160" height="85" rx="8" fill="url(#bankGrad)" stroke="#1a472a" stroke-width="2"/>
+    <rect x="710" y="125" width="160" height="22" rx="8" fill="#1a472a"/>
+    <text x="790" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🏦 Woodgrove Key Vault</text>
+    <text x="790" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;c</text>
+    <text x="790" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#1a472a">🔑 woodgrove-secret-key</text>
+    <text x="790" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">+ Partner Access</text>
+  </g>
+  
+  <!-- MAA -->
+  <g filter="url(#shadow)">
+    <rect x="900" y="125" width="150" height="85" rx="8" fill="#fff" stroke="#0078d4" stroke-width="2"/>
+    <rect x="900" y="125" width="150" height="22" rx="8" fill="#0078d4"/>
+    <text x="975" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🛡️ Azure Attestation</text>
+    <text x="975" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Verifies TEE Evidence</text>
+    <text x="975" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Issues JWT Token</text>
+    <text x="975" y="195" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sharedeus.eus.attest.azure.net</text>
+  </g>
+  
+  <!-- TEE Container Area -->
+  <g filter="url(#shadow)">
+    <rect x="350" y="230" width="700" height="280" rx="12" fill="url(#teeGrad)" stroke="#28a745" stroke-width="3"/>
+    <rect x="350" y="230" width="700" height="30" rx="12" fill="#28a745"/>
+    <text x="700" y="251" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#fff" font-weight="bold">🔒 Confidential Containers (AMD SEV-SNP TEE) - Hardware Memory Encryption</text>
+    
+    <!-- Hardware boundary note -->
+    <rect x="365" y="270" width="670" height="25" rx="5" fill="#155724"/>
+    <text x="700" y="287" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff">Even hypervisor and Azure operators cannot see memory contents - CPU-level encryption</text>
+    
+    <!-- Contoso Container -->
+    <rect x="375" y="305" width="150" height="90" rx="8" fill="#fff" stroke="#28a745" stroke-width="2"/>
+    <text x="450" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">🏢 Contoso</text>
+    <text x="450" y="345" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Flask :80 + SKR :8080</text>
+    <text x="450" y="365" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">✅ Own key access</text>
+    <text x="450" y="382" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#dc3545">❌ Cannot get Fabrikam key</text>
+    
+    <!-- Fabrikam Container -->
+    <rect x="545" y="305" width="150" height="90" rx="8" fill="#fff" stroke="#28a745" stroke-width="2"/>
+    <text x="620" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">🏭 Fabrikam</text>
+    <text x="620" y="345" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Flask :80 + SKR :8080</text>
+    <text x="620" y="365" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">✅ Own key access</text>
+    <text x="620" y="382" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#dc3545">❌ Cannot get Contoso key</text>
+    
+    <!-- Woodgrove Container -->
+    <rect x="715" y="305" width="170" height="90" rx="8" fill="#fff" stroke="#1a472a" stroke-width="2"/>
+    <text x="800" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#1a472a" font-weight="bold">🏦 Woodgrove Bank</text>
+    <text x="800" y="345" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Flask :80 + SKR :8080</text>
+    <text x="800" y="365" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">✅ Own key + Partner keys</text>
+    <text x="800" y="382" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#1a472a">📊 Partner Analysis</text>
+    
+    <!-- Decryption result box -->
+    <rect x="375" y="410" width="510" height="85" rx="8" fill="#fff" stroke="#28a745" stroke-width="1"/>
+    <text x="630" y="432" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#155724" font-weight="bold">✅ Decrypted Data (Visible Only Inside TEE)</text>
+    <text x="400" y="455" font-family="Courier New, monospace" font-size="9" fill="#28a745">Contoso: Name: "John Doe"    Phone: "555-1234"</text>
+    <text x="400" y="472" font-family="Courier New, monospace" font-size="9" fill="#28a745">Fabrikam: Name: "Jane Smith"  Phone: "555-5678"</text>
+    <text x="400" y="489" font-family="Courier New, monospace" font-size="9" fill="#1a472a">Woodgrove: Can decrypt BOTH (partner access granted)</text>
+    
+    <!-- Key only in memory note -->
+    <rect x="905" y="305" width="130" height="90" rx="8" fill="#d4edda" stroke="#28a745" stroke-width="2"/>
+    <text x="970" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">🔓 Keys in</text>
+    <text x="970" y="340" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">TEE Memory</text>
+    <text x="970" y="360" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Never exported</text>
+    <text x="970" y="375" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Hardware protected</text>
+    <text x="970" y="390" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#666">Decryption inside</text>
+  </g>
+  
+  <!-- ============ FLOW ARROWS ============ -->
+  
+  <!-- Encrypted data from blob to TEE -->
+  <path d="M 285 195 L 340 350" stroke="#ffc107" stroke-width="3" fill="none" marker-end="url(#arrowOrange)"/>
+  <text x="300" y="280" font-family="Segoe UI, Arial" font-size="9" fill="#856404">1️⃣ Encrypted</text>
+  <text x="300" y="293" font-family="Segoe UI, Arial" font-size="9" fill="#856404">data</text>
+  
+  <!-- TEE to MAA -->
+  <path d="M 700 265 L 900 165" stroke="#0078d4" stroke-width="2" fill="none" marker-end="url(#arrowBlue)" stroke-dasharray="5,3"/>
+  <text x="815" y="205" font-family="Segoe UI, Arial" font-size="8" fill="#0078d4">2️⃣ Attest</text>
+  
+  <!-- MAA to TEE (JWT) -->
+  <path d="M 930 210 L 800 265" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  <text x="880" y="245" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">JWT</text>
+  
+  <!-- TEE to Key Vaults -->
+  <path d="M 450 305 L 430 210" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  <text x="420" y="260" font-family="Segoe UI, Arial" font-size="7" fill="#28a745">3️⃣ Key</text>
+  
+  <path d="M 620 305 L 610 210" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  
+  <path d="M 800 305 L 790 210" stroke="#1a472a" stroke-width="2" fill="none" marker-end="url(#arrowBank)"/>
+  
+  <!-- Woodgrove to partner Key Vaults -->
+  <path d="M 750 320 Q 580 280 450 210" stroke="#1a472a" stroke-width="1.5" stroke-dasharray="3,2" fill="none" marker-end="url(#arrowBank)"/>
+  <path d="M 780 315 Q 700 280 620 210" stroke="#1a472a" stroke-width="1.5" stroke-dasharray="3,2" fill="none" marker-end="url(#arrowBank)"/>
+  <text x="600" y="275" font-family="Segoe UI, Arial" font-size="7" fill="#1a472a">Partner keys</text>
+  
+  <!-- Snooper denied arrow -->
+  <path d="M 285 340 L 340 340" stroke="#dc3545" stroke-width="2" fill="none" stroke-dasharray="5,3"/>
+  <text x="305" y="330" font-family="Segoe UI, Arial" font-size="9" fill="#dc3545" font-weight="bold">❌</text>
+  <line x1="325" y1="325" x2="355" y2="355" stroke="#dc3545" stroke-width="3"/>
+  <line x1="325" y1="355" x2="355" y2="325" stroke="#dc3545" stroke-width="3"/>
+  
+  <!-- ============ LEGEND ============ -->
+  <rect x="25" y="490" width="280" height="140" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
+  <text x="45" y="515" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Data Flow Legend:</text>
+  
+  <line x1="45" y1="535" x2="85" y2="535" stroke="#ffc107" stroke-width="3"/>
+  <text x="95" y="540" font-family="Segoe UI, Arial" font-size="9" fill="#333">1️⃣ Encrypted data from blob</text>
+  
+  <line x1="45" y1="555" x2="85" y2="555" stroke="#0078d4" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="95" y="560" font-family="Segoe UI, Arial" font-size="9" fill="#333">2️⃣ TEE attestation to MAA</text>
+  
+  <line x1="45" y1="575" x2="85" y2="575" stroke="#28a745" stroke-width="2"/>
+  <text x="95" y="580" font-family="Segoe UI, Arial" font-size="9" fill="#333">3️⃣ Key release to TEE</text>
+  
+  <line x1="45" y1="595" x2="85" y2="595" stroke="#1a472a" stroke-width="2" stroke-dasharray="3,2"/>
+  <text x="95" y="600" font-family="Segoe UI, Arial" font-size="9" fill="#333">Woodgrove partner access</text>
+  
+  <line x1="45" y1="615" x2="85" y2="615" stroke="#dc3545" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="95" y="620" font-family="Segoe UI, Arial" font-size="9" fill="#333">❌ Snooper denied</text>
+  
+  <!-- Result summary -->
+  <rect x="330" y="530" width="720" height="100" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
+  <text x="350" y="555" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Decryption Results by Container:</text>
+  
+  <rect x="350" y="570" width="150" height="45" rx="5" fill="#d4edda" stroke="#28a745"/>
+  <text x="425" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">Contoso ✅</text>
+  <text x="425" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Decrypts own 9 records</text>
+  
+  <rect x="520" y="570" width="150" height="45" rx="5" fill="#d4edda" stroke="#28a745"/>
+  <text x="595" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">Fabrikam ✅</text>
+  <text x="595" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Decrypts own 9 records</text>
+  
+  <rect x="690" y="570" width="170" height="45" rx="5" fill="#d4edda" stroke="#1a472a"/>
+  <text x="775" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#1a472a" font-weight="bold">Woodgrove Bank ✅</text>
+  <text x="775" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#1a472a">Decrypts partner data</text>
+  
+  <rect x="880" y="570" width="150" height="45" rx="5" fill="#f8d7da" stroke="#dc3545"/>
+  <text x="955" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#721c24" font-weight="bold">Snooper ❌</text>
+  <text x="955" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#721c24">Cannot decrypt anything</text>
+</svg>

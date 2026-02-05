@@ -1,0 +1,2739 @@
+from flask import Flask, jsonify, request, render_template
+import requests
+import json
+import os
+
+app = Flask(__name__)
+
+# Log file paths (configured in supervisord.conf)
+LOG_FILES = {
+    'skr': '/var/log/supervisor/skr.log',
+    'skr_error': '/var/log/supervisor/skr_error.log',
+    'flask': '/var/log/supervisor/flask.log',
+    'flask_error': '/var/log/supervisor/flask_error.log',
+    'supervisord': '/var/log/supervisor/supervisord.log'
+}
+
+def check_sev_guest_device():
+    """Check for AMD SEV-SNP guest device and return status info"""
+    sev_devices = [
+        '/dev/sev-guest',
+        '/dev/sev',
+        '/dev/sev0'
+    ]
+    
+    result = {
+        'available': False,
+        'device_path': None,
+        'device_info': None,
+        'explanation': None
+    }
+    
+    for device in sev_devices:
+        if os.path.exists(device):
+            result['available'] = True
+            result['device_path'] = device
+            try:
+                # Get device file info
+                import stat
+                st = os.stat(device)
+                result['device_info'] = {
+                    'mode': oct(st.st_mode),
+                    'type': 'character device' if stat.S_ISCHR(st.st_mode) else 'other',
+                    'accessible': os.access(device, os.R_OK)
+                }
+                result['explanation'] = f'AMD SEV-SNP device found at {device}. Hardware attestation should be available.'
+            except Exception as e:
+                result['device_info'] = f'Error reading device info: {str(e)}'
+            break
+    
+    if not result['available']:
+        result['explanation'] = (
+            'No AMD SEV-SNP device found (/dev/sev-guest, /dev/sev, /dev/sev0). '
+            'This means the container is NOT running inside a Trusted Execution Environment (TEE). '
+            'Hardware-based attestation is not possible. '
+            'To enable attestation, deploy with Confidential SKU (without -NoAcc flag) on AMD SEV-SNP capable hardware.'
+        )
+        # Check if we're in a container and list available devices
+        try:
+            dev_contents = os.listdir('/dev')
+            result['dev_listing'] = [d for d in dev_contents if 'sev' in d.lower() or 'tpm' in d.lower() or 'sgx' in d.lower()]
+        except:
+            result['dev_listing'] = []
+    
+    return result
+
+def read_log_files(max_lines=100):
+    """Read the last N lines from each log file"""
+    logs = {}
+    for name, path in LOG_FILES.items():
+        try:
+            if os.path.exists(path):
+                with open(path, 'r') as f:
+                    lines = f.readlines()
+                    # Get last max_lines
+                    logs[name] = ''.join(lines[-max_lines:]) if lines else '(empty)'
+            else:
+                logs[name] = f'(file not found: {path})'
+        except Exception as e:
+            logs[name] = f'(error reading file: {str(e)})'
+    
+    # Add SEV-SNP device status
+    logs['sev_device'] = check_sev_guest_device()
+    
+    return logs
+
+@app.route('/')
+def index():
+    """Serve the main attestation demo page"""
+    return render_template('index.html')
+
+@app.route('/attest/maa', methods=['POST'])
+def attest_maa():
+    """
+    Request attestation from Microsoft Azure Attestation (MAA) via sidecar
+    This endpoint forwards the request to the attestation sidecar container
+    """
+    try:
+        data = request.get_json()
+        # Use the shared MAA endpoint for East US
+        maa_endpoint = data.get('maa_endpoint', 'sharedeus.eus.attest.azure.net')
+        runtime_data = data.get('runtime_data', '')
+        
+        # Ensure the endpoint doesn't have https:// prefix - sidecar adds it
+        if maa_endpoint.startswith('https://'):
+            maa_endpoint = maa_endpoint.replace('https://', '')
+        if maa_endpoint.startswith('http://'):
+            maa_endpoint = maa_endpoint.replace('http://', '')
+
+        # Forward request to attestation sidecar (running on localhost:8080)
+        response = requests.post(
+            "http://localhost:8080/attest/maa",
+            json={"maa_endpoint": maa_endpoint, "runtime_data": runtime_data},
+            timeout=30
+        )
+
+        # Check if sidecar returned an error
+        if response.status_code != 200:
+            # Parse common error scenarios
+            error_detail = response.text[:1000] if response.text else "No response body"
+            
+            # Detect specific failure modes
+            failure_reason = "Unknown attestation failure"
+            if "SNP" in error_detail.upper() or "SEV" in error_detail.upper():
+                failure_reason = "AMD SEV-SNP hardware not available - container is running on standard (non-confidential) hardware"
+            elif "VMPL" in error_detail.upper():
+                failure_reason = "VMPL (Virtual Machine Privilege Level) not accessible - not running in a TEE"
+            elif response.status_code == 400:
+                failure_reason = "Bad request to attestation service - possibly malformed or missing TEE evidence"
+            elif response.status_code == 401 or response.status_code == 403:
+                failure_reason = "Authentication/authorization failed with MAA endpoint"
+            elif response.status_code == 500:
+                failure_reason = "Internal error in attestation sidecar - likely no TEE hardware available"
+            
+            return jsonify({
+                'status': 'error',
+                'message': f'Attestation failed with status {response.status_code}',
+                'failure_reason': failure_reason,
+                'sidecar_response': error_detail,
+                'sidecar_status_code': response.status_code,
+                'maa_endpoint': maa_endpoint,
+                'diagnosis': {
+                    'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
+                    'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
+                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
+                },
+                'note': 'Attestation requires AMD SEV-SNP hardware (Confidential SKU). Standard SKU containers cannot generate valid attestation evidence.',
+                'logs': read_log_files()
+            }), response.status_code
+
+        return jsonify({
+            'status': 'success',
+            'attestation_token': response.text,
+            'maa_endpoint': maa_endpoint
+        })
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Attestation sidecar not available. Connection refused.',
+            'diagnosis': {
+                'likely_cause': 'Sidecar container not running or not yet started',
+                'solution': 'Wait for container group to fully start, or check container logs'
+            },
+            'note': 'The sidecar container may not be running. Check container logs with: az container logs -g <rg> -n <container> --container-name attestation-sidecar',
+            'logs': read_log_files()
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'error',
+            'message': 'Attestation request timed out after 30 seconds.',
+            'note': 'The sidecar may be unresponsive or the attestation service is slow.'
+        }), 504
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/attest/raw', methods=['POST'])
+def attest_raw():
+    """
+    Get raw attestation report from the sidecar
+    """
+    try:
+        data = request.get_json()
+        runtime_data = data.get('runtime_data', '')
+
+        # Forward request to attestation sidecar
+        response = requests.post(
+            "http://localhost:8080/attest/raw",
+            json={"runtime_data": runtime_data},
+            timeout=30
+        )
+
+        # Check if sidecar returned an error
+        if response.status_code != 200:
+            error_detail = response.text[:1000] if response.text else "No response body"
+            
+            # Detect specific failure modes
+            failure_reason = "Unable to generate raw attestation report"
+            if "SNP" in error_detail.upper() or "SEV" in error_detail.upper():
+                failure_reason = "AMD SEV-SNP hardware not available"
+            elif "open /dev/sev" in error_detail.lower() or "sev-guest" in error_detail.lower():
+                failure_reason = "Cannot access /dev/sev-guest device - not running on AMD SEV-SNP hardware"
+            elif response.status_code == 500:
+                failure_reason = "Internal sidecar error - TEE hardware likely not available"
+            
+            return jsonify({
+                'status': 'error',
+                'message': f'Raw attestation failed with status {response.status_code}',
+                'failure_reason': failure_reason,
+                'sidecar_response': error_detail,
+                'sidecar_status_code': response.status_code,
+                'diagnosis': {
+                    'likely_cause': 'Container deployed with Standard SKU - no AMD SEV-SNP TEE hardware',
+                    'detail': 'Raw attestation requires direct access to AMD SEV-SNP hardware (/dev/sev-guest)',
+                    'solution': 'Redeploy with Confidential SKU'
+                },
+                'note': 'Raw attestation report can only be generated on AMD SEV-SNP confidential hardware.'
+            }), response.status_code
+
+        return jsonify({
+            'status': 'success',
+            'attestation_report': response.text
+        })
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Attestation sidecar not available. Connection refused.',
+            'diagnosis': {
+                'likely_cause': 'Sidecar container not running',
+                'solution': 'Check container logs: az container logs -g <rg> -n <container> --container-name attestation-sidecar'
+            }
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'error',
+            'message': 'Raw attestation request timed out after 30 seconds.'
+        }), 504
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/sidecar/status', methods=['GET'])
+def sidecar_status():
+    """
+    Check if the attestation sidecar is reachable and get its status
+    """
+    try:
+        response = requests.get("http://localhost:8080/status", timeout=5)
+        return jsonify({
+            'status': 'available',
+            'sidecar_response': response.text,
+            'sidecar_status_code': response.status_code
+        })
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'unavailable',
+            'message': 'Sidecar not reachable (connection refused)'
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/skr/release', methods=['POST'])
+def skr_release():
+    """
+    Attempt to release a key from Azure Key Vault using Secure Key Release (SKR).
+    This requires:
+    1. The container to be running on AMD SEV-SNP hardware (Confidential SKU)
+    2. A key in Azure Key Vault with a release policy that trusts the MAA endpoint
+    3. The container's attestation to match the key's release policy
+    """
+    try:
+        # Get SKR configuration from environment variables (set by ARM template)
+        env_maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+        env_akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+        env_key_name = os.environ.get('SKR_KEY_NAME', '')
+        
+        # Allow override from request body if provided
+        data = request.get_json(silent=True) or {}
+        maa_endpoint = data.get('maa_endpoint', env_maa_endpoint)
+        akv_endpoint = data.get('akv_endpoint', env_akv_endpoint)
+        kid = data.get('kid', env_key_name)
+        
+        if not akv_endpoint or not kid:
+            return jsonify({
+                'status': 'error',
+                'message': 'SKR not configured. Deploy with SKR-enabled Key Vault to use this feature.',
+                'note': 'Missing akv_endpoint or key name. These are set via SKR_AKV_ENDPOINT and SKR_KEY_NAME environment variables.',
+                'maa_endpoint': maa_endpoint,
+                'akv_endpoint': akv_endpoint or '(not configured)',
+                'key_name': kid or '(not configured)'
+            }), 400
+        
+        # Ensure endpoints don't have https:// prefix - sidecar adds it
+        if maa_endpoint.startswith('https://'):
+            maa_endpoint = maa_endpoint.replace('https://', '')
+        if maa_endpoint.startswith('http://'):
+            maa_endpoint = maa_endpoint.replace('http://', '')
+        if akv_endpoint.startswith('https://'):
+            akv_endpoint = akv_endpoint.replace('https://', '')
+        if akv_endpoint.startswith('http://'):
+            akv_endpoint = akv_endpoint.replace('http://', '')
+
+        # Forward request to SKR sidecar's key/release endpoint
+        response = requests.post(
+            "http://localhost:8080/key/release",
+            json={
+                "maa_endpoint": maa_endpoint,
+                "akv_endpoint": akv_endpoint,
+                "kid": kid
+            },
+            timeout=60  # SKR can take longer
+        )
+
+        # Check if sidecar returned an error
+        if response.status_code != 200:
+            error_detail = response.text[:2000] if response.text else "No response body"
+            
+            # Try to parse error JSON
+            error_json = None
+            try:
+                error_json = response.json()
+                if 'error' in error_json:
+                    error_detail = error_json['error']
+            except:
+                pass
+            
+            # Detect specific failure modes
+            failure_reason = "Secure Key Release failed"
+            if "SNP" in error_detail.upper() or "SEV" in error_detail.upper():
+                failure_reason = "AMD SEV-SNP hardware not available - cannot generate attestation for key release"
+            elif "policy" in error_detail.lower():
+                failure_reason = "Key release policy validation failed - attestation claims don't match required policy"
+            elif "401" in error_detail or "unauthorized" in error_detail.lower():
+                failure_reason = "Unauthorized - check Key Vault access permissions"
+            elif "403" in error_detail or "forbidden" in error_detail.lower():
+                failure_reason = "Forbidden - attestation failed to meet key release policy requirements"
+            elif "404" in error_detail:
+                failure_reason = f"Key not found: {kid}"
+            elif response.status_code == 500:
+                failure_reason = "Internal error in SKR sidecar - likely no TEE hardware available"
+            
+            return jsonify({
+                'status': 'error',
+                'message': f'Secure Key Release failed with status {response.status_code}',
+                'failure_reason': failure_reason,
+                'sidecar_response': error_detail,
+                'sidecar_status_code': response.status_code,
+                'maa_endpoint': maa_endpoint,
+                'akv_endpoint': akv_endpoint,
+                'key_name': kid,
+                'diagnosis': {
+                    'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
+                    'explanation': 'Secure Key Release requires hardware attestation to prove the container is running in a TEE. Without AMD SEV-SNP, the attestation fails and the key cannot be released.',
+                    'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
+                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
+                },
+                'note': 'SKR requires: 1) Confidential SKU with AMD SEV-SNP, 2) Key Vault Premium with HSM-backed key, 3) Release policy trusting the MAA endpoint',
+                'logs': read_log_files()
+            }), response.status_code
+
+        # Success - parse the released key
+        try:
+            result = response.json()
+            key_data = result.get('key', response.text)
+            
+            # Parse the key if it's JSON string
+            if isinstance(key_data, str):
+                try:
+                    key_data = json.loads(key_data)
+                except:
+                    pass
+            
+            # Store the released key for encryption use
+            global _released_key
+            global _released_key_name
+            _released_key = key_data
+            _released_key_name = kid  # Store the key name to identify company
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Secure Key Release successful!',
+                'key': key_data,
+                'maa_endpoint': maa_endpoint,
+                'akv_endpoint': akv_endpoint,
+                'key_name': kid,
+                'note': 'This key was released because the container proved it is running in a hardware TEE that matches the key release policy.',
+                'encryption_enabled': True
+            })
+        except Exception as parse_error:
+            return jsonify({
+                'status': 'success',
+                'message': 'Key released (raw response)',
+                'key': response.text,
+                'maa_endpoint': maa_endpoint,
+                'akv_endpoint': akv_endpoint,
+                'key_name': kid,
+                'parse_warning': str(parse_error)
+            })
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'SKR sidecar not available. Connection refused.',
+            'diagnosis': {
+                'likely_cause': 'Sidecar container not running or not yet started',
+                'solution': 'Wait for container group to fully start, or check container logs'
+            },
+            'logs': read_log_files()
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'error',
+            'message': 'Secure Key Release request timed out after 60 seconds.',
+            'note': 'SKR involves attestation and key vault communication which can take time.'
+        }), 504
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'exception_type': type(e).__name__,
+            'logs': read_log_files()
+        }), 500
+
+@app.route('/skr/config', methods=['GET'])
+def skr_config():
+    """
+    Return the SKR configuration from environment variables or defaults.
+    This helps the frontend know which key vault and key to use.
+    """
+    key_name = os.environ.get('SKR_KEY_NAME', '')
+    
+    # Determine company name from key name
+    company_name = None
+    key_lower = key_name.lower()
+    is_woodgrove = 'woodgrove' in key_lower
+    
+    if 'contoso' in key_lower:
+        company_name = 'Contoso'
+    elif 'fabrikam' in key_lower:
+        company_name = 'Fabrikam'
+    elif 'woodgrove' in key_lower:
+        company_name = 'Woodgrove Bank'
+    elif key_name:
+        # Extract name from key (e.g., "my-company-secret-key" -> "My Company")
+        company_name = key_name.replace('-secret-key', '').replace('-key', '').replace('-', ' ').title()
+    
+    # Check if we have TEE hardware (indicates confidential vs snooper)
+    sev_status = check_sev_guest_device()
+    is_confidential = sev_status.get('available', False)
+    
+    # Determine the "other" company's configuration
+    other_company_name = None
+    other_key_name = None
+    other_akv_endpoint = None
+    akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+    
+    # Partner configs for Woodgrove Bank (from environment variables)
+    partner_configs = None
+    if is_woodgrove:
+        # Woodgrove has access to both Contoso and Fabrikam Key Vaults
+        partner_contoso_kv = os.environ.get('PARTNER_CONTOSO_AKV_ENDPOINT', '')
+        partner_fabrikam_kv = os.environ.get('PARTNER_FABRIKAM_AKV_ENDPOINT', '')
+        partner_contoso_url = os.environ.get('PARTNER_CONTOSO_URL', '')
+        partner_fabrikam_url = os.environ.get('PARTNER_FABRIKAM_URL', '')
+        
+        if partner_contoso_kv or partner_fabrikam_kv:
+            partner_configs = {
+                'contoso': {
+                    'name': 'Contoso',
+                    'key_name': 'contoso-secret-key',
+                    'akv_endpoint': partner_contoso_kv,
+                    'container_url': partner_contoso_url
+                },
+                'fabrikam': {
+                    'name': 'Fabrikam',
+                    'key_name': 'fabrikam-secret-key',
+                    'akv_endpoint': partner_fabrikam_kv,
+                    'container_url': partner_fabrikam_url
+                }
+            }
+    elif 'contoso' in key_lower:
+        other_company_name = 'Fabrikam'
+        other_key_name = 'fabrikam-secret-key'
+        # Replace 'a' suffix with 'b' in akv endpoint (e.g., kv...a.vault.azure.net -> kv...b.vault.azure.net)
+        if akv_endpoint:
+            other_akv_endpoint = akv_endpoint.replace('a.vault.azure.net', 'b.vault.azure.net')
+    elif 'fabrikam' in key_lower:
+        other_company_name = 'Contoso'
+        other_key_name = 'contoso-secret-key'
+        if akv_endpoint:
+            other_akv_endpoint = akv_endpoint.replace('b.vault.azure.net', 'a.vault.azure.net')
+    
+    return jsonify({
+        'maa_endpoint': os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net'),
+        'akv_endpoint': akv_endpoint,
+        'key_name': key_name,
+        'company_name': company_name,
+        'is_confidential': is_confidential,
+        'is_woodgrove': is_woodgrove,
+        'configured': bool(akv_endpoint and key_name),
+        'other_company': {
+            'name': other_company_name,
+            'key_name': other_key_name,
+            'akv_endpoint': other_akv_endpoint
+        } if other_company_name else None,
+        'partner_configs': partner_configs
+    })
+
+@app.route('/skr/release-partner', methods=['POST'])
+def skr_release_partner_key():
+    """
+    Release a partner company's key (Woodgrove Bank only).
+    Woodgrove Bank has been granted access to both Contoso and Fabrikam Key Vaults.
+    """
+    try:
+        data = request.get_json()
+        partner_name = data.get('partner', '').lower()  # 'contoso' or 'fabrikam'
+        
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+        maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+        
+        # Only Woodgrove Bank can use this endpoint
+        if 'woodgrove' not in our_key_name.lower():
+            return jsonify({
+                'status': 'error',
+                'message': 'Only Woodgrove Bank can release partner keys'
+            }), 403
+        
+        # Get partner Key Vault endpoint from environment
+        if partner_name == 'contoso':
+            partner_akv_endpoint = os.environ.get('PARTNER_CONTOSO_AKV_ENDPOINT', '')
+            partner_key_name = 'contoso-secret-key'
+            partner_display_name = 'Contoso'
+        elif partner_name == 'fabrikam':
+            partner_akv_endpoint = os.environ.get('PARTNER_FABRIKAM_AKV_ENDPOINT', '')
+            partner_key_name = 'fabrikam-secret-key'
+            partner_display_name = 'Fabrikam'
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Unknown partner: {partner_name}. Use "contoso" or "fabrikam".'
+            }), 400
+        
+        if not partner_akv_endpoint:
+            return jsonify({
+                'status': 'error',
+                'message': f'Partner Key Vault endpoint not configured for {partner_display_name}'
+            }), 400
+        
+        # Ensure endpoint format
+        if maa_endpoint.startswith('https://'):
+            maa_endpoint = maa_endpoint.replace('https://', '')
+        if maa_endpoint.startswith('http://'):
+            maa_endpoint = maa_endpoint.replace('http://', '')
+        if partner_akv_endpoint.startswith('https://'):
+            partner_akv_endpoint = partner_akv_endpoint.replace('https://', '')
+        if partner_akv_endpoint.startswith('http://'):
+            partner_akv_endpoint = partner_akv_endpoint.replace('http://', '')
+        
+        # Call the SKR sidecar to release the partner's key (same port as regular SKR release)
+        skr_url = 'http://localhost:8080/key/release'
+        skr_payload = {
+            'maa_endpoint': maa_endpoint,
+            'akv_endpoint': partner_akv_endpoint,
+            'kid': partner_key_name
+        }
+        
+        response = requests.post(skr_url, json=skr_payload, timeout=60)
+        
+        if response.status_code == 200:
+            skr_response = response.json()
+            
+            # Extract and store the released key for later decryption
+            key_data = skr_response.get('key', skr_response)
+            if isinstance(key_data, str):
+                try:
+                    key_data = json.loads(key_data)
+                except:
+                    pass
+            
+            # Store the partner key for cross-company analytics
+            store_partner_key(partner_name, key_data)
+            
+            # Check if private key components are present
+            has_private_key = False
+            if isinstance(key_data, dict):
+                inner_key = key_data.get('key', key_data)
+                has_private_key = bool(inner_key.get('d'))
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Successfully released {partner_display_name}\'s key!',
+                'partner': partner_display_name,
+                'key_name': partner_key_name,
+                'key_vault': partner_akv_endpoint,
+                'key_released': True,
+                'can_decrypt': has_private_key,
+                'note': 'Key stored for cross-company analytics' if has_private_key else 'Public key only - decryption requires HSM access'
+            })
+        else:
+            error_detail = response.text[:500] if response.text else 'Unknown error'
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to release {partner_display_name}\'s key',
+                'partner': partner_display_name,
+                'http_status': response.status_code,
+                'error_detail': error_detail
+            }), response.status_code
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'SKR sidecar not available',
+            'hint': 'This container may not have the SKR sidecar running.'
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/partner/analyze', methods=['POST'])
+def partner_analyze():
+    """
+    Fetch encrypted data from partner containers (Contoso and Fabrikam),
+    decrypt using the released partner keys, and return combined demographic analysis.
+    
+    This is the real implementation - it fetches encrypted CSVs from partner containers
+    and decrypts them using the keys released via SKR (Secure Key Release).
+    """
+    try:
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+        
+        # Only Woodgrove Bank can use this endpoint
+        if 'woodgrove' not in our_key_name.lower():
+            return jsonify({
+                'status': 'error',
+                'message': 'Only Woodgrove Bank can perform partner analysis'
+            }), 403
+        
+        data = request.get_json() or {}
+        
+        # Get partner container URLs from request or environment
+        contoso_url = data.get('contoso_url', os.environ.get('PARTNER_CONTOSO_URL', ''))
+        fabrikam_url = data.get('fabrikam_url', os.environ.get('PARTNER_FABRIKAM_URL', ''))
+        
+        # Get stored partner keys (released via /skr/release-partner)
+        contoso_key = get_partner_key('contoso')
+        fabrikam_key = get_partner_key('fabrikam')
+        
+        all_records = []
+        contoso_count = 0
+        fabrikam_count = 0
+        errors = []
+        
+        # Process Contoso data
+        if contoso_key:
+            if contoso_url:
+                try:
+                    # Fetch encrypted data from Contoso container
+                    response = requests.get(f'{contoso_url}/company/list', timeout=30)
+                    if response.status_code == 200:
+                        contoso_data = response.json()
+                        encrypted_records = contoso_data.get('records', [])
+                        
+                        for record in encrypted_records:
+                            decrypted_record = {'source': 'Contoso'}
+                            
+                            # Decrypt name and phone fields
+                            if record.get('name_encrypted'):
+                                name, err = decrypt_data_with_key(record['name_encrypted'], contoso_key)
+                                decrypted_record['name'] = name if not err else f'[Decryption Error: {err}]'
+                            else:
+                                decrypted_record['name'] = '[No encrypted name]'
+                            
+                            if record.get('phone_encrypted'):
+                                phone, err = decrypt_data_with_key(record['phone_encrypted'], contoso_key)
+                                decrypted_record['phone'] = phone if not err else '[Decryption Error]'
+                            else:
+                                decrypted_record['phone'] = '[No encrypted phone]'
+                            
+                            all_records.append(decrypted_record)
+                            contoso_count += 1
+                    else:
+                        errors.append(f'Contoso: HTTP {response.status_code}')
+                except requests.exceptions.RequestException as e:
+                    errors.append(f'Contoso: Connection error - {str(e)}')
+            else:
+                errors.append('Contoso: Container URL not configured')
+        else:
+            errors.append('Contoso: Key not released')
+        
+        # Process Fabrikam data
+        if fabrikam_key:
+            if fabrikam_url:
+                try:
+                    # Fetch encrypted data from Fabrikam container
+                    response = requests.get(f'{fabrikam_url}/company/list', timeout=30)
+                    if response.status_code == 200:
+                        fabrikam_data = response.json()
+                        encrypted_records = fabrikam_data.get('records', [])
+                        
+                        for record in encrypted_records:
+                            decrypted_record = {'source': 'Fabrikam'}
+                            
+                            # Decrypt name and phone fields
+                            if record.get('name_encrypted'):
+                                name, err = decrypt_data_with_key(record['name_encrypted'], fabrikam_key)
+                                decrypted_record['name'] = name if not err else f'[Decryption Error: {err}]'
+                            else:
+                                decrypted_record['name'] = '[No encrypted name]'
+                            
+                            if record.get('phone_encrypted'):
+                                phone, err = decrypt_data_with_key(record['phone_encrypted'], fabrikam_key)
+                                decrypted_record['phone'] = phone if not err else '[Decryption Error]'
+                            else:
+                                decrypted_record['phone'] = '[No encrypted phone]'
+                            
+                            all_records.append(decrypted_record)
+                            fabrikam_count += 1
+                    else:
+                        errors.append(f'Fabrikam: HTTP {response.status_code}')
+                except requests.exceptions.RequestException as e:
+                    errors.append(f'Fabrikam: Connection error - {str(e)}')
+            else:
+                errors.append('Fabrikam: Container URL not configured')
+        else:
+            errors.append('Fabrikam: Key not released')
+        
+        # Calculate unique names
+        unique_names = len(set(r.get('name', '') for r in all_records if not r.get('name', '').startswith('[')))
+        
+        return jsonify({
+            'status': 'success' if all_records else 'partial',
+            'contoso_count': contoso_count,
+            'fabrikam_count': fabrikam_count,
+            'total_count': len(all_records),
+            'unique_names': unique_names,
+            'records': all_records,
+            'errors': errors if errors else None,
+            'note': 'Real decrypted data from partner containers' if all_records else 'No data could be retrieved'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/analytics/partner-demographics', methods=['POST'])
+def partner_demographics_analysis():
+    """
+    Woodgrove Bank Partner Demographic Analysis.
+    Fetches encrypted data from Contoso and Fabrikam containers,
+    releases partner keys via SKR, decrypts the data, and returns real aggregate analytics.
+    """
+    import collections
+    
+    try:
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+        
+        # Only Woodgrove Bank can use this endpoint
+        if 'woodgrove' not in our_key_name.lower():
+            return jsonify({
+                'status': 'error',
+                'message': 'Only Woodgrove Bank can perform partner demographic analysis'
+            }), 403
+        
+        data = request.get_json() or {}
+        contoso_url = data.get('contoso_url', '')
+        fabrikam_url = data.get('fabrikam_url', '')
+        
+        if not contoso_url or not fabrikam_url:
+            return jsonify({
+                'status': 'error',
+                'message': 'Both contoso_url and fabrikam_url are required'
+            }), 400
+        
+        results = {
+            'status': 'success',
+            'partners': {},
+            'combined_analytics': {}
+        }
+        
+        all_decrypted_records = []
+        
+        print(f"\n{'='*60}")
+        print(f"[ANALYTICS] Starting Partner Demographic Analysis")
+        print(f"[ANALYTICS] Contoso URL: {contoso_url}")
+        print(f"[ANALYTICS] Fabrikam URL: {fabrikam_url}")
+        print(f"{'='*60}")
+        import sys
+        sys.stdout.flush()
+        
+        # Fetch and process data from each partner
+        for partner_name, partner_url in [('contoso', contoso_url), ('fabrikam', fabrikam_url)]:
+            try:
+                print(f"\n[ANALYTICS] Processing partner: {partner_name.upper()}")
+                sys.stdout.flush()
+                
+                # Step 1: Release partner's key via SKR (proves TEE attestation)
+                print(f"[ANALYTICS] Step 1: Releasing {partner_name}'s encryption key via SKR...")
+                sys.stdout.flush()
+                maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+                if partner_name == 'contoso':
+                    partner_akv = os.environ.get('PARTNER_CONTOSO_AKV_ENDPOINT', '')
+                else:
+                    partner_akv = os.environ.get('PARTNER_FABRIKAM_AKV_ENDPOINT', '')
+                
+                maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+                akv_clean = partner_akv.replace('https://', '').replace('http://', '')
+                
+                skr_response = requests.post(
+                    'http://localhost:8080/key/release',
+                    json={
+                        'maa_endpoint': maa_clean,
+                        'akv_endpoint': akv_clean,
+                        'kid': f'{partner_name}-secret-key'
+                    },
+                    timeout=60
+                )
+                
+                if skr_response.status_code != 200:
+                    print(f"[ANALYTICS] ❌ Failed to release {partner_name} key: {skr_response.status_code}")
+                    sys.stdout.flush()
+                    results['partners'][partner_name] = {
+                        'status': 'error',
+                        'message': f'Failed to release {partner_name} key: {skr_response.text[:200]}',
+                        'records': 0,
+                        'decrypted': 0
+                    }
+                    continue
+                
+                print(f"[ANALYTICS] ✓ Successfully released {partner_name}'s key via SKR")
+                sys.stdout.flush()
+                
+                # Extract and store the released key
+                skr_result = skr_response.json()
+                key_data = skr_result.get('key', skr_result)
+                if isinstance(key_data, str):
+                    try:
+                        key_data = json.loads(key_data)
+                    except:
+                        pass
+                
+                store_partner_key(partner_name, key_data)
+                partner_key = get_partner_key(partner_name)
+                
+                # Check if we have decryption capability
+                inner_key = partner_key.get('key', partner_key) if isinstance(partner_key, dict) else partner_key
+                has_private_key = bool(inner_key.get('d') if isinstance(inner_key, dict) else False)
+                print(f"[ANALYTICS]   - Has private key for decryption: {has_private_key}")
+                sys.stdout.flush()
+                
+                # Step 2: Fetch encrypted data from partner container
+                print(f"[ANALYTICS] Step 2: Fetching encrypted data from {partner_name}...")
+                sys.stdout.flush()
+                encrypted_response = requests.get(f'{partner_url}/company/list', timeout=30)
+                
+                if encrypted_response.status_code != 200:
+                    results['partners'][partner_name] = {
+                        'status': 'error',
+                        'message': f'Failed to fetch data from {partner_name}',
+                        'records': 0,
+                        'decrypted': 0
+                    }
+                    continue
+                
+                encrypted_data = encrypted_response.json()
+                records = encrypted_data.get('records', [])
+                print(f"[ANALYTICS] ✓ Fetched {len(records)} encrypted records from {partner_name}")
+                sys.stdout.flush()
+                
+                # Step 3: Decrypt the records using the released key
+                print(f"[ANALYTICS] Step 3: Decrypting {len(records)} records (10 fields each)...")
+                sys.stdout.flush()
+                decrypted_count = 0
+                decrypt_errors = 0
+                last_progress = 0
+                
+                for idx, record in enumerate(records):
+                    # Progress update every 500 records
+                    progress = (idx + 1) * 100 // len(records) if records else 0
+                    if progress >= last_progress + 10 or idx == len(records) - 1:
+                        print(f"[ANALYTICS]   Decrypting: {idx+1}/{len(records)} records ({progress}%)")
+                        sys.stdout.flush()
+                        last_progress = progress
+                    decrypted_record = {'company': partner_name}
+                    
+                    # Fields to decrypt
+                    encrypted_fields = ['name', 'phone', 'address', 'postal_code', 'city', 'country',
+                                       'age', 'salary', 'eye_color', 'favorite_color']
+                    
+                    record_valid = True
+                    for field in encrypted_fields:
+                        encrypted_value = record.get(f'{field}_encrypted')
+                        if encrypted_value:
+                            if has_private_key:
+                                decrypted_value, err = decrypt_data_with_key(encrypted_value, partner_key)
+                                if err:
+                                    record_valid = False
+                                    decrypt_errors += 1
+                                    break
+                                decrypted_record[field] = decrypted_value
+                            else:
+                                # No private key - can't decrypt
+                                decrypted_record[field] = None
+                        else:
+                            decrypted_record[field] = None
+                    
+                    if record_valid and has_private_key:
+                        all_decrypted_records.append(decrypted_record)
+                        decrypted_count += 1
+                
+                print(f"[ANALYTICS] ✓ {partner_name.upper()} complete: {decrypted_count} records decrypted, {decrypt_errors} errors")
+                sys.stdout.flush()
+                
+                results['partners'][partner_name] = {
+                    'status': 'success',
+                    'records': len(records),
+                    'decrypted': decrypted_count,
+                    'decrypt_errors': decrypt_errors,
+                    'has_private_key': has_private_key,
+                    'key_released': True
+                }
+                
+            except Exception as e:
+                print(f"[ANALYTICS] ❌ Error processing {partner_name}: {str(e)}")
+                sys.stdout.flush()
+                results['partners'][partner_name] = {
+                    'status': 'error',
+                    'message': str(e),
+                    'records': 0,
+                    'decrypted': 0
+                }
+        
+        # Perform real analytics on decrypted data
+        total_records = len(all_decrypted_records)
+        
+        print(f"\n[ANALYTICS] Step 4: Computing analytics on {total_records} decrypted records...")
+        sys.stdout.flush()
+        
+        if total_records > 0:
+            results['combined_analytics']['total_records'] = total_records
+            results['combined_analytics']['contoso_records'] = len([r for r in all_decrypted_records if r['company'] == 'contoso'])
+            results['combined_analytics']['fabrikam_records'] = len([r for r in all_decrypted_records if r['company'] == 'fabrikam'])
+            
+            # Fields that were decrypted
+            results['combined_analytics']['decrypted_fields'] = [
+                'name', 'phone', 'address', 'postal_code', 'city', 'country',
+                'age', 'salary', 'eye_color', 'favorite_color'
+            ]
+            
+            # Generation breakdown by age
+            generation_counts = {
+                'Gen Alpha (2-13)': 0,
+                'Gen Z (14-29)': 0,
+                'Millennials (30-45)': 0,
+                'Gen X (46-61)': 0,
+                'Baby Boomers (62-80)': 0,
+                'Silent Generation (81+)': 0
+            }
+            
+            salary_ranges = {
+                'Under $50K': 0,
+                '$50K-$100K': 0,
+                '$100K-$150K': 0,
+                '$150K-$200K': 0,
+                'Over $200K': 0
+            }
+            
+            country_counts = collections.Counter()
+            city_by_country = collections.defaultdict(collections.Counter)
+            eye_color_counts = collections.Counter()
+            favorite_color_counts = collections.Counter()
+            contoso_salaries = []
+            fabrikam_salaries = []
+            
+            for record in all_decrypted_records:
+                # Age/Generation
+                try:
+                    age = int(record.get('age', 0))
+                    if 2 <= age <= 13:
+                        generation_counts['Gen Alpha (2-13)'] += 1
+                    elif 14 <= age <= 29:
+                        generation_counts['Gen Z (14-29)'] += 1
+                    elif 30 <= age <= 45:
+                        generation_counts['Millennials (30-45)'] += 1
+                    elif 46 <= age <= 61:
+                        generation_counts['Gen X (46-61)'] += 1
+                    elif 62 <= age <= 80:
+                        generation_counts['Baby Boomers (62-80)'] += 1
+                    elif age > 80:
+                        generation_counts['Silent Generation (81+)'] += 1
+                except:
+                    pass
+                
+                # Salary
+                try:
+                    salary = int(record.get('salary', 0))
+                    if salary < 50000:
+                        salary_ranges['Under $50K'] += 1
+                    elif salary < 100000:
+                        salary_ranges['$50K-$100K'] += 1
+                    elif salary < 150000:
+                        salary_ranges['$100K-$150K'] += 1
+                    elif salary < 200000:
+                        salary_ranges['$150K-$200K'] += 1
+                    else:
+                        salary_ranges['Over $200K'] += 1
+                    
+                    if record['company'] == 'contoso':
+                        contoso_salaries.append(salary)
+                    else:
+                        fabrikam_salaries.append(salary)
+                except:
+                    pass
+                
+                # Country
+                country = record.get('country', '')
+                if country:
+                    country_counts[country] += 1
+                    city = record.get('city', '')
+                    if city:
+                        city_by_country[country][city] += 1
+                
+                # Colors
+                eye = record.get('eye_color', '')
+                if eye:
+                    eye_color_counts[eye] += 1
+                
+                fav = record.get('favorite_color', '')
+                if fav:
+                    favorite_color_counts[fav] += 1
+            
+            results['combined_analytics']['generations'] = generation_counts
+            results['combined_analytics']['salary_ranges'] = salary_ranges
+            
+            # Top 10 countries
+            results['combined_analytics']['top_countries'] = dict(country_counts.most_common(10))
+            
+            # Top 3 cities per top country
+            top_cities = {}
+            for country in list(country_counts.keys())[:10]:
+                top_cities[country] = [city for city, _ in city_by_country[country].most_common(3)]
+            results['combined_analytics']['top_cities_by_country'] = top_cities
+            
+            results['combined_analytics']['top_eye_colors'] = dict(eye_color_counts.most_common(6))
+            results['combined_analytics']['top_favorite_colors'] = dict(favorite_color_counts.most_common(10))
+            
+            # Salary comparison
+            results['combined_analytics']['salary_comparison'] = {
+                'contoso': {
+                    'count': len(contoso_salaries),
+                    'avg': int(sum(contoso_salaries) / len(contoso_salaries)) if contoso_salaries else 0,
+                    'min': min(contoso_salaries) if contoso_salaries else 0,
+                    'max': max(contoso_salaries) if contoso_salaries else 0
+                },
+                'fabrikam': {
+                    'count': len(fabrikam_salaries),
+                    'avg': int(sum(fabrikam_salaries) / len(fabrikam_salaries)) if fabrikam_salaries else 0,
+                    'min': min(fabrikam_salaries) if fabrikam_salaries else 0,
+                    'max': max(fabrikam_salaries) if fabrikam_salaries else 0
+                }
+            }
+            
+            results['combined_analytics']['analysis_note'] = (
+                'These analytics were computed from REAL DECRYPTED DATA. '
+                'Woodgrove Bank obtained the encryption keys via Secure Key Release (SKR) '
+                'after proving TEE attestation. Individual records are never exposed - only aggregate statistics.'
+            )
+            
+            print(f"[ANALYTICS] ✓ Analytics complete!")
+            print(f"[ANALYTICS]   - Total records analyzed: {total_records}")
+            print(f"[ANALYTICS]   - Countries found: {len(results['combined_analytics'].get('top_countries', {}))}")
+            print(f"[ANALYTICS]   - Generations computed: {sum(generation_counts.values())}")
+            print(f"{'='*60}")
+            sys.stdout.flush()
+        else:
+            print(f"[ANALYTICS] ⚠ No records could be decrypted")
+            print(f"{'='*60}")
+            sys.stdout.flush()
+            results['combined_analytics']['note'] = 'No records could be decrypted. Check that SKR released the full key (including private components).'
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/skr/release-other', methods=['POST'])
+def skr_release_other_company():
+    """
+    Attempt to release a key from the OTHER company's Key Vault.
+    This demonstrates that even though both Contoso and Fabrikam are confidential containers,
+    each can only access their own keys - not each other's.
+    
+    Expected result: FAILURE - the key release policy only allows the owning company's identity.
+    """
+    try:
+        # Get our company's configuration
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+        our_akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+        maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+        
+        # Determine our company and the other company
+        key_lower = our_key_name.lower()
+        our_company = 'Unknown'
+        other_company = 'Unknown'
+        other_key_name = ''
+        other_akv_endpoint = ''
+        
+        if 'contoso' in key_lower:
+            our_company = 'Contoso'
+            other_company = 'Fabrikam'
+            other_key_name = 'fabrikam-secret-key'
+            other_akv_endpoint = our_akv_endpoint.replace('a.vault.azure.net', 'b.vault.azure.net')
+        elif 'fabrikam' in key_lower:
+            our_company = 'Fabrikam'
+            other_company = 'Contoso'
+            other_key_name = 'contoso-secret-key'
+            other_akv_endpoint = our_akv_endpoint.replace('b.vault.azure.net', 'a.vault.azure.net')
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Cannot determine company configuration. This demo requires Contoso or Fabrikam containers.',
+                'our_key_name': our_key_name
+            }), 400
+        
+        # Ensure endpoint format
+        if maa_endpoint.startswith('https://'):
+            maa_endpoint = maa_endpoint.replace('https://', '')
+        if other_akv_endpoint.startswith('https://'):
+            other_akv_endpoint = other_akv_endpoint.replace('https://', '')
+        
+        # Attempt to release the OTHER company's key
+        response = requests.post(
+            "http://localhost:8080/key/release",
+            json={
+                "maa_endpoint": maa_endpoint,
+                "akv_endpoint": other_akv_endpoint,
+                "kid": other_key_name
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            # Unexpected success! This shouldn't happen with proper policy isolation
+            return jsonify({
+                'status': 'unexpected_success',
+                'message': f'WARNING: {our_company} was able to access {other_company}\'s key! Check key release policies.',
+                'our_company': our_company,
+                'other_company': other_company,
+                'other_key_name': other_key_name,
+                'security_warning': 'Key release policies should prevent cross-company access'
+            })
+        else:
+            # Expected failure - access denied
+            error_detail = response.text[:1000] if response.text else "Access denied"
+            
+            return jsonify({
+                'status': 'access_denied',
+                'message': f'{our_company} cannot access {other_company}\'s key - as expected!',
+                'our_company': our_company,
+                'other_company': other_company,
+                'attempted_key': other_key_name,
+                'attempted_keyvault': other_akv_endpoint,
+                'http_status': response.status_code,
+                'error_detail': error_detail,
+                'explanation': 'This failure is EXPECTED. Each company has its own Key Vault and Managed Identity. '
+                              'Even though both containers are confidential, the key release policy restricts access '
+                              'to the specific managed identity assigned to each company.'
+            })
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'SKR sidecar not available',
+            'hint': 'This container may not have the SKR sidecar running.'
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# Global storage for the released key (in-memory, cleared on restart)
+_released_key = None
+_released_key_name = None  # Store the key name to identify company
+
+@app.route('/encrypt', methods=['POST'])
+def encrypt_with_released_key():
+    """
+    Encrypt plaintext using the previously released SKR key.
+    The key must have been released first via /skr/release.
+    Uses RSA-OAEP with SHA-256 for encryption.
+    """
+    global _released_key
+    
+    try:
+        data = request.get_json()
+        plaintext = data.get('plaintext', '')
+        
+        if not plaintext:
+            return jsonify({
+                'status': 'error',
+                'message': 'No plaintext provided'
+            }), 400
+        
+        if not _released_key:
+            return jsonify({
+                'status': 'error',
+                'message': 'No key has been released yet. Click "Test Secure Key Release" first.',
+                'hint': 'The key must be released from Azure Key Vault before encryption can work.'
+            }), 400
+        
+        # Import cryptography library
+        from cryptography.hazmat.primitives.asymmetric import rsa, padding
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.backends import default_backend
+        import base64
+        
+        # Parse the JWK key to extract RSA components
+        key_data = _released_key
+        
+        # Handle nested key structure
+        if isinstance(key_data, dict) and 'key' in key_data:
+            key_data = key_data['key']
+        
+        if not isinstance(key_data, dict):
+            return jsonify({
+                'status': 'error',
+                'message': 'Released key is not in expected JWK format',
+                'key_type': str(type(key_data))
+            }), 500
+        
+        # Get RSA components from JWK (n = modulus, e = exponent)
+        n_b64 = key_data.get('n', '')
+        e_b64 = key_data.get('e', '')
+        
+        if not n_b64 or not e_b64:
+            return jsonify({
+                'status': 'error',
+                'message': 'Key missing RSA components (n, e)',
+                'available_keys': list(key_data.keys())
+            }), 500
+        
+        # Convert Base64URL to bytes
+        def b64url_to_int(b64url):
+            # Add padding if needed
+            padding_needed = 4 - len(b64url) % 4
+            if padding_needed != 4:
+                b64url += '=' * padding_needed
+            # Replace URL-safe chars
+            b64 = b64url.replace('-', '+').replace('_', '/')
+            data = base64.b64decode(b64)
+            return int.from_bytes(data, byteorder='big')
+        
+        n = b64url_to_int(n_b64)
+        e = b64url_to_int(e_b64)
+        
+        # Create RSA public key from components
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+        public_numbers = RSAPublicNumbers(e, n)
+        public_key = public_numbers.public_key(default_backend())
+        
+        # Encrypt the plaintext using RSA-OAEP with SHA-256
+        plaintext_bytes = plaintext.encode('utf-8')
+        
+        # Check plaintext length (RSA-OAEP has size limits based on key size)
+        key_size_bytes = (public_key.key_size + 7) // 8
+        max_plaintext_size = key_size_bytes - 2 * 32 - 2  # For SHA-256
+        
+        if len(plaintext_bytes) > max_plaintext_size:
+            return jsonify({
+                'status': 'error',
+                'message': f'Plaintext too long. Maximum {max_plaintext_size} bytes for this key size.',
+                'plaintext_length': len(plaintext_bytes),
+                'max_length': max_plaintext_size
+            }), 400
+        
+        ciphertext = public_key.encrypt(
+            plaintext_bytes,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
+        # Return Base64-encoded ciphertext
+        ciphertext_b64 = base64.b64encode(ciphertext).decode('ascii')
+        
+        return jsonify({
+            'status': 'success',
+            'ciphertext': ciphertext_b64,
+            'algorithm': 'RSA-OAEP-SHA256',
+            'key_id': key_data.get('kid', 'unknown'),
+            'plaintext_length': len(plaintext_bytes),
+            'ciphertext_length': len(ciphertext)
+        })
+        
+    except ImportError as e:
+        return jsonify({
+            'status': 'error',
+            'message': 'Cryptography library not available',
+            'detail': str(e)
+        }), 500
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Encryption failed: {str(e)}',
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/decrypt', methods=['POST'])
+def decrypt_with_released_key():
+    """
+    Decrypt ciphertext using the previously released SKR key.
+    The key must have been released first via /skr/release.
+    Uses RSA-OAEP with SHA-256 for decryption.
+    Requires the private key components (d, p, q, etc.) in the released key.
+    """
+    global _released_key
+    
+    try:
+        data = request.get_json()
+        ciphertext_b64 = data.get('ciphertext', '')
+        
+        if not ciphertext_b64:
+            return jsonify({
+                'status': 'error',
+                'message': 'No ciphertext provided'
+            }), 400
+        
+        if not _released_key:
+            return jsonify({
+                'status': 'error',
+                'message': 'No key released. Perform Secure Key Release first.',
+                'hint': 'Click "Test Secure Key Release" button to release a key from Azure Key Vault.'
+            }), 400
+        
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateNumbers, RSAPublicNumbers
+        import base64
+        
+        # Parse the JWK key to extract RSA components
+        key_data = _released_key
+        
+        # Handle nested key structure
+        if isinstance(key_data, dict) and 'key' in key_data:
+            key_data = key_data['key']
+        
+        if not isinstance(key_data, dict):
+            return jsonify({
+                'status': 'error',
+                'message': 'Released key is not in expected JWK format'
+            }), 500
+        
+        # Get RSA components from JWK
+        # Public: n = modulus, e = exponent
+        # Private: d = private exponent, p, q = primes, dp, dq, qi = CRT params
+        n_b64 = key_data.get('n', '')
+        e_b64 = key_data.get('e', '')
+        d_b64 = key_data.get('d', '')
+        p_b64 = key_data.get('p', '')
+        q_b64 = key_data.get('q', '')
+        dp_b64 = key_data.get('dp', '')
+        dq_b64 = key_data.get('dq', '')
+        qi_b64 = key_data.get('qi', '')
+        
+        if not d_b64:
+            return jsonify({
+                'status': 'error',
+                'message': 'Released key does not contain private key components. Decryption not possible.',
+                'hint': 'The key release may have only returned the public key.',
+                'available_keys': list(key_data.keys())
+            }), 400
+        
+        # Convert Base64URL to int
+        def b64url_to_int(b64url):
+            padding_needed = 4 - len(b64url) % 4
+            if padding_needed != 4:
+                b64url += '=' * padding_needed
+            b64 = b64url.replace('-', '+').replace('_', '/')
+            data = base64.b64decode(b64)
+            return int.from_bytes(data, byteorder='big')
+        
+        n = b64url_to_int(n_b64)
+        e = b64url_to_int(e_b64)
+        d = b64url_to_int(d_b64)
+        p = b64url_to_int(p_b64)
+        q = b64url_to_int(q_b64)
+        dp = b64url_to_int(dp_b64)
+        dq = b64url_to_int(dq_b64)
+        qi = b64url_to_int(qi_b64)
+        
+        # Create RSA private key from components
+        public_numbers = RSAPublicNumbers(e, n)
+        private_numbers = RSAPrivateNumbers(p, q, d, dp, dq, qi, public_numbers)
+        private_key = private_numbers.private_key(default_backend())
+        
+        # Decode ciphertext from Base64
+        ciphertext = base64.b64decode(ciphertext_b64)
+        
+        # Decrypt using RSA-OAEP with SHA-256
+        plaintext_bytes = private_key.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
+        plaintext = plaintext_bytes.decode('utf-8')
+        
+        return jsonify({
+            'status': 'success',
+            'plaintext': plaintext,
+            'algorithm': 'RSA-OAEP-SHA256',
+            'ciphertext_length': len(ciphertext),
+            'plaintext_length': len(plaintext)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Decryption failed: {str(e)}',
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/skr/key-status', methods=['GET'])
+def skr_key_status():
+    """Check if a key has been released and is available for encryption."""
+    global _released_key
+    
+    if _released_key:
+        key_data = _released_key
+        if isinstance(key_data, dict) and 'key' in key_data:
+            key_data = key_data['key']
+        
+        return jsonify({
+            'released': True,
+            'key_type': key_data.get('kty', 'unknown') if isinstance(key_data, dict) else 'unknown',
+            'key_id': key_data.get('kid', 'unknown') if isinstance(key_data, dict) else 'unknown'
+        })
+    else:
+        return jsonify({
+            'released': False,
+            'message': 'No key has been released yet'
+        })
+
+@app.route('/health')
+def health():
+    """Health check endpoint"""
+    return jsonify({'status': 'healthy', 'service': 'confidential-aci-attestation-demo'})
+
+@app.route('/info')
+def info():
+    """Get information about the deployment with live attestation status"""
+    # Check if we're running on confidential hardware by attempting attestation
+    sidecar_available = False
+    attestation_works = False
+    attestation_error = None
+    sidecar_error = None
+    raw_sidecar_response = None
+    
+    # Step 1: Check if sidecar is available
+    try:
+        status_response = requests.get("http://localhost:8080/status", timeout=5)
+        sidecar_available = status_response.status_code == 200
+        raw_sidecar_response = status_response.text
+    except requests.exceptions.ConnectionError as e:
+        sidecar_error = f"Sidecar connection refused: {str(e)}"
+    except Exception as e:
+        sidecar_error = f"Sidecar check failed: {type(e).__name__}: {str(e)}"
+    
+    # Step 2: Try attestation if sidecar is available
+    if sidecar_available:
+        try:
+            attest_response = requests.post(
+                "http://localhost:8080/attest/maa",
+                json={"maa_endpoint": "sharedeus.eus.attest.azure.net", "runtime_data": ""},
+                timeout=30
+            )
+            if attest_response.status_code == 200:
+                attestation_works = True
+            else:
+                attestation_error = f"HTTP {attest_response.status_code}: {attest_response.text[:500]}"
+        except Exception as e:
+            attestation_error = f"{type(e).__name__}: {str(e)}"
+    
+    # Determine actual runtime environment
+    if attestation_works:
+        actual_sku = "Confidential"
+        actual_hardware = "AMD SEV-SNP (Trusted Execution Environment)"
+        platform_status = "running_in_tee"
+    elif sidecar_available:
+        actual_sku = "Standard (or Confidential without TEE access)"
+        actual_hardware = "No hardware security - Attestation sidecar present but attestation failed"
+        platform_status = "sidecar_present_attestation_failed"
+    else:
+        actual_sku = "Unknown"
+        actual_hardware = "Unable to determine - Sidecar not available"
+        platform_status = "sidecar_unavailable"
+    
+    return jsonify({
+        'platform': 'Azure Container Instances',
+        'sku': actual_sku,
+        'attestation_service': 'Microsoft Azure Attestation (MAA)',
+        'hardware': actual_hardware,
+        'demo': 'Confidential containers on ACI with remote attestation',
+        'status': {
+            'platform_status': platform_status,
+            'sidecar_available': sidecar_available,
+            'attestation_works': attestation_works,
+            'sidecar_error': sidecar_error,
+            'attestation_error': attestation_error,
+            'sidecar_status_response': raw_sidecar_response
+        },
+        'features': [
+            'Hardware-based Trusted Execution Environment (TEE)' if attestation_works else 'TEE NOT AVAILABLE - Running on standard hardware',
+            'Data integrity and confidentiality' if attestation_works else 'DATA NOT PROTECTED - No hardware encryption',
+            'Code integrity verification' if attestation_works else 'CODE INTEGRITY NOT VERIFIED',
+            'Remote attestation via MAA' if attestation_works else 'ATTESTATION FAILED - Cannot prove integrity',
+            'Security policy enforcement' if attestation_works else 'SECURITY POLICY NOT ENFORCED'
+        ],
+        'diagnostics': {
+            'note': 'If attestation_works is false, the container is NOT running in a confidential environment.',
+            'recommendation': 'Deploy with Confidential SKU to enable hardware-based security.' if not attestation_works else 'Container is properly secured with AMD SEV-SNP.',
+            'maa_endpoint': 'sharedeus.eus.attest.azure.net'
+        }
+    })
+
+@app.route('/container/info', methods=['GET'])
+def container_info():
+    """
+    Get container image metadata including image name, digest, and file checksums.
+    """
+    import hashlib
+    import subprocess
+    
+    info = {
+        'image': None,
+        'image_digest': None,
+        'container_id': None,
+        'hostname': None,
+        'app_checksums': {},
+        'skr_binary_info': {},
+        'sev_device': check_sev_guest_device(),
+        'skr_status': {}
+    }
+    
+    # Get hostname (container ID in ACI)
+    try:
+        info['hostname'] = os.environ.get('HOSTNAME', 'unknown')
+    except:
+        pass
+    
+    # Check for image info from environment (set by ACI)
+    info['image'] = os.environ.get('CONTAINER_IMAGE', 'Not available from environment')
+    
+    # Try to get container ID from cgroup
+    try:
+        with open('/proc/1/cgroup', 'r') as f:
+            cgroup_content = f.read()
+            # Look for container ID pattern
+            for line in cgroup_content.split('\n'):
+                if 'docker' in line or 'containerd' in line or 'cri' in line:
+                    parts = line.split('/')
+                    if parts:
+                        info['container_id'] = parts[-1][:12] if len(parts[-1]) > 12 else parts[-1]
+                        break
+    except:
+        info['container_id'] = 'Unable to determine'
+    
+    # Calculate checksums for key application files
+    app_files = [
+        '/app/app.py',
+        '/app/templates/index.html',
+        '/etc/supervisor/conf.d/supervisord.conf'
+    ]
+    
+    for filepath in app_files:
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, 'rb') as f:
+                    content = f.read()
+                    info['app_checksums'][filepath] = {
+                        'md5': hashlib.md5(content).hexdigest(),
+                        'sha256': hashlib.sha256(content).hexdigest()[:32] + '...',
+                        'size_bytes': len(content)
+                    }
+        except Exception as e:
+            info['app_checksums'][filepath] = {'error': str(e)}
+    
+    # Get SKR binary info
+    skr_binary = '/app/skr'
+    try:
+        if os.path.exists(skr_binary):
+            with open(skr_binary, 'rb') as f:
+                content = f.read()
+                info['skr_binary_info'] = {
+                    'path': skr_binary,
+                    'md5': hashlib.md5(content).hexdigest(),
+                    'sha256': hashlib.sha256(content).hexdigest()[:32] + '...',
+                    'size_bytes': len(content),
+                    'executable': os.access(skr_binary, os.X_OK)
+                }
+            
+            # Try to get version info
+            try:
+                result = subprocess.run([skr_binary, '--version'], capture_output=True, text=True, timeout=5)
+                info['skr_binary_info']['version'] = result.stdout.strip() or result.stderr.strip() or 'No version output'
+            except subprocess.TimeoutExpired:
+                info['skr_binary_info']['version'] = 'Timeout getting version'
+            except Exception as e:
+                info['skr_binary_info']['version'] = f'Error: {str(e)}'
+        else:
+            info['skr_binary_info'] = {'error': 'SKR binary not found at /app/skr'}
+    except Exception as e:
+        info['skr_binary_info'] = {'error': str(e)}
+    
+    # Check SKR service status
+    try:
+        # Check if SKR is responding
+        response = requests.get("http://localhost:8080/status", timeout=2)
+        info['skr_status'] = {
+            'running': True,
+            'status_code': response.status_code,
+            'response': response.text[:500] if response.text else 'No response body'
+        }
+    except requests.exceptions.ConnectionError:
+        # SKR not running - explain why for NoAcc mode
+        sev_device = info['sev_device']
+        if not sev_device.get('available', False):
+            info['skr_status'] = {
+                'running': False,
+                'reason': 'SKR sidecar cannot start without AMD SEV-SNP hardware',
+                'explanation': (
+                    'The SKR (Secure Key Release) service requires /dev/sev-guest device to generate hardware attestation reports. '
+                    'This device is only available when running on AMD SEV-SNP hardware with Confidential SKU. '
+                    'Without TEE hardware, the SKR binary may start but cannot perform any attestation operations.'
+                ),
+                'solution': 'Deploy with Confidential SKU: .\\Deploy-MultiParty.ps1 -Build -Deploy (without -NoAcc)',
+                'technical_detail': 'The SKR binary uses the SNP_GET_REPORT ioctl on /dev/sev-guest to request attestation reports from the AMD PSP.'
+            }
+        else:
+            info['skr_status'] = {
+                'running': False,
+                'reason': 'SKR service not responding on port 8080',
+                'explanation': 'The SKR binary may still be starting or encountered an error.',
+                'logs_hint': 'Check /var/log/supervisor/skr_error.log for details'
+            }
+    except requests.exceptions.Timeout:
+        info['skr_status'] = {
+            'running': 'unknown',
+            'reason': 'Timeout waiting for SKR response'
+        }
+    except Exception as e:
+        info['skr_status'] = {
+            'running': False,
+            'error': str(e)
+        }
+    
+    # Get OS info
+    try:
+        with open('/etc/os-release', 'r') as f:
+            os_release = {}
+            for line in f:
+                if '=' in line:
+                    key, value = line.strip().split('=', 1)
+                    os_release[key] = value.strip('"')
+            info['os'] = {
+                'name': os_release.get('NAME', 'Unknown'),
+                'version': os_release.get('VERSION_ID', 'Unknown'),
+                'pretty_name': os_release.get('PRETTY_NAME', 'Unknown')
+            }
+    except:
+        info['os'] = {'error': 'Unable to read /etc/os-release'}
+    
+    return jsonify(info)
+
+# ============================================================================
+# External Storage Access - Demonstrates data access from blob storage
+# ============================================================================
+
+# Configuration for the external storage account (created by Create-StorageAccount.ps1)
+# Connection string should be stored in environment variable AZURE_STORAGE_CONNECTION_STRING
+# or in a .env file (which is gitignored)
+EXTERNAL_STORAGE_ACCOUNT = "orangeappstorezspo861"
+EXTERNAL_CONTAINER_NAME = "privateappdata"
+EXTERNAL_BLOB_ENDPOINT = f"https://{EXTERNAL_STORAGE_ACCOUNT}.blob.core.windows.net"
+
+def get_consolidated_blob_name():
+    """Get the consolidated records blob name, unique per resource group deployment"""
+    resource_group = os.environ.get('RESOURCE_GROUP_NAME', '')
+    if resource_group:
+        return f"consolidated-records-{resource_group}.json"
+    return "consolidated-records.json"
+
+def get_storage_sas_token():
+    """Extract SAS token from connection string environment variable"""
+    conn_str = os.environ.get('AZURE_STORAGE_CONNECTION_STRING', '')
+    if not conn_str:
+        return None
+    # Parse the SAS token from connection string
+    # Format: ...;SharedAccessSignature=sv=...
+    if 'SharedAccessSignature=' in conn_str:
+        sas_part = conn_str.split('SharedAccessSignature=')[-1]
+        return sas_part
+    return None
+
+def get_sas_token_expiry():
+    """Parse the SAS token to extract expiry date (se parameter)"""
+    from urllib.parse import parse_qs
+    from datetime import datetime, timezone
+    
+    sas_token = get_storage_sas_token()
+    if not sas_token:
+        return None
+    
+    try:
+        # Parse the SAS token query parameters
+        params = parse_qs(sas_token)
+        
+        # 'se' is the signed expiry parameter
+        expiry_str = params.get('se', [None])[0]
+        if not expiry_str:
+            return None
+        
+        # Parse the ISO 8601 date format (e.g., 2026-02-10T00:00:00Z)
+        expiry_dt = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+        now = datetime.now(timezone.utc)
+        
+        # Calculate days remaining
+        delta = expiry_dt - now
+        days_remaining = delta.days
+        
+        return {
+            'expiry_date': expiry_str,
+            'expiry_formatted': expiry_dt.strftime('%Y-%m-%d %H:%M:%S UTC'),
+            'days_remaining': days_remaining,
+            'is_expired': days_remaining < 0,
+            'is_expiring_soon': 0 <= days_remaining <= 7
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+def get_storage_url_with_sas(base_url):
+    """Append SAS token to URL if available"""
+    sas_token = get_storage_sas_token()
+    if sas_token:
+        separator = '&' if '?' in base_url else '?'
+        return f"{base_url}{separator}{sas_token}"
+    return base_url
+
+@app.route('/storage/config')
+def storage_config():
+    """Return the external storage configuration"""
+    has_sas = get_storage_sas_token() is not None
+    expiry_info = get_sas_token_expiry()
+    blob_name = get_consolidated_blob_name()
+    return jsonify({
+        'storage_account': EXTERNAL_STORAGE_ACCOUNT,
+        'container_name': EXTERNAL_CONTAINER_NAME,
+        'blob_endpoint': EXTERNAL_BLOB_ENDPOINT,
+        'container_url': f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}",
+        'consolidated_blob_name': blob_name,
+        'authenticated': has_sas,
+        'auth_method': 'SAS Token' if has_sas else 'Anonymous (public access only)',
+        'sas_expiry': expiry_info
+    })
+
+@app.route('/storage/list')
+def list_blobs():
+    """
+    List blobs in the external storage container.
+    Uses SAS token from environment variable if available.
+    """
+    try:
+        # Azure Blob Storage supports listing via REST API with restype=container&comp=list
+        base_url = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}?restype=container&comp=list"
+        list_url = get_storage_url_with_sas(base_url)
+        
+        response = requests.get(list_url, timeout=10)
+        
+        if response.status_code == 200:
+            # Parse the XML response
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(response.text)
+            
+            blobs = []
+            for blob in root.findall('.//Blob'):
+                blob_info = {
+                    'name': blob.find('Name').text if blob.find('Name') is not None else 'Unknown',
+                }
+                # Get properties if available
+                props = blob.find('Properties')
+                if props is not None:
+                    blob_info['size'] = props.find('Content-Length').text if props.find('Content-Length') is not None else '0'
+                    blob_info['content_type'] = props.find('Content-Type').text if props.find('Content-Type') is not None else 'unknown'
+                    blob_info['last_modified'] = props.find('Last-Modified').text if props.find('Last-Modified') is not None else 'unknown'
+                    blob_info['url'] = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}/{blob_info['name']}"
+                blobs.append(blob_info)
+            
+            return jsonify({
+                'status': 'success',
+                'storage_account': EXTERNAL_STORAGE_ACCOUNT,
+                'container': EXTERNAL_CONTAINER_NAME,
+                'blob_count': len(blobs),
+                'blobs': blobs,
+                'message': 'Successfully listed blobs from external storage',
+                'security_note': 'Data accessed using SAS token authentication' if get_storage_sas_token() else 'This data is publicly accessible - no attestation required!',
+                'authenticated': get_storage_sas_token() is not None
+            })
+        elif response.status_code == 404:
+            return jsonify({
+                'status': 'error',
+                'message': 'Container not found. The storage account or container may not exist yet.',
+                'storage_account': EXTERNAL_STORAGE_ACCOUNT,
+                'container': EXTERNAL_CONTAINER_NAME,
+                'hint': 'Run Create-StorageAccount.ps1 to create the storage account and container.'
+            }), 404
+        elif response.status_code == 403:
+            return jsonify({
+                'status': 'error',
+                'message': 'Access denied. The container may not have public access enabled.',
+                'storage_account': EXTERNAL_STORAGE_ACCOUNT,
+                'container': EXTERNAL_CONTAINER_NAME
+            }), 403
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Unexpected response from storage: HTTP {response.status_code}',
+                'response_text': response.text[:500]
+            }), response.status_code
+            
+    except requests.exceptions.ConnectionError as e:
+        return jsonify({
+            'status': 'error',
+            'message': 'Cannot connect to storage account. Network may be unavailable.',
+            'error': str(e)
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'error',
+            'message': 'Request to storage account timed out.'
+        }), 504
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/storage/download/<path:blob_name>')
+def download_blob(blob_name):
+    """
+    Download a specific blob and return its contents.
+    Uses SAS token from environment variable if available.
+    """
+    try:
+        base_url = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}/{blob_name}"
+        blob_url = get_storage_url_with_sas(base_url)
+        response = requests.get(blob_url, timeout=30)
+        
+        if response.status_code == 200:
+            # Try to decode as text, fallback to base64 for binary
+            try:
+                content = response.text
+                is_text = True
+            except:
+                import base64
+                content = base64.b64encode(response.content).decode('utf-8')
+                is_text = False
+            
+            return jsonify({
+                'status': 'success',
+                'blob_name': blob_name,
+                'content': content,
+                'is_text': is_text,
+                'size': len(response.content),
+                'content_type': response.headers.get('Content-Type', 'unknown'),
+                'security_note': 'Data accessed using SAS token authentication' if get_storage_sas_token() else 'This data was accessed WITHOUT attestation - it is publicly readable!',
+                'authenticated': get_storage_sas_token() is not None
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to download blob: HTTP {response.status_code}',
+                'blob_name': blob_name
+            }), response.status_code
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'blob_name': blob_name
+        }), 500
+
+# ============================================================================
+# Company Data Management - Encrypted data storage per company
+# ============================================================================
+
+def get_company_name_from_key():
+    """Extract company name from the released key name"""
+    global _released_key_name
+    if not _released_key_name:
+        return None
+    # Key names are like "contoso-secret-key" or "fabrikam-secret-key"
+    key_name = _released_key_name.lower()
+    if 'contoso' in key_name:
+        return 'contoso'
+    elif 'fabrikam' in key_name:
+        return 'fabrikam'
+    else:
+        # Use the key name as-is for other cases
+        return key_name.replace('-secret-key', '').replace('-key', '')
+
+def encrypt_data_with_key(plaintext):
+    """Encrypt data using the released key"""
+    global _released_key
+    
+    if not _released_key:
+        return None, "No key released"
+    
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+    import base64
+    
+    key_data = _released_key
+    if isinstance(key_data, dict) and 'key' in key_data:
+        key_data = key_data['key']
+    
+    n_b64 = key_data.get('n', '')
+    e_b64 = key_data.get('e', '')
+    
+    if not n_b64 or not e_b64:
+        return None, "Key missing RSA components"
+    
+    def b64url_to_int(b64url):
+        padding_needed = 4 - len(b64url) % 4
+        if padding_needed != 4:
+            b64url += '=' * padding_needed
+        b64 = b64url.replace('-', '+').replace('_', '/')
+        data = base64.b64decode(b64)
+        return int.from_bytes(data, byteorder='big')
+    
+    n = b64url_to_int(n_b64)
+    e = b64url_to_int(e_b64)
+    
+    public_numbers = RSAPublicNumbers(e, n)
+    public_key = public_numbers.public_key(default_backend())
+    
+    plaintext_bytes = plaintext.encode('utf-8')
+    
+    ciphertext = public_key.encrypt(
+        plaintext_bytes,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    
+    return base64.b64encode(ciphertext).decode('utf-8'), None
+
+def decrypt_data_with_key(ciphertext_b64, key_data=None):
+    """Decrypt data using the released key's private components"""
+    global _released_key
+    
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateNumbers, RSAPublicNumbers
+    import base64
+    
+    # Use provided key or fall back to global released key
+    if key_data is None:
+        if not _released_key:
+            return None, "No key released"
+        key_data = _released_key
+    
+    if isinstance(key_data, dict) and 'key' in key_data:
+        key_data = key_data['key']
+    
+    # Get RSA components
+    n_b64 = key_data.get('n', '')
+    e_b64 = key_data.get('e', '')
+    d_b64 = key_data.get('d', '')  # Private exponent
+    p_b64 = key_data.get('p', '')  # First prime
+    q_b64 = key_data.get('q', '')  # Second prime
+    dp_b64 = key_data.get('dp', '')  # d mod (p-1)
+    dq_b64 = key_data.get('dq', '')  # d mod (q-1)
+    qi_b64 = key_data.get('qi', '')  # q^(-1) mod p
+    
+    if not all([n_b64, e_b64, d_b64, p_b64, q_b64]):
+        return None, "Key missing private RSA components (d, p, q required for decryption)"
+    
+    def b64url_to_int(b64url):
+        padding_needed = 4 - len(b64url) % 4
+        if padding_needed != 4:
+            b64url += '=' * padding_needed
+        b64 = b64url.replace('-', '+').replace('_', '/')
+        data = base64.b64decode(b64)
+        return int.from_bytes(data, byteorder='big')
+    
+    try:
+        n = b64url_to_int(n_b64)
+        e = b64url_to_int(e_b64)
+        d = b64url_to_int(d_b64)
+        p = b64url_to_int(p_b64)
+        q = b64url_to_int(q_b64)
+        
+        # Calculate dp, dq, qi if not provided
+        if dp_b64:
+            dp = b64url_to_int(dp_b64)
+        else:
+            dp = d % (p - 1)
+        
+        if dq_b64:
+            dq = b64url_to_int(dq_b64)
+        else:
+            dq = d % (q - 1)
+        
+        if qi_b64:
+            qi = b64url_to_int(qi_b64)
+        else:
+            qi = pow(q, -1, p)
+        
+        # Construct the private key
+        public_numbers = RSAPublicNumbers(e, n)
+        private_numbers = RSAPrivateNumbers(p, q, d, dp, dq, qi, public_numbers)
+        private_key = private_numbers.private_key(default_backend())
+        
+        # Decode the ciphertext
+        ciphertext = base64.b64decode(ciphertext_b64)
+        
+        # Decrypt
+        plaintext_bytes = private_key.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
+        return plaintext_bytes.decode('utf-8'), None
+        
+    except Exception as e:
+        return None, f"Decryption failed: {str(e)}"
+
+# Store partner keys for Woodgrove's cross-company analytics
+_partner_keys = {}  # {'contoso': key_data, 'fabrikam': key_data}
+
+def store_partner_key(partner_name, key_data):
+    """Store a partner's released key for later use"""
+    global _partner_keys
+    _partner_keys[partner_name.lower()] = key_data
+
+def get_partner_key(partner_name):
+    """Get a stored partner key"""
+    global _partner_keys
+    return _partner_keys.get(partner_name.lower())
+
+@app.route('/company/info')
+def company_info():
+    """Get information about which company this container belongs to"""
+    global _released_key_name
+    company = get_company_name_from_key()
+    return jsonify({
+        'company': company,
+        'key_name': _released_key_name,
+        'key_released': _released_key is not None,
+        'data_file': f"{company}-data.json" if company else None
+    })
+
+@app.route('/company/save', methods=['POST'])
+def save_company_data():
+    """
+    Save encrypted data to company-specific blob storage file.
+    Appends to existing data or creates new file.
+    """
+    global _released_key
+    global _released_key_name
+    
+    try:
+        if not _released_key:
+            return jsonify({
+                'status': 'error',
+                'message': 'No key released. Complete Secure Key Release first.'
+            }), 400
+        
+        data = request.get_json()
+        name = data.get('name', '')
+        phone = data.get('phone', '')
+        
+        if not name and not phone:
+            return jsonify({
+                'status': 'error',
+                'message': 'At least a name or phone number must be provided'
+            }), 400
+        
+        company = get_company_name_from_key()
+        if not company:
+            return jsonify({
+                'status': 'error',
+                'message': 'Cannot determine company from key name'
+            }), 400
+        
+        # Encrypt each field
+        encrypted_name, err1 = encrypt_data_with_key(name) if name else (None, None)
+        encrypted_phone, err2 = encrypt_data_with_key(phone) if phone else (None, None)
+        
+        if err1 or err2:
+            return jsonify({
+                'status': 'error',
+                'message': f'Encryption failed: {err1 or err2}'
+            }), 500
+        
+        # Create the new record with company identifier
+        import datetime
+        new_record = {
+            'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+            'company': company,
+            'name_encrypted': encrypted_name,
+            'phone_encrypted': encrypted_phone
+        }
+        
+        # Read existing data from consolidated file (if exists)
+        blob_name = get_consolidated_blob_name()
+        existing_data = []
+        
+        try:
+            base_url = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}/{blob_name}"
+            read_url = get_storage_url_with_sas(base_url)
+            response = requests.get(read_url, timeout=10)
+            if response.status_code == 200:
+                existing_data = response.json()
+                if not isinstance(existing_data, list):
+                    existing_data = [existing_data]
+        except:
+            existing_data = []
+        
+        # Append new record
+        existing_data.append(new_record)
+        
+        # Upload to blob storage
+        sas_token = get_storage_sas_token()
+        if not sas_token:
+            return jsonify({
+                'status': 'error',
+                'message': 'No storage SAS token configured. Cannot save data.'
+            }), 500
+        
+        upload_url = f"{EXTERNAL_BLOB_ENDPOINT}/{EXTERNAL_CONTAINER_NAME}/{blob_name}?{sas_token}"
+        headers = {
+            'Content-Type': 'application/json',
+            'x-ms-blob-type': 'BlockBlob'
+        }
+        
+        upload_response = requests.put(
+            upload_url,
+            data=json.dumps(existing_data, indent=2),
+            headers=headers,
+            timeout=30
+        )
+        
+        if upload_response.status_code in [200, 201]:
+            return jsonify({
+                'status': 'success',
+                'message': f'Data saved to {blob_name}',
+                'company': company,
+                'blob_name': blob_name,
+                'record_count': len(existing_data),
+                'note': 'Data is encrypted with company-specific key. Only this company can decrypt it.'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to upload: HTTP {upload_response.status_code}',
+                'response': upload_response.text[:500]
+            }), upload_response.status_code
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/company/populate', methods=['POST'])
+def populate_from_csv():
+    """
+    Read company CSV file from inside the TEE, encrypt each record,
+    and write to consolidated-records.json in blob storage.
+    """
+    global _released_key
+    global _released_key_name
+    
+    try:
+        if not _released_key:
+            return jsonify({
+                'status': 'error',
+                'message': 'No key released. Complete Secure Key Release first.'
+            }), 400
+        
+        company = get_company_name_from_key()
+        if not company:
+            return jsonify({
+                'status': 'error',
+                'message': 'Cannot determine company from key name'
+            }), 400
+        
+        # Determine which CSV file to read based on company
+        csv_filename = f"{company.lower()}-data.csv"
+        csv_path = f"/app/{csv_filename}"
+        
+        if not os.path.exists(csv_path):
+            return jsonify({
+                'status': 'error',
+                'message': f'CSV file not found: {csv_filename}. File should be at {csv_path}'
+            }), 404
+        
+        # Read CSV file
+        import csv
+        import datetime
+        
+        records = []
+        with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                records.append(row)
+        
+        if not records:
+            return jsonify({
+                'status': 'error',
+                'message': f'No records found in {csv_filename}'
+            }), 400
+        
+        # Encrypt each record - ALL fields get encrypted with company's secret key
+        encrypted_records = []
+        all_fields = ['name', 'phone', 'address', 'postal_code', 'city', 'country', 'age', 'salary', 'eye_color', 'favorite_color']
+        
+        for record in records:
+            encrypted_record = {
+                'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+                'company': company
+            }
+            
+            # Encrypt ALL fields with company's secret key
+            for field in all_fields:
+                value = record.get(field, '')
+                if value:
+                    encrypted_value, err = encrypt_data_with_key(str(value))
+                    if err:
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'Encryption failed for {field}: {err}'
+                        }), 500
+                    encrypted_record[f'{field}_encrypted'] = encrypted_value
+                else:
+                    encrypted_record[f'{field}_encrypted'] = None
+            
+            encrypted_records.append(encrypted_record)
+        
+        # Save to local storage inside the container
+        local_data_dir = '/app/encrypted-data'
+        os.makedirs(local_data_dir, exist_ok=True)
+        local_file = f'{local_data_dir}/{company}-encrypted.json'
+        
+        # Read existing local records (if any)
+        existing_data = []
+        try:
+            if os.path.exists(local_file):
+                with open(local_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    if not isinstance(existing_data, list):
+                        existing_data = [existing_data]
+        except:
+            existing_data = []
+        
+        # Append new encrypted records
+        existing_data.extend(encrypted_records)
+        
+        # Write to local file
+        try:
+            with open(local_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, indent=2)
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Populated {len(encrypted_records)} records from {csv_filename}',
+                'company': company,
+                'source_file': csv_filename,
+                'records_added': len(encrypted_records),
+                'total_records': len(existing_data),
+                'destination': local_file,
+                'storage_type': 'local',
+                'note': 'All PII fields encrypted with company key. Demographic fields stored for analytics.'
+            })
+        except Exception as write_err:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to write local file: {str(write_err)}'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/company/list')
+def list_company_data():
+    """
+    Read and display company's encrypted data file from local storage.
+    Note: Decryption would require the private key which stays in Azure Key Vault HSM.
+    This endpoint shows the encrypted data to demonstrate that it's protected.
+    """
+    global _released_key
+    global _released_key_name
+    
+    try:
+        company = get_company_name_from_key()
+        
+        if not company:
+            # Try to determine company from SKR_KEY_NAME environment variable
+            key_name = os.environ.get('SKR_KEY_NAME', '')
+            if 'contoso' in key_name.lower():
+                company = 'contoso'
+            elif 'fabrikam' in key_name.lower():
+                company = 'fabrikam'
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Cannot determine company. Release a key first or check SKR configuration.'
+                }), 400
+        
+        # Read from local encrypted data file
+        local_data_dir = '/app/encrypted-data'
+        local_file = f'{local_data_dir}/{company}-encrypted.json'
+        
+        if os.path.exists(local_file):
+            with open(local_file, 'r', encoding='utf-8') as f:
+                all_data = json.load(f)
+            
+            # Add line numbers to all records (1-based index)
+            if isinstance(all_data, list):
+                for i, record in enumerate(all_data):
+                    record['line_number'] = i + 1
+                all_records = all_data
+            else:
+                all_data['line_number'] = 1
+                all_records = [all_data]
+            
+            return jsonify({
+                'status': 'success',
+                'company': company,
+                'local_file': local_file,
+                'record_count': len(all_records),
+                'records': all_records,
+                'key_released': _released_key is not None,
+                'storage_type': 'local',
+                'note': 'Data is encrypted and stored locally in the container.'
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'company': company,
+                'local_file': local_file,
+                'record_count': 0,
+                'records': [],
+                'message': 'No encrypted data file exists yet. Run /company/populate or wait for auto-initialization.'
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/company/encrypted-status')
+def encrypted_data_status():
+    """
+    Check the status of the encrypted data file (quick summary without full data).
+    """
+    try:
+        key_name = os.environ.get('SKR_KEY_NAME', '')
+        company = None
+        if 'contoso' in key_name.lower():
+            company = 'contoso'
+        elif 'fabrikam' in key_name.lower():
+            company = 'fabrikam'
+        elif 'woodgrove' in key_name.lower():
+            company = 'woodgrove'
+        
+        local_data_dir = '/app/encrypted-data'
+        local_file = f'{local_data_dir}/{company}-encrypted.json' if company else None
+        
+        result = {
+            'company': company,
+            'key_name': key_name,
+            'key_released': _released_key is not None,
+            'encrypted_file': local_file,
+            'file_exists': os.path.exists(local_file) if local_file else False,
+        }
+        
+        if result['file_exists']:
+            # Get file stats
+            stat = os.stat(local_file)
+            result['file_size_bytes'] = stat.st_size
+            
+            # Count records
+            with open(local_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                result['record_count'] = len(data) if isinstance(data, list) else 1
+                
+                # Show first record summary (fields only, no values)
+                if isinstance(data, list) and len(data) > 0:
+                    result['fields'] = list(data[0].keys())
+                elif isinstance(data, dict):
+                    result['fields'] = list(data.keys())
+            
+            result['status'] = 'success'
+            result['message'] = f'Encrypted data file exists with {result["record_count"]} records'
+        else:
+            result['status'] = 'pending'
+            result['message'] = 'No encrypted data file yet. Auto-initialization may still be running.'
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# =============================================================================
+# AUTO-INITIALIZATION ON STARTUP (For Contoso and Fabrikam containers)
+# =============================================================================
+def auto_initialize_container():
+    """
+    Automatically perform attestation, key release, and CSV encryption on startup.
+    This only runs for Contoso and Fabrikam containers (which have CSV files).
+    Woodgrove and Snooper containers skip this process.
+    """
+    import time
+    import csv
+    import datetime
+    
+    # Determine which company this container belongs to based on SKR_KEY_NAME
+    key_name = os.environ.get('SKR_KEY_NAME', '')
+    maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+    akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+    
+    # Identify company from key name
+    company = None
+    if 'contoso' in key_name.lower():
+        company = 'contoso'
+    elif 'fabrikam' in key_name.lower():
+        company = 'fabrikam'
+    
+    # Log startup info
+    print(f"\n{'='*60}")
+    print(f"AUTO-INITIALIZATION STARTED")
+    print(f"{'='*60}")
+    print(f"SKR_KEY_NAME: {key_name or '(not set)'}")
+    print(f"SKR_MAA_ENDPOINT: {maa_endpoint}")
+    print(f"SKR_AKV_ENDPOINT: {akv_endpoint or '(not set)'}")
+    print(f"Detected Company: {company or '(unknown)'}")
+    
+    # Skip if not Contoso or Fabrikam
+    if not company or company not in ['contoso', 'fabrikam']:
+        print(f"\n[SKIP] This container is not Contoso or Fabrikam (key: {key_name})")
+        print(f"       Auto-initialization only runs for data provider containers.")
+        print(f"{'='*60}\n")
+        return
+    
+    # Check for CSV file
+    csv_filename = f"{company}-data.csv"
+    csv_path = f"/app/{csv_filename}"
+    
+    if not os.path.exists(csv_path):
+        print(f"\n[SKIP] CSV file not found: {csv_path}")
+        print(f"       Auto-initialization requires {csv_filename}")
+        print(f"{'='*60}\n")
+        return
+    
+    # Wait for SKR sidecar to be ready
+    print(f"\n[STEP 1/4] Waiting for SKR sidecar to be ready...")
+    max_retries = 30
+    sidecar_ready = False
+    
+    for i in range(max_retries):
+        try:
+            response = requests.get("http://localhost:8080/", timeout=2)
+            sidecar_ready = True
+            print(f"           SKR sidecar is ready (attempt {i+1}/{max_retries})")
+            break
+        except:
+            if i < max_retries - 1:
+                time.sleep(2)
+            else:
+                print(f"           [FAILED] SKR sidecar not available after {max_retries} attempts")
+    
+    if not sidecar_ready:
+        print(f"\n[ERROR] Auto-initialization FAILED: SKR sidecar not available")
+        print(f"{'='*60}\n")
+        return
+    
+    # Step 2: Perform MAA Attestation
+    print(f"\n[STEP 2/4] Performing MAA attestation...")
+    attestation_success = False
+    
+    try:
+        # Clean up endpoint
+        maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+        
+        response = requests.post(
+            "http://localhost:8080/attest/maa",
+            json={"maa_endpoint": maa_clean, "runtime_data": "auto-init"},
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            attestation_success = True
+            print(f"           [SUCCESS] MAA attestation successful")
+            print(f"           MAA Endpoint: {maa_clean}")
+        else:
+            print(f"           [FAILED] MAA attestation failed: HTTP {response.status_code}")
+            print(f"           Response: {response.text[:200]}")
+    except Exception as e:
+        print(f"           [FAILED] MAA attestation error: {str(e)}")
+    
+    # Step 3: Perform Secure Key Release
+    print(f"\n[STEP 3/4] Performing Secure Key Release...")
+    global _released_key
+    global _released_key_name
+    skr_success = False
+    
+    try:
+        # Clean up endpoints
+        akv_clean = akv_endpoint.replace('https://', '').replace('http://', '')
+        maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+        
+        response = requests.post(
+            "http://localhost:8080/key/release",
+            json={
+                "maa_endpoint": maa_clean,
+                "akv_endpoint": akv_clean,
+                "kid": key_name
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            key_data = result.get('key', response.text)
+            
+            # Parse the key if it's JSON string
+            if isinstance(key_data, str):
+                try:
+                    key_data = json.loads(key_data)
+                except:
+                    pass
+            
+            _released_key = key_data
+            _released_key_name = key_name
+            skr_success = True
+            print(f"           [SUCCESS] Secure Key Release successful")
+            print(f"           Key Name: {key_name}")
+            print(f"           AKV Endpoint: {akv_clean}")
+        else:
+            print(f"           [FAILED] SKR failed: HTTP {response.status_code}")
+            print(f"           Response: {response.text[:200]}")
+    except Exception as e:
+        print(f"           [FAILED] SKR error: {str(e)}")
+    
+    if not skr_success:
+        print(f"\n[ERROR] Auto-initialization FAILED: Could not release key")
+        print(f"{'='*60}\n")
+        return
+    
+    # Step 4: Encrypt CSV and upload to blob storage
+    print(f"\n[STEP 4/4] Encrypting CSV file and uploading to blob storage...")
+    
+    try:
+        # Read CSV file
+        records = []
+        with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                records.append(row)
+        
+        total_records = len(records)
+        print(f"           CSV File: {csv_filename}")
+        print(f"           Total Records: {total_records}")
+        
+        if total_records == 0:
+            print(f"           [SKIP] No records to encrypt")
+            print(f"{'='*60}\n")
+            return
+        
+        # Encrypt each record - ALL fields get encrypted with company's secret key
+        encrypted_records = []
+        encryption_errors = 0
+        all_fields = ['name', 'phone', 'address', 'postal_code', 'city', 'country', 'age', 'salary', 'eye_color', 'favorite_color']
+        
+        for record in records:
+            encrypted_record = {
+                'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+                'company': company
+            }
+            
+            has_error = False
+            # Encrypt ALL fields with company's secret key
+            for field in all_fields:
+                value = record.get(field, '')
+                if value:
+                    encrypted_value, err = encrypt_data_with_key(str(value))
+                    if err:
+                        has_error = True
+                        break
+                    encrypted_record[f'{field}_encrypted'] = encrypted_value
+                else:
+                    encrypted_record[f'{field}_encrypted'] = None
+            
+            if has_error:
+                encryption_errors += 1
+                continue
+            
+            encrypted_records.append(encrypted_record)
+        
+        lines_encrypted = len(encrypted_records)
+        print(f"           Records Encrypted: {lines_encrypted}")
+        
+        if encryption_errors > 0:
+            print(f"           Encryption Errors: {encryption_errors}")
+        
+        if lines_encrypted == 0:
+            print(f"           [FAILED] No records encrypted successfully")
+            print(f"{'='*60}\n")
+            return
+        
+        # Save to local storage inside the container
+        local_data_dir = '/app/encrypted-data'
+        os.makedirs(local_data_dir, exist_ok=True)
+        local_file = f'{local_data_dir}/{company}-encrypted.json'
+        
+        # Read existing local records (if any)
+        existing_data = []
+        try:
+            if os.path.exists(local_file):
+                with open(local_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    if not isinstance(existing_data, list):
+                        existing_data = [existing_data]
+        except:
+            existing_data = []
+        
+        # Append new encrypted records
+        existing_data.extend(encrypted_records)
+        
+        # Write to local file
+        try:
+            with open(local_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, indent=2)
+            
+            print(f"           [SUCCESS] Saved to local storage")
+            print(f"           Destination: {local_file}")
+        except Exception as write_err:
+            print(f"           [FAILED] Write failed: {str(write_err)}")
+            print(f"{'='*60}\n")
+            return
+        
+        # Final summary
+        print(f"\n{'='*60}")
+        print(f"AUTO-INITIALIZATION COMPLETED SUCCESSFULLY")
+        print(f"{'='*60}")
+        print(f"  Company:          {company.upper()}")
+        print(f"  Key Used:         {key_name}")
+        print(f"  Source File:      {csv_filename}")
+        print(f"  Records Read:     {total_records}")
+        print(f"  Lines Encrypted:  {lines_encrypted}")
+        print(f"  Total in Storage: {len(existing_data)}")
+        print(f"  Output File:      {local_file}")
+        print(f"  Attestation:      {'SUCCESS' if attestation_success else 'FAILED'}")
+        print(f"  Key Release:      {'SUCCESS' if skr_success else 'FAILED'}")
+        print(f"  Encryption:       SUCCESS")
+        print(f"  Local Save:       SUCCESS")
+        print(f"{'='*60}\n")
+        
+    except Exception as e:
+        print(f"           [ERROR] Exception during encryption/upload: {str(e)}")
+        print(f"{'='*60}\n")
+
+def start_auto_initialization():
+    """Start auto-initialization in a background thread"""
+    import threading
+    
+    def delayed_init():
+        import time
+        # Give Flask a moment to start
+        time.sleep(3)
+        try:
+            auto_initialize_container()
+        except Exception as e:
+            print(f"\n[AUTO-INIT ERROR] {str(e)}\n")
+    
+    # Run in background thread so Flask can start immediately
+    init_thread = threading.Thread(target=delayed_init, daemon=True)
+    init_thread.start()
+    print("\n[INFO] Auto-initialization thread started (will run in background)\n")
+
+if __name__ == '__main__':
+    # Start auto-initialization for Contoso/Fabrikam containers
+    start_auto_initialization()
+    
+    # Run on port 80 to match Azure Container Instances default
+    app.run(host='0.0.0.0', port=80, debug=False)
