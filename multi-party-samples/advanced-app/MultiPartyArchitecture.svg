@@ -123,7 +123,7 @@
   <g filter="url(#shadow)">
     <rect x="370" y="280" width="280" height="200" rx="10" fill="url(#confGrad)" stroke="#28a745" stroke-width="2"/>
     <rect x="370" y="280" width="280" height="32" rx="10" fill="#28a745"/>
-    <text x="510" y="302" text-anchor="middle" font-family="Segoe UI, Arial" font-size="13" fill="#fff" font-weight="bold">🏭 Fabrikam (Confidential)</text>
+    <text x="510" y="302" text-anchor="middle" font-family="Segoe UI, Arial" font-size="13" fill="#fff" font-weight="bold">👗 Fabrikam Fashion (Confidential)</text>
     <rect x="390" y="322" width="240" height="45" rx="5" fill="#d4edda" stroke="#28a745"/>
     <text x="510" y="342" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724">🔒 AMD SEV-SNP TEE</text>
     <text x="510" y="358" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724">Hardware Memory Encryption</text>

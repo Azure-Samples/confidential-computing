@@ -98,24 +98,24 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Generate Contoso data with seed for reproducibility
-    random.seed(12345)
+    random.seed(20260206)
     contoso_path = os.path.join(script_dir, 'contoso-data.csv')
     with open(contoso_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['name', 'phone', 'age', 'salary', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
-        for _ in range(2500):
+        for _ in range(800):
             writer.writerow(generate_record())
-    print(f'Generated 2500 records for contoso-data.csv')
+    print(f'Generated 800 records for contoso-data.csv')
 
     # Generate Fabrikam data with different seed
-    random.seed(67890)
+    random.seed(20260207)
     fabrikam_path = os.path.join(script_dir, 'fabrikam-data.csv')
     with open(fabrikam_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['name', 'phone', 'age', 'salary', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
-        for _ in range(2500):
+        for _ in range(800):
             writer.writerow(generate_record())
-    print(f'Generated 2500 records for fabrikam-data.csv')
+    print(f'Generated 800 records for fabrikam-data.csv')
 
 if __name__ == '__main__':
     main()

@@ -65,7 +65,8 @@ Comprehensive 4-container demonstration with partner analytics:
 
 ![Multi-Party Topology](/multi-party-samples/advanced-app/MultiPartyTopology.svg)
 
-- **Contoso & Fabrikam** - Data providers with encrypted datasets (50 records each)
+- **Contoso Corporation** - Enterprise data provider with encrypted employee records
+- **Fabrikam Fashion** - Online retailer with encrypted customer records
 - **Woodgrove Bank** - Trusted analytics partner with cross-company key access
 - **Snooper** - Attacker view showing encrypted-only data
 
@@ -86,7 +87,7 @@ Comprehensive 4-container demonstration with partner analytics:
 ![Data Flow Diagram](/multi-party-samples/advanced-app/DataFlowDiagram.svg)
 
 #### [Demo App](/multi-party-samples/demo-app/README-MultiParty.md) - Basic Demo
-Simpler 3-container demonstration (Contoso, Fabrikam, Snooper) without partner analytics.
+Simpler 3-container demonstration (Contoso, Fabrikam Fashion, Snooper) without partner analytics.
 
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:

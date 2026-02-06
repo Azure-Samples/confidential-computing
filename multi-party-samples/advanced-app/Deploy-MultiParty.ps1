@@ -4,9 +4,9 @@
 
 .DESCRIPTION
     Deploys three confidential containers to demonstrate multi-party confidential computing:
-    - Contoso: Confidential container (AMD SEV-SNP) - Can attest and access secrets
-    - Fabrikam: Confidential container (AMD SEV-SNP) - Can attest and access secrets  
-    - Woodgrove-Bank: Confidential container (AMD SEV-SNP) - Can attest and access partner secrets
+    - Contoso Corporation: Enterprise data provider with encrypted employee records
+    - Fabrikam Fashion: Online retail data provider with encrypted customer records  
+    - Woodgrove Bank: Financial analytics platform that processes partner data securely
 
     This demonstrates how confidential computing enables secure multi-party data sharing,
     where each company's secrets are protected by hardware attestation and only accessible
@@ -498,7 +498,7 @@ function Invoke-Build {
         keyVaultName = $KeyVaultNameA
         skrMaaEndpoint = $MaaEndpoint
         # Contoso configuration
-        companyA = @{
+        contoso = @{
             keyVaultName = $KeyVaultNameA
             skrKeyName = $SkrKeyNameA
             skrAkvEndpoint = "$KeyVaultNameA.vault.azure.net"
@@ -507,7 +507,7 @@ function Invoke-Build {
             identityClientId = $IdentityClientIdA
         }
         # Fabrikam configuration
-        companyB = @{
+        fabrikam = @{
             keyVaultName = $KeyVaultNameB
             skrKeyName = $SkrKeyNameB
             skrAkvEndpoint = "$KeyVaultNameB.vault.azure.net"
@@ -516,7 +516,7 @@ function Invoke-Build {
             identityClientId = $IdentityClientIdB
         }
         # Woodgrove-Bank configuration
-        companyC = @{
+        woodgrove = @{
             keyVaultName = $KeyVaultNameC
             skrKeyName = $SkrKeyNameC
             skrAkvEndpoint = "$KeyVaultNameC.vault.azure.net"
@@ -647,9 +647,9 @@ function Invoke-Deploy {
     Write-Header "Deploying Contoso (Confidential)"
     
     # Use Contoso's specific SKR configuration
-    $companyAConfig = $config.companyA
-    Write-Host "Using Contoso's Key Vault: $($companyAConfig.keyVaultName)" -ForegroundColor Cyan
-    Write-Host "Using Contoso's SKR Key: $($companyAConfig.skrKeyName)" -ForegroundColor Cyan
+    $contosoConfig = $config.contoso
+    Write-Host "Using Contoso's Key Vault: $($contosoConfig.keyVaultName)" -ForegroundColor Cyan
+    Write-Host "Using Contoso's SKR Key: $($contosoConfig.skrKeyName)" -ForegroundColor Cyan
     
     $params_companyA = @{
         '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
@@ -662,10 +662,10 @@ function Invoke-Deploy {
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
             'registryPassword' = @{ 'value' = $ACR_PASSWORD }
             'dnsNameLabel' = @{ 'value' = $dns_companyA }
-            'skrKeyName' = @{ 'value' = $companyAConfig.skrKeyName }
+            'skrKeyName' = @{ 'value' = $contosoConfig.skrKeyName }
             'skrMaaEndpoint' = @{ 'value' = $config.skrMaaEndpoint }
-            'skrAkvEndpoint' = @{ 'value' = $companyAConfig.skrAkvEndpoint }
-            'identityResourceId' = @{ 'value' = $companyAConfig.identityResourceId }
+            'skrAkvEndpoint' = @{ 'value' = $contosoConfig.skrAkvEndpoint }
+            'identityResourceId' = @{ 'value' = $contosoConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
             'resourceGroupName' = @{ 'value' = $resource_group }
         }
@@ -696,9 +696,9 @@ function Invoke-Deploy {
     Write-Header "Deploying Fabrikam (Confidential)"
     
     # Use Fabrikam's specific SKR configuration
-    $companyBConfig = $config.companyB
-    Write-Host "Using Fabrikam's Key Vault: $($companyBConfig.keyVaultName)" -ForegroundColor Cyan
-    Write-Host "Using Fabrikam's SKR Key: $($companyBConfig.skrKeyName)" -ForegroundColor Cyan
+    $fabrikamConfig = $config.fabrikam
+    Write-Host "Using Fabrikam's Key Vault: $($fabrikamConfig.keyVaultName)" -ForegroundColor Cyan
+    Write-Host "Using Fabrikam's SKR Key: $($fabrikamConfig.skrKeyName)" -ForegroundColor Cyan
     
     $params_companyB = @{
         '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
@@ -711,10 +711,10 @@ function Invoke-Deploy {
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
             'registryPassword' = @{ 'value' = $ACR_PASSWORD }
             'dnsNameLabel' = @{ 'value' = $dns_companyB }
-            'skrKeyName' = @{ 'value' = $companyBConfig.skrKeyName }
+            'skrKeyName' = @{ 'value' = $fabrikamConfig.skrKeyName }
             'skrMaaEndpoint' = @{ 'value' = $config.skrMaaEndpoint }
-            'skrAkvEndpoint' = @{ 'value' = $companyBConfig.skrAkvEndpoint }
-            'identityResourceId' = @{ 'value' = $companyBConfig.identityResourceId }
+            'skrAkvEndpoint' = @{ 'value' = $fabrikamConfig.skrAkvEndpoint }
+            'identityResourceId' = @{ 'value' = $fabrikamConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
             'resourceGroupName' = @{ 'value' = $resource_group }
         }
@@ -745,9 +745,9 @@ function Invoke-Deploy {
     Write-Header "Deploying Woodgrove-Bank (Confidential)"
     
     # Use Woodgrove-Bank's specific SKR configuration
-    $companyCConfig = $config.companyC
-    Write-Host "Using Woodgrove-Bank's Key Vault: $($companyCConfig.keyVaultName)" -ForegroundColor Cyan
-    Write-Host "Using Woodgrove-Bank's SKR Key: $($companyCConfig.skrKeyName)" -ForegroundColor Cyan
+    $woodgroveConfig = $config.woodgrove
+    Write-Host "Using Woodgrove-Bank's Key Vault: $($woodgroveConfig.keyVaultName)" -ForegroundColor Cyan
+    Write-Host "Using Woodgrove-Bank's SKR Key: $($woodgroveConfig.skrKeyName)" -ForegroundColor Cyan
     Write-Host "Woodgrove-Bank has cross-company access to Contoso and Fabrikam keys" -ForegroundColor Yellow
     
     # Build partner container URLs based on DNS names
@@ -767,14 +767,14 @@ function Invoke-Deploy {
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
             'registryPassword' = @{ 'value' = $ACR_PASSWORD }
             'dnsNameLabel' = @{ 'value' = $dns_companyC }
-            'skrKeyName' = @{ 'value' = $companyCConfig.skrKeyName }
+            'skrKeyName' = @{ 'value' = $woodgroveConfig.skrKeyName }
             'skrMaaEndpoint' = @{ 'value' = $config.skrMaaEndpoint }
-            'skrAkvEndpoint' = @{ 'value' = $companyCConfig.skrAkvEndpoint }
-            'identityResourceId' = @{ 'value' = $companyCConfig.identityResourceId }
+            'skrAkvEndpoint' = @{ 'value' = $woodgroveConfig.skrAkvEndpoint }
+            'identityResourceId' = @{ 'value' = $woodgroveConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
             'resourceGroupName' = @{ 'value' = $resource_group }
-            'partnerContosoAkvEndpoint' = @{ 'value' = $config.companyA.skrAkvEndpoint }
-            'partnerFabrikamAkvEndpoint' = @{ 'value' = $config.companyB.skrAkvEndpoint }
+            'partnerContosoAkvEndpoint' = @{ 'value' = $config.contoso.skrAkvEndpoint }
+            'partnerFabrikamAkvEndpoint' = @{ 'value' = $config.fabrikam.skrAkvEndpoint }
             'partnerContosoUrl' = @{ 'value' = $contosoContainerUrl }
             'partnerFabrikamUrl' = @{ 'value' = $fabrikamContainerUrl }
         }

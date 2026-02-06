@@ -144,7 +144,7 @@
     
     <!-- Fabrikam Container -->
     <rect x="545" y="305" width="150" height="90" rx="8" fill="#fff" stroke="#28a745" stroke-width="2"/>
-    <text x="620" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">🏭 Fabrikam</text>
+    <text x="620" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">👗 Fabrikam Fashion</text>
     <text x="620" y="345" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Flask :80 + SKR :8080</text>
     <text x="620" y="365" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">✅ Own key access</text>
     <text x="620" y="382" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#dc3545">❌ Cannot get Contoso key</text>

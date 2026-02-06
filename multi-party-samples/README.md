@@ -24,8 +24,8 @@ A comprehensive 4-container demonstration with **partner analytics** capabilitie
 
 | Container | Type | Purpose |
 |-----------|------|---------|
-| **Contoso** | Confidential (AMD SEV-SNP) | Data provider with 50 encrypted employee records |
-| **Fabrikam** | Confidential (AMD SEV-SNP) | Data provider with 50 encrypted employee records |
+| **Contoso** | Confidential (AMD SEV-SNP) | Enterprise data provider with 50 encrypted employee records |
+| **Fabrikam Fashion** | Confidential (AMD SEV-SNP) | Online retailer with 50 encrypted customer records |
 | **Woodgrove Bank** | Confidential (AMD SEV-SNP) | Analytics partner with cross-company key access |
 | **Snooper** | Standard (No TEE) | Attacker view - demonstrates failed key access |
 
@@ -67,8 +67,8 @@ A simpler 3-container demonstration without partner analytics:
 
 | Container | Type | Purpose |
 |-----------|------|---------|
-| **Contoso** | Confidential (AMD SEV-SNP) | Trusted party with access to own encryption key |
-| **Fabrikam** | Confidential (AMD SEV-SNP) | Trusted party with access to own encryption key |
+| **Contoso** | Confidential (AMD SEV-SNP) | Enterprise with access to own encryption key |
+| **Fabrikam Fashion** | Confidential (AMD SEV-SNP) | Online retailer with access to own encryption key |
 | **Snooper** | Standard (No TEE) | Attacker view - cannot access any keys |
 
 #### Quick Start

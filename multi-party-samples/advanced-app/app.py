@@ -855,13 +855,24 @@ def partner_analyze():
                 'top_cities': top_3_cities
             })
         
-        # 2. Generation breakdown
+        # 2. Generation breakdown (combined)
         generation_counts = Counter(r.get('generation') for r in all_records if r.get('generation'))
         generations = []
         gen_order = ['Gen Alpha', 'Gen Z', 'Millennials', 'Gen X', 'Baby Boomers', 'Silent Generation']
         for gen in gen_order:
             if gen in generation_counts:
                 generations.append({'generation': gen, 'count': generation_counts[gen]})
+        
+        # 2b. Generation breakdown per company with percentages
+        contoso_gen_counts = Counter(r.get('generation') for r in contoso_records if r.get('generation'))
+        fabrikam_gen_counts = Counter(r.get('generation') for r in fabrikam_records if r.get('generation'))
+        contoso_total = sum(contoso_gen_counts.values()) or 1
+        fabrikam_total = sum(fabrikam_gen_counts.values()) or 1
+        
+        generations_by_company = {
+            'Contoso': [{'generation': gen, 'count': contoso_gen_counts.get(gen, 0), 'percent': round(100 * contoso_gen_counts.get(gen, 0) / contoso_total, 1)} for gen in gen_order if contoso_gen_counts.get(gen, 0) > 0],
+            'Fabrikam': [{'generation': gen, 'count': fabrikam_gen_counts.get(gen, 0), 'percent': round(100 * fabrikam_gen_counts.get(gen, 0) / fabrikam_total, 1)} for gen in gen_order if fabrikam_gen_counts.get(gen, 0) > 0]
+        }
         
         # 3. Staff count per company
         company_staff = {
@@ -880,6 +891,23 @@ def partner_analyze():
             'Fabrikam': round(sum(fabrikam_salaries) / len(fabrikam_salaries)) if fabrikam_salaries else 0,
             'Combined': round(sum(all_salaries) / len(all_salaries)) if all_salaries else 0
         }
+        
+        # 4b. Average salary per country (for world map)
+        country_salary_data = defaultdict(list)
+        for r in all_records:
+            if r.get('country') and r.get('salary'):
+                country_salary_data[r['country']].append(r['salary'])
+        
+        salary_by_country = []
+        for country, salaries in country_salary_data.items():
+            salary_by_country.append({
+                'country': country,
+                'avg_salary': round(sum(salaries) / len(salaries)),
+                'count': len(salaries),
+                'min_salary': min(salaries),
+                'max_salary': max(salaries)
+            })
+        salary_by_country.sort(key=lambda x: x['avg_salary'], reverse=True)
         
         # 5. Eye color distribution
         eye_colors = Counter(r.get('eye_color') for r in all_records if r.get('eye_color'))
@@ -919,6 +947,8 @@ def partner_analyze():
             # Analytics
             'top_10_countries': top_10_countries,
             'generations': generations,
+            'generations_by_company': generations_by_company,
+            'salary_by_country': salary_by_country,
             'company_staff': company_staff,
             'avg_salaries': avg_salaries,
             'eye_colors': {
@@ -1084,6 +1114,17 @@ def partner_analyze_stream():
             if gen in generation_counts:
                 generations.append({'generation': gen, 'count': generation_counts[gen]})
         
+        # Generation breakdown per company with percentages
+        contoso_gen_counts = Counter(r.get('generation') for r in contoso_records if r.get('generation'))
+        fabrikam_gen_counts = Counter(r.get('generation') for r in fabrikam_records if r.get('generation'))
+        contoso_total = sum(contoso_gen_counts.values()) or 1
+        fabrikam_total = sum(fabrikam_gen_counts.values()) or 1
+        
+        generations_by_company = {
+            'Contoso': [{'generation': gen, 'count': contoso_gen_counts.get(gen, 0), 'percent': round(100 * contoso_gen_counts.get(gen, 0) / contoso_total, 1)} for gen in gen_order if contoso_gen_counts.get(gen, 0) > 0],
+            'Fabrikam': [{'generation': gen, 'count': fabrikam_gen_counts.get(gen, 0), 'percent': round(100 * fabrikam_gen_counts.get(gen, 0) / fabrikam_total, 1)} for gen in gen_order if fabrikam_gen_counts.get(gen, 0) > 0]
+        }
+        
         # Salaries
         contoso_salaries = [r['salary'] for r in contoso_records if r.get('salary')]
         fabrikam_salaries = [r['salary'] for r in fabrikam_records if r.get('salary')]
@@ -1094,6 +1135,23 @@ def partner_analyze_stream():
             'Fabrikam': round(sum(fabrikam_salaries) / len(fabrikam_salaries)) if fabrikam_salaries else 0,
             'Combined': round(sum(all_salaries) / len(all_salaries)) if all_salaries else 0
         }
+        
+        # Salary by country for world map
+        country_salary_data = defaultdict(list)
+        for r in all_records:
+            if r.get('country') and r.get('salary'):
+                country_salary_data[r['country']].append(r['salary'])
+        
+        salary_by_country = []
+        for country, salaries in country_salary_data.items():
+            salary_by_country.append({
+                'country': country,
+                'avg_salary': round(sum(salaries) / len(salaries)),
+                'count': len(salaries),
+                'min_salary': min(salaries),
+                'max_salary': max(salaries)
+            })
+        salary_by_country.sort(key=lambda x: x['avg_salary'], reverse=True)
         
         # Eye colors
         eye_colors = Counter(r.get('eye_color') for r in all_records if r.get('eye_color'))
@@ -1117,6 +1175,8 @@ def partner_analyze_stream():
             'total_time': round(total_time, 2),
             'top_10_countries': top_10_countries,
             'generations': generations,
+            'generations_by_company': generations_by_company,
+            'salary_by_country': salary_by_country,
             'avg_salaries': avg_salaries,
             'eye_colors': {
                 'most_common': {'color': most_common_eye[0], 'count': most_common_eye[1]},
