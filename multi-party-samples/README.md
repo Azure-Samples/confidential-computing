@@ -18,16 +18,15 @@ Secure multi-party computation demonstrations using Azure Confidential Container
 
 ### [Advanced App](advanced-app/README.md) ⭐ RECOMMENDED
 
-A comprehensive 4-container demonstration with **partner analytics** capabilities:
+A comprehensive 3-container demonstration with **partner analytics** capabilities:
 
 ![Multi-Party Topology](advanced-app/MultiPartyTopology.svg)
 
 | Container | Type | Purpose |
 |-----------|------|---------|
-| **Contoso** | Confidential (AMD SEV-SNP) | Enterprise data provider with 50 encrypted employee records |
-| **Fabrikam Fashion** | Confidential (AMD SEV-SNP) | Online retailer with 50 encrypted customer records |
-| **Woodgrove Bank** | Confidential (AMD SEV-SNP) | Analytics partner with cross-company key access |
-| **Snooper** | Standard (No TEE) | Attacker view - demonstrates failed key access |
+| **Contoso** | Confidential (AMD SEV-SNP) | Corporate data provider with 800 encrypted employee records (🏢) |
+| **Fabrikam Fashion** | Confidential (AMD SEV-SNP) | Online retailer with 800 encrypted customer records (👗) |
+| **Woodgrove Bank** | Confidential (AMD SEV-SNP) | Analytics partner with cross-company key access (🏦) |
 
 #### Key Features
 
@@ -36,8 +35,7 @@ A comprehensive 4-container demonstration with **partner analytics** capabilitie
 - 🔑 **Secure Key Release (SKR)** - HSM keys only released to attested TEE containers
 - 🏦 **Partner Analytics** - Woodgrove Bank performs cross-company demographic analysis
 - 📊 **Real-time Progress** - Server-Sent Events (SSE) streaming with progress bars
-- 🌍 **Demographics Analysis** - Top 10 countries with top 3 cities, generations, salary averages
-- 👁️ **Attacker Visualization** - See what malicious actors observe (encrypted data only)
+- 🌍 **Demographics Analysis** - Top 10 countries with top 3 cities, generations by company, salary world map
 - 🔓 **TEE-Only Decryption** - Data decrypted only inside hardware-protected memory
 
 #### Architecture
@@ -63,13 +61,12 @@ See the [full documentation](advanced-app/README.md) for detailed instructions.
 
 ### [Demo App](demo-app/README-MultiParty.md)
 
-A simpler 3-container demonstration without partner analytics:
+A simpler 2-container demonstration without partner analytics:
 
 | Container | Type | Purpose |
 |-----------|------|---------|
-| **Contoso** | Confidential (AMD SEV-SNP) | Enterprise with access to own encryption key |
-| **Fabrikam Fashion** | Confidential (AMD SEV-SNP) | Online retailer with access to own encryption key |
-| **Snooper** | Standard (No TEE) | Attacker view - cannot access any keys |
+| **Contoso** | Confidential (AMD SEV-SNP) | Corporate data provider with access to own encryption key (🏢) |
+| **Fabrikam Fashion** | Confidential (AMD SEV-SNP) | Online retailer with access to own encryption key (👗) |
 
 #### Quick Start
 

@@ -39,7 +39,7 @@
 
 .EXAMPLE
     .\Deploy-MultiParty.ps1 -Deploy
-    Deploy all four containers
+    Deploy all three containers
 
 .EXAMPLE
     .\Deploy-MultiParty.ps1 -Build -Deploy
@@ -556,18 +556,17 @@ function Invoke-Build {
 }
 
 # ============================================================================
-# Deploy Phase - Multi-Party (Contoso, Fabrikam, snooper)
+# Deploy Phase - Multi-Party (Contoso, Fabrikam Fashion, Woodgrove Bank)
 # ============================================================================
 
 function Invoke-Deploy {
     param([switch]$SkipBrowser)
     
     Write-Header "Deploying Multi-Party Demonstration"
-    Write-Host "This will deploy 4 containers:" -ForegroundColor Yellow
-    Write-Host "  - Contoso:        Confidential (AMD SEV-SNP TEE)" -ForegroundColor Green
-    Write-Host "  - Fabrikam:       Confidential (AMD SEV-SNP TEE)" -ForegroundColor Green
-    Write-Host "  - Woodgrove-Bank: Confidential (AMD SEV-SNP TEE) - Cross-company access" -ForegroundColor Green
-    Write-Host "  - snooper:        Standard (No TEE - cannot attest)" -ForegroundColor Red
+    Write-Host "This will deploy 3 containers:" -ForegroundColor Yellow
+    Write-Host "  - Contoso:        Confidential (AMD SEV-SNP TEE) - Corporate data provider" -ForegroundColor Green
+    Write-Host "  - Fabrikam:       Confidential (AMD SEV-SNP TEE) - Online retailer" -ForegroundColor Magenta
+    Write-Host "  - Woodgrove-Bank: Confidential (AMD SEV-SNP TEE) - Analytics partner" -ForegroundColor Green
     Write-Host ""
     
     $config = Get-Config

@@ -16,26 +16,24 @@ A demonstration of Azure Confidential Container Instances (ACI) with AMD SEV-SNP
 
 ## Overview
 
-This project deploys **four containers** running identical code to demonstrate multi-party confidential computing:
+This project deploys **three containers** running identical code to demonstrate multi-party confidential computing:
 
 | Container | SKU | Hardware | Can Attest? | Can Release Keys? | Special Features |
 |-----------|-----|----------|-------------|-------------------|------------------|
-| **Contoso** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | Data provider |
-| **Fabrikam** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | Data provider |
-| **Woodgrove Bank** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own + Partner keys | Analytics partner |
-| **Snooper** | Standard | None | ❌ No | ❌ No keys | Attacker view |
+| **Contoso** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | Corporate data provider (🏢) |
+| **Fabrikam Fashion** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | Online retailer (👗) |
+| **Woodgrove Bank** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own + Partner keys | Analytics partner (🏦) |
 
 ### Key Features
 
 - **Multi-Party Isolation** - Each company has separate Key Vault keys bound to their container identity
-- **Partner Analytics** - Woodgrove Bank can access Contoso and Fabrikam keys for aggregate analysis
+- **Partner Analytics** - Woodgrove Bank can access Contoso and Fabrikam Fashion keys for aggregate analysis
 - **Hardware-Based Security** - AMD SEV-SNP memory encryption at the CPU level
 - **Remote Attestation** - Cryptographic proof via Microsoft Azure Attestation (MAA)
 - **Secure Key Release (SKR)** - Keys only released to attested confidential containers
-- **Cross-Company Protection** - Contoso cannot access Fabrikam's key, and vice versa
+- **Cross-Company Protection** - Contoso cannot access Fabrikam Fashion's key, and vice versa
 - **Real-time Progress** - SSE streaming with progress bars and time estimates
-- **Demographics Analysis** - Top 10 countries with top 3 cities, generational breakdowns, salary averages
-- **Attacker Visualization** - Snooper container shows what an attacker sees (encrypted data only)
+- **Demographics Analysis** - Top 10 countries with top 3 cities, generational breakdowns, salary averages, salary by country world map
 - **Interactive Web UI** - Real-time demonstration of attestation and encryption
 - **Unique Per-Deployment Storage** - Each deployment uses `consolidated-records-{resource_group}.json`
 
@@ -44,8 +42,7 @@ This project deploys **four containers** running identical code to demonstrate m
 ![Multi-Party Architecture](MultiPartyArchitecture.svg)
 
 The demo deploys:
-- **3 Confidential Containers** (Contoso, Fabrikam, Woodgrove Bank) - Running on AMD SEV-SNP hardware with TEE protection
-- **1 Standard Container** (Snooper) - Running without TEE hardware to demonstrate attack scenarios
+- **3 Confidential Containers** (Contoso, Fabrikam Fashion, Woodgrove Bank) - Running on AMD SEV-SNP hardware with TEE protection
 - **3 Key Vaults** - Separate Premium HSM-backed vaults for each company's encryption keys
 - **Shared Blob Storage** - Contains encrypted data from all parties
 
@@ -120,11 +117,10 @@ This creates:
 .\Deploy-MultiParty.ps1 -Deploy
 ```
 
-Deploys four containers:
-- **Contoso** - Confidential SKU with AMD SEV-SNP TEE
-- **Fabrikam** - Confidential SKU with AMD SEV-SNP TEE  
-- **Woodgrove Bank** - Confidential SKU with AMD SEV-SNP TEE and partner access
-- **Snooper** - Standard SKU (no TEE hardware)
+Deploys three containers:
+- **Contoso** - Confidential SKU with AMD SEV-SNP TEE (corporate data provider)
+- **Fabrikam Fashion** - Confidential SKU with AMD SEV-SNP TEE (online retailer)
+- **Woodgrove Bank** - Confidential SKU with AMD SEV-SNP TEE and partner access (analytics partner)
 
 > ⚠️ **Requires Docker to be running** for security policy generation.
 
@@ -145,7 +141,7 @@ Deploys four containers:
 | Parameter | Description |
 |-----------|-------------|
 | `-Build` | Build and push container image to ACR (creates RG, ACR, Key Vaults) |
-| `-Deploy` | Deploy all 4 containers (Contoso, Fabrikam, Woodgrove Bank, Snooper) |
+| `-Deploy` | Deploy all 3 containers (Contoso, Fabrikam Fashion, Woodgrove Bank) |
 | `-Cleanup` | Delete all Azure resources in the resource group |
 | `-SkipBrowser` | Don't open Microsoft Edge browser after deployment |
 | `-RegistryName <name>` | Custom ACR name (default: random 8-character string) |
@@ -173,18 +169,18 @@ Deploys four containers:
 
 ## What You'll See
 
-After deployment, a browser opens with a 4-pane side-by-side comparison view:
+After deployment, a browser opens with a 3-pane side-by-side comparison view:
 
 ```
-+------------------+------------------+------------------+------------------+
-|     CONTOSO      |     FABRIKAM     |  WOODGROVE BANK  |     SNOOPER      |
-| (Confidential)   | (Confidential)   |  (Confidential)  |  (Standard)      |
-|                  |                  |                  |                  |
-| ✅ Attestation   | ✅ Attestation   | ✅ Attestation   | ❌ Attestation   |
-| ✅ Key Release   | ✅ Key Release   | ✅ Key Release   | ❌ Key Release   |
-| ✅ Encryption    | ✅ Encryption    | ✅ Partner Keys  | ❌ Encryption    |
-| ✅ Own data      | ✅ Own data      | ✅ Partner data  | 👁️ Encrypted    |
-+------------------+------------------+------------------+------------------+
++------------------+------------------+------------------+
+|     CONTOSO      | FABRIKAM FASHION |  WOODGROVE BANK  |
+| (Confidential)   |  (Confidential)  |  (Confidential)  |
+|       🏢         |       👗         |       🏦         |
+| ✅ Attestation   | ✅ Attestation   | ✅ Attestation   |
+| ✅ Key Release   | ✅ Key Release   | ✅ Key Release   |
+| ✅ Encryption    | ✅ Encryption    | ✅ Partner Keys  |
+| ✅ Own data      | ✅ Own data      | ✅ Partner data  |
++------------------+------------------+------------------+
 ```
 
 ### Woodgrove Bank Special Features
@@ -199,29 +195,21 @@ After deployment, a browser opens with a 4-pane side-by-side comparison view:
 ### Basic Attestation Demo
 
 1. **Show Contoso**: Expand "Remote Attestation" → Click "Get Raw Report" → Success
-2. **Show Fabrikam**: Same actions → Also succeeds
+2. **Show Fabrikam Fashion**: Same actions → Also succeeds (pink fashion theme)
 3. **Show Woodgrove Bank**: Same actions → Also succeeds (green bank theme)
-4. **Show Snooper**: Same actions → Fails with detailed error
 
 ### Secure Key Release Demo
 
-5. **Release Key on Contoso**: Expand "Secure Key Release" → Click release → Key obtained
-6. **Try on Snooper**: Same actions → Key release denied
-7. **Cross-Company Test**: On Contoso, expand "Cross-Company Key Access" → Shows cannot access Fabrikam's key
+4. **Release Key on Contoso**: Expand "Secure Key Release" → Click release → Key obtained
+5. **Cross-Company Test**: On Contoso, expand "Cross-Company Key Access" → Shows cannot access Fabrikam Fashion's key
 
 ### Partner Analysis Demo (Woodgrove Bank)
 
-8. **Open Woodgrove Bank**: Notice custom green bank branding
-9. **Expand "Partner Demographic Analysis"**: Click "Start Partner Demographic Analysis"
-10. **Watch Progress**: Contoso key release ✅, then Fabrikam key release ✅
-11. **Review Log**: Shows attestation passed for each partner
-
-### Data Protection Demo
-
-12. **Expand "Protect Data"**: CSV automatically imported and encrypted
-13. **List Records**: Shows encrypted data in table
-14. **Press Decrypt**: Own company data decrypts successfully
-15. **View Snooper**: Shows attacker view with all data encrypted
+6. **Open Woodgrove Bank**: Notice custom green bank branding with 🏦 logo
+7. **Expand "Partner Demographic Analysis"**: Click "Start Partner Demographic Analysis"
+8. **Watch Progress**: Contoso key release ✅, then Fabrikam Fashion key release ✅
+9. **Review Results**: Demographics by country, generation breakdown by company, salary world map
+10. **Review Log**: Shows attestation passed for each partner
 
 ## Security Model
 
@@ -234,14 +222,14 @@ Contoso Key Vault: kv<registry>a
 ├── Key: contoso-secret-key (RSA-HSM, exportable)
 └── Release Policy: sevsnpvm attestation required
 
-Fabrikam Key Vault: kv<registry>b  
+Fabrikam Fashion Key Vault: kv<registry>b  
 ├── Key: fabrikam-secret-key (RSA-HSM, exportable)
 └── Release Policy: sevsnpvm attestation required
 
 Woodgrove Bank Key Vault: kv<registry>c
 ├── Key: woodgrove-secret-key (RSA-HSM, exportable)
 ├── Release Policy: sevsnpvm attestation required
-└── Cross-Company Access: Can also release Contoso and Fabrikam keys
+└── Cross-Company Access: Can also release Contoso and Fabrikam Fashion keys
 ```
 
 ### Woodgrove Partner Access

@@ -21,13 +21,12 @@ This demonstration shows how Azure Confidential Containers enable secure multi-p
 
 ## Overview
 
-The demo deploys **three containers** running identical code, demonstrating how hardware-based security provides protection that software alone cannot achieve:
+The demo deploys **two containers** running identical code, demonstrating how hardware-based security provides protection that software alone cannot achieve:
 
 | Container | SKU | Hardware | Can Attest? | Can Get Keys? | Can Decrypt Data? |
 |-----------|-----|----------|-------------|---------------|-------------------|
 | **Contoso** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
-| **Fabrikam** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
-| **Snooper** | Standard | None | ❌ No | ❌ No keys | ❌ No data |
+| **Fabrikam Fashion** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
 
 ## Key Concepts
 
@@ -40,29 +39,17 @@ In traditional cloud computing, infrastructure operators (cloud providers, IT ad
 3. **Secure Key Release (SKR)**: Keys are only released to attested environments
 4. **Company Isolation**: Each company's key is bound to their container identity
 
-### The Snooper Problem
-
-The `snooper` container represents:
-- A malicious container trying to intercept data
-- An infrastructure operator trying to peek at secrets
-- A compromised container without TEE protection
-
-**Even though snooper runs the same code**, it cannot:
-- Generate valid attestation tokens (no `/dev/sev-guest` device)
-- Release cryptographic keys from Azure Key Vault
-- Decrypt data protected by SKR-released keys
-
 ### Cross-Company Isolation
 
-Even between trusted parties (Contoso and Fabrikam):
+Even between trusted parties (Contoso and Fabrikam Fashion):
 - Each company has a **separate Key Vault key** with its own release policy
 - Contoso's key is bound to Contoso's container identity
-- Fabrikam cannot access Contoso's key, and vice versa
+- Fabrikam Fashion cannot access Contoso's key, and vice versa
 - Shared storage contains encrypted data from both, but each can only decrypt their own
 
 ## Traffic Flow
 
-### Successful Attestation & Key Release (Contoso/Fabrikam)
+### Successful Attestation & Key Release (Contoso/Fabrikam Fashion)
 
 ```
 User Browser → Flask App (:80) → SKR Sidecar (:8080)
@@ -76,18 +63,6 @@ User Browser → Flask App (:80) → SKR Sidecar (:8080)
                               Private Key → TEE Memory
                                         ↓
                               Encrypt/Decrypt Operations
-```
-
-### Failed Attestation (Snooper)
-
-```
-User Browser → Flask App (:80) → SKR Sidecar (:8080)
-                                        ↓
-                              ❌ No /dev/sev-guest device
-                              ❌ Cannot generate TEE evidence
-                              ❌ Attestation fails
-                              ❌ No JWT token
-                              ❌ Key Vault denies access
 ```
 
 ### Data Protection Flow
@@ -115,12 +90,12 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 │            └─────────────┬─────────────┘                                │
 │                          ▼                                               │
 │              ┌───────────────────────┐                                  │
-│              │  consolidated-        │        ┌──────────────┐          │
-│              │  records-{rg}.json    │◄───────│   Snooper    │          │
-│              │  (Azure Blob Storage) │        │  Can READ    │          │
-│              │  Mixed encrypted data │        │  but NOT     │          │
-│              └───────────┬───────────┘        │  DECRYPT ❌  │          │
-│                          │                    └──────────────┘          │
+│              │  consolidated-        │                                  │
+│              │  records-{rg}.json    │                                  │
+│              │  (Azure Blob Storage) │                                  │
+│              │  Mixed encrypted data │                                  │
+│              └───────────┬───────────┘                                  │
+│                          │                                              │
 └──────────────────────────┼──────────────────────────────────────────────┘
                            │
 ┌──────────────────────────┼──────────────────────────────────────────────┐
@@ -155,14 +130,13 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 │  │     🔓 Even hypervisor cannot read TEE memory                     │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                          │                                               │
-│            ┌─────────────┼─────────────┐                                │
-│            │             │             │                                 │
-│            ▼             ▼             ▼                                 │
-│        Contoso       Fabrikam      Snooper                              │
-│       Decrypts      Decrypts       ❌ Cannot                            │
-│       own 9         own 9          attest                               │
-│       records       records        ❌ No key                            │
-│                                    ❌ No decrypt                        │
+│                ┌─────────┴─────────┐                                   │
+│                │                   │                                   │
+│                ▼                   ▼                                   │
+│            Contoso         Fabrikam Fashion                            │
+│           Decrypts            Decrypts                                  │
+│           own data            own data                                  │
+│           inside TEE          inside TEE                                │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -181,7 +155,7 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 # Build the container image (first time only)
 .\Deploy-MultiParty.ps1 -Build
 
-# Deploy all 3 containers
+# Deploy all 2 containers
 .\Deploy-MultiParty.ps1 -Deploy
 
 # Or build and deploy in one command
@@ -197,48 +171,37 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 
 ## What You'll See
 
-After deployment, a browser opens with a 3-pane view:
+After deployment, a browser opens with a 2-pane view:
 
 ```
 +---------------------------+---------------------------+
-|        CONTOSO            |        FABRIKAM           |
+|        CONTOSO            |    FABRIKAM FASHION       |
 |    (Confidential TEE)     |    (Confidential TEE)     |
-|                           |                           |
+|          🏢               |           👗              |
 |  ✅ Attestation: Success  |  ✅ Attestation: Success  |
 |  ✅ Key Release: Works    |  ✅ Key Release: Works    |
 |  ✅ Encryption: Works     |  ✅ Encryption: Works     |
 |  ✅ CSV Auto-Import       |  ✅ CSV Auto-Import       |
 +---------------------------+---------------------------+
-|                 SNOOPER                               |
-|              (Standard - No TEE)                      |
-|                                                       |
-|  ❌ Attestation: FAILED (no TEE hardware)            |
-|  ❌ Key Release: DENIED (not attested)               |
-|  👁️ Attacker View: Sees encrypted data only          |
-|  🔄 Auto-refresh: Monitors blob for new records      |
-+-------------------------------------------------------+
 ```
 
 ## Demo Script
 
 ### Basic Attestation Demo
 
-1. **Show Contoso**: Click "Get Raw Report" - attestation succeeds
-2. **Show Fabrikam**: Same result - both can attest
-3. **Show Snooper**: Click "Get Raw Report" - fails with error message
+1. **Show Contoso**: Click "Get Raw Report" - attestation succeeds (🏢)
+2. **Show Fabrikam Fashion**: Same result - both can attest (👗)
 
 ### Secure Key Release Demo
 
-4. **Release Key on Contoso**: Expand "Secure Key Release" section, click release
-5. **Try on Snooper**: Same action fails - no attestation = no key
-6. **Cross-Company Test**: Contoso tries to access Fabrikam's key - denied
+3. **Release Key on Contoso**: Expand "Secure Key Release" section, click release
+4. **Cross-Company Test**: Contoso tries to access Fabrikam Fashion's key - denied
 
 ### Data Protection Demo
 
-7. **Expand "Protect Data"**: Section auto-imports CSV records
-8. **Show encrypted storage**: Records encrypted with company-specific keys
-9. **Decrypt Toggle**: Press "Decrypt" to see plaintext (only for own data)
-10. **Switch to Snooper**: Show auto-refreshing attacker view with encrypted blobs
+5. **Expand "Protect Data"**: Section auto-imports CSV records
+6. **Show encrypted storage**: Records encrypted with company-specific keys
+7. **Decrypt Toggle**: Press "Decrypt" to see plaintext (only for own data)
 
 ## Security Model
 
@@ -251,7 +214,7 @@ Azure Key Vault: kv<registry>a (Contoso)
 ├── Exportable: true (for SKR)
 └── Release Policy: sevsnpvm + Contoso container identity
 
-Azure Key Vault: kv<registry>b (Fabrikam)
+Azure Key Vault: kv<registry>b (Fabrikam Fashion)
 ├── Key: fabrikam-secret-key
 ├── Type: RSA-HSM (4096-bit)
 ├── Exportable: true (for SKR)
@@ -275,7 +238,7 @@ Azure Key Vault: kv<registry>b (Fabrikam)
 
 This means:
 - Only containers with `x-ms-attestation-type: sevsnpvm` can release the key
-- The snooper container cannot fake this claim - it's verified by AMD hardware
+- Non-TEE containers cannot fake this claim - it's verified by AMD hardware
 - Each company's key has its own policy tied to their container
 
 ## Files
@@ -286,11 +249,11 @@ This means:
 | `app.py` | Flask application with all API endpoints |
 | `Dockerfile` | Multi-stage build with SKR sidecar |
 | `templates/index.html` | Interactive web UI with all demo features |
-| `contoso-data.csv` | Sample data for Contoso (9 records) |
-| `fabrikam-data.csv` | Sample data for Fabrikam (9 records) |
+| `contoso-data.csv` | Sample data for Contoso |
+| `fabrikam-data.csv` | Sample data for Fabrikam Fashion |
 | `deployment-template-original.json` | ARM template for Confidential SKU |
 | `deployment-template-standard.json` | ARM template for Standard SKU |
-| `multiparty-view.html` | 3-pane view for side-by-side comparison |
+| `multiparty-view.html` | 2-pane view for side-by-side comparison |
 | `MultiPartyArchitecture.svg` | High-level architecture diagram |
 | `DataFlowDiagram.svg` | Encrypted data flow showing TEE decryption model |
 
@@ -311,7 +274,7 @@ This means:
 | `/company/populate` | POST | Import CSV and encrypt to blob |
 | `/company/list` | GET | List company's encrypted records |
 | `/storage/config` | GET | Get blob storage configuration |
-| `/storage/list` | GET | List all blobs (for snooper view) |
+| `/storage/list` | GET | List all blobs in storage |
 | `/container/info` | GET | Get container metadata |
 | `/health` | GET | Health check endpoint |
 

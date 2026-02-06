@@ -61,14 +61,13 @@ Azure Container Instances with AMD SEV-SNP confidential computing:
 Secure multi-party computation demonstrations with Azure Confidential Containers. Two versions available:
 
 #### [Advanced App](/multi-party-samples/advanced-app/README.md) - Full-Featured Demo
-Comprehensive 4-container demonstration with partner analytics:
+Comprehensive 3-container demonstration with partner analytics:
 
 ![Multi-Party Topology](/multi-party-samples/advanced-app/MultiPartyTopology.svg)
 
-- **Contoso Corporation** - Enterprise data provider with encrypted employee records
-- **Fabrikam Fashion** - Online retailer with encrypted customer records
-- **Woodgrove Bank** - Trusted analytics partner with cross-company key access
-- **Snooper** - Attacker view showing encrypted-only data
+- **Contoso Corporation** - Corporate data provider with encrypted employee records (🏢)
+- **Fabrikam Fashion** - Online retailer with encrypted customer records (👗)
+- **Woodgrove Bank** - Trusted analytics partner with cross-company key access (🏦)
 
 **Key Features:**
 - 🔐 **Hardware-based isolation** - AMD SEV-SNP TEE protects data in memory
@@ -76,8 +75,7 @@ Comprehensive 4-container demonstration with partner analytics:
 - 🔑 **Secure Key Release (SKR)** - HSM keys only released to attested containers
 - 🏦 **Partner Analytics** - Woodgrove Bank analyzes encrypted partner data inside TEE
 - 📊 **Real-time Progress** - SSE streaming with progress bars and time estimates
-- 🌍 **Demographics Analysis** - Top countries, cities, generations, salaries, eye colors
-- 👁️ **Attacker visualization** - Snooper container shows what attackers see
+- 🌍 **Demographics Analysis** - Top countries, cities, generations by company, salary world map
 - 🔓 **TEE-only decryption** - Data decrypted only inside hardware-protected memory
 
 ![Multi-Party Architecture](/multi-party-samples/advanced-app/MultiPartyArchitecture.svg)
@@ -87,7 +85,7 @@ Comprehensive 4-container demonstration with partner analytics:
 ![Data Flow Diagram](/multi-party-samples/advanced-app/DataFlowDiagram.svg)
 
 #### [Demo App](/multi-party-samples/demo-app/README-MultiParty.md) - Basic Demo
-Simpler 3-container demonstration (Contoso, Fabrikam Fashion, Snooper) without partner analytics.
+Simpler 2-container demonstration (Contoso, Fabrikam Fashion) without partner analytics.
 
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:
