@@ -778,13 +778,16 @@ function Invoke-Deploy {
     Write-Success "ACR login complete"
     Write-Host ""
     
-    # ========== Deploy Contoso (Confidential) ==========
-    Write-Header "Deploying Contoso (Confidential)"
+    # ========== PHASE 1: Generate All Security Policies ==========
+    # We need all policy hashes BEFORE creating keys so we can set up multi-party access
     
-    # Use Contoso's specific SKR configuration
+    Write-Header "Phase 1: Generating Security Policies for All Companies"
+    Write-Host "All policies must be generated first to enable cross-company key access" -ForegroundColor Yellow
+    Write-Host ""
+    
+    # --- Contoso Policy Generation ---
     $contosoConfig = $config.contoso
-    Write-Host "Using Contoso's Key Vault: $($contosoConfig.keyVaultName)" -ForegroundColor Cyan
-    Write-Host "Using Contoso's SKR Key: $($contosoConfig.skrKeyName)" -ForegroundColor Cyan
+    Write-Host "[1/3] Generating Contoso security policy..." -ForegroundColor Cyan
     
     $params_companyA = @{
         '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
@@ -806,57 +809,17 @@ function Invoke-Deploy {
         }
     }
     $params_companyA | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-contoso.json'
-    
     Copy-Item -Path "deployment-template-original.json" -Destination "deployment-template-contoso.json" -Force
     
-    Write-Host "Generating security policy for Contoso..."
     az confcom acipolicygen -a deployment-template-contoso.json --parameters deployment-params-contoso.json --disable-stdio --approve-wildcards
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to generate security policy for Contoso"
-    }
-    Write-Success "Security policy generated for Contoso"
+    if ($LASTEXITCODE -ne 0) { throw "Failed to generate security policy for Contoso" }
     
-    # Extract policy hash and update key release policy
     $contosoPolicyInfo = Get-PolicyHashFromTemplate -TemplatePath "deployment-template-contoso.json"
-    Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║  CONTOSO CONTAINER SECURITY POLICY                                           ║" -ForegroundColor Green
-    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Green
-    Write-Host "║  Policy Hash (SHA256): $($contosoPolicyInfo.PolicyHash)  ║" -ForegroundColor Cyan
-    Write-Host "║  This hash uniquely identifies the approved container code                   ║" -ForegroundColor Gray
-    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
-    Write-Host ""
+    Write-Success "Contoso policy hash: $($contosoPolicyInfo.PolicyHash)"
     
-    # Update Contoso's key to require this specific policy hash
-    $contosoReleasePolicy = Update-KeyReleasePolicy `
-        -KeyVaultName $contosoConfig.keyVaultName `
-        -KeyName $contosoConfig.skrKeyName `
-        -MaaEndpoint $config.skrMaaEndpoint `
-        -PolicyHash $contosoPolicyInfo.PolicyHash `
-        -CompanyName "Contoso"
-    
-    # Add policy hash to deployment parameters for display in UI
-    $params_companyA.parameters['securityPolicyHash'] = @{ 'value' = $contosoPolicyInfo.PolicyHash }
-    $params_companyA | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-contoso.json'
-    
-    Write-Host "Deploying Contoso container..."
-    az deployment group create `
-        --resource-group $resource_group `
-        --template-file deployment-template-contoso.json `
-        --parameters '@deployment-params-contoso.json' | Out-Null
-    
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to deploy Contoso container"
-    }
-    Write-Success "Contoso container deployed!"
-    
-    # ========== Deploy Fabrikam (Confidential) ==========
-    Write-Header "Deploying Fabrikam (Confidential)"
-    
-    # Use Fabrikam's specific SKR configuration
+    # --- Fabrikam Policy Generation ---
     $fabrikamConfig = $config.fabrikam
-    Write-Host "Using Fabrikam's Key Vault: $($fabrikamConfig.keyVaultName)" -ForegroundColor Cyan
-    Write-Host "Using Fabrikam's SKR Key: $($fabrikamConfig.skrKeyName)" -ForegroundColor Cyan
+    Write-Host "[2/3] Generating Fabrikam security policy..." -ForegroundColor Magenta
     
     $params_companyB = @{
         '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
@@ -878,64 +841,21 @@ function Invoke-Deploy {
         }
     }
     $params_companyB | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-fabrikam.json'
-    
     Copy-Item -Path "deployment-template-original.json" -Destination "deployment-template-fabrikam.json" -Force
     
-    Write-Host "Generating security policy for Fabrikam..."
     az confcom acipolicygen -a deployment-template-fabrikam.json --parameters deployment-params-fabrikam.json --disable-stdio --approve-wildcards
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to generate security policy for Fabrikam"
-    }
-    Write-Success "Security policy generated for Fabrikam"
+    if ($LASTEXITCODE -ne 0) { throw "Failed to generate security policy for Fabrikam" }
     
-    # Extract policy hash and update key release policy
     $fabrikamPolicyInfo = Get-PolicyHashFromTemplate -TemplatePath "deployment-template-fabrikam.json"
-    Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
-    Write-Host "║  FABRIKAM CONTAINER SECURITY POLICY                                          ║" -ForegroundColor Magenta
-    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Magenta
-    Write-Host "║  Policy Hash (SHA256): $($fabrikamPolicyInfo.PolicyHash)  ║" -ForegroundColor Cyan
-    Write-Host "║  This hash uniquely identifies the approved container code                   ║" -ForegroundColor Gray
-    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
-    Write-Host ""
+    Write-Success "Fabrikam policy hash: $($fabrikamPolicyInfo.PolicyHash)"
     
-    # Update Fabrikam's key to require this specific policy hash
-    $fabrikamReleasePolicy = Update-KeyReleasePolicy `
-        -KeyVaultName $fabrikamConfig.keyVaultName `
-        -KeyName $fabrikamConfig.skrKeyName `
-        -MaaEndpoint $config.skrMaaEndpoint `
-        -PolicyHash $fabrikamPolicyInfo.PolicyHash `
-        -CompanyName "Fabrikam"
-    
-    # Add policy hash to deployment parameters for display in UI
-    $params_companyB.parameters['securityPolicyHash'] = @{ 'value' = $fabrikamPolicyInfo.PolicyHash }
-    $params_companyB | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-fabrikam.json'
-    
-    Write-Host "Deploying Fabrikam container..."
-    az deployment group create `
-        --resource-group $resource_group `
-        --template-file deployment-template-fabrikam.json `
-        --parameters '@deployment-params-fabrikam.json' | Out-Null
-    
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to deploy Fabrikam container"
-    }
-    Write-Success "Fabrikam container deployed!"
-    
-    # ========== Deploy Woodgrove-Bank (Confidential) ==========
-    Write-Header "Deploying Woodgrove-Bank (Confidential)"
-    
-    # Use Woodgrove-Bank's specific SKR configuration
+    # --- Woodgrove Policy Generation ---
     $woodgroveConfig = $config.woodgrove
-    Write-Host "Using Woodgrove-Bank's Key Vault: $($woodgroveConfig.keyVaultName)" -ForegroundColor Cyan
-    Write-Host "Using Woodgrove-Bank's SKR Key: $($woodgroveConfig.skrKeyName)" -ForegroundColor Cyan
-    Write-Host "Woodgrove-Bank has cross-company access to Contoso and Fabrikam keys" -ForegroundColor Yellow
+    Write-Host "[3/3] Generating Woodgrove-Bank security policy..." -ForegroundColor Yellow
     
     # Build partner container URLs based on DNS names
     $contosoContainerUrl = "http://${dns_companyA}.${Location}.azurecontainer.io"
     $fabrikamContainerUrl = "http://${dns_companyB}.${Location}.azurecontainer.io"
-    Write-Host "Partner Contoso URL: $contosoContainerUrl" -ForegroundColor Cyan
-    Write-Host "Partner Fabrikam URL: $fabrikamContainerUrl" -ForegroundColor Cyan
     
     $params_companyC = @{
         '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
@@ -961,43 +881,32 @@ function Invoke-Deploy {
         }
     }
     $params_companyC | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-woodgrove.json'
-    
-    # Use Woodgrove-specific template with partner Key Vault environment variables
     Copy-Item -Path "deployment-template-woodgrove-base.json" -Destination "deployment-template-woodgrove.json" -Force
     
-    Write-Host "Generating security policy for Woodgrove-Bank..."
     az confcom acipolicygen -a deployment-template-woodgrove.json --parameters deployment-params-woodgrove.json --disable-stdio --approve-wildcards
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to generate security policy for Woodgrove-Bank"
-    }
-    Write-Success "Security policy generated for Woodgrove-Bank"
+    if ($LASTEXITCODE -ne 0) { throw "Failed to generate security policy for Woodgrove-Bank" }
     
-    # Extract policy hash for Woodgrove
     $woodgrovePolicyInfo = Get-PolicyHashFromTemplate -TemplatePath "deployment-template-woodgrove.json"
-    Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
-    Write-Host "║  WOODGROVE BANK CONTAINER SECURITY POLICY                                    ║" -ForegroundColor Yellow
-    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Yellow
-    Write-Host "║  Policy Hash (SHA256): $($woodgrovePolicyInfo.PolicyHash)  ║" -ForegroundColor Cyan
-    Write-Host "║  This hash uniquely identifies the approved container code                   ║" -ForegroundColor Gray
-    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
-    Write-Host ""
+    Write-Success "Woodgrove policy hash: $($woodgrovePolicyInfo.PolicyHash)"
     
-    # Update Woodgrove's key to require this specific policy hash
-    $woodgroveReleasePolicy = Update-KeyReleasePolicy `
-        -KeyVaultName $woodgroveConfig.keyVaultName `
-        -KeyName $woodgroveConfig.skrKeyName `
-        -MaaEndpoint $config.skrMaaEndpoint `
-        -PolicyHash $woodgrovePolicyInfo.PolicyHash `
-        -CompanyName "Woodgrove"
-    
-    # ========== Update Partner Keys for Multi-Party Access ==========
-    Write-Header "Updating Partner Keys for Cross-Company Analytics"
-    Write-Host "Contoso and Fabrikam keys will now accept Woodgrove's policy hash for analytics" -ForegroundColor Yellow
+    # ========== Display All Policy Hashes ==========
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║  SECURITY POLICY HASHES - ALL COMPANIES                                      ║" -ForegroundColor Cyan
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Contoso:   $($contosoPolicyInfo.PolicyHash)  ║" -ForegroundColor Green
+    Write-Host "║  Fabrikam:  $($fabrikamPolicyInfo.PolicyHash)  ║" -ForegroundColor Magenta
+    Write-Host "║  Woodgrove: $($woodgrovePolicyInfo.PolicyHash)  ║" -ForegroundColor Yellow
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
     Write-Host ""
     
-    # Update Contoso's key to allow BOTH Contoso AND Woodgrove containers
-    Write-Host "Updating Contoso key to allow Woodgrove access..." -ForegroundColor Cyan
+    # ========== PHASE 2: Create Keys with Multi-Party Policies ==========
+    Write-Header "Phase 2: Creating Keys with Multi-Party Access Policies"
+    Write-Host "Now that we have all policy hashes, we can create keys with proper bindings" -ForegroundColor Yellow
+    Write-Host ""
+    
+    # --- Create Contoso Key (allows Contoso + Woodgrove) ---
+    Write-Host "Creating Contoso key (multi-party: Contoso + Woodgrove)..." -ForegroundColor Cyan
     $contosoMultiPartyPolicy = @{
         version = "1.0.0"
         anyOf = @(
@@ -1020,26 +929,31 @@ function Invoke-Deploy {
     $contosoMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-contoso-multiparty.json"
     $contosoMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $contosoMultiPolicyPath -Encoding UTF8
     
-    # Delete, wait, purge, wait, then create
-    Write-Host "    Deleting Contoso key..." -ForegroundColor Gray
-    az keyvault key delete --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
-    Start-Sleep -Seconds 3
-    Write-Host "    Purging Contoso key..." -ForegroundColor Gray
-    az keyvault key purge --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
-    Start-Sleep -Seconds 5
-    Write-Host "    Creating Contoso key with multi-party policy..." -ForegroundColor Gray
-    $contosoCreateResult = az keyvault key create --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName `
-        --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
-        --policy $contosoMultiPolicyPath 2>&1
+    # Check if key exists and delete/purge if needed
+    $existingKey = az keyvault key show --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "  Contoso key updated: allows Contoso + Woodgrove containers"
+        Write-Host "    Deleting existing Contoso key..." -ForegroundColor Gray
+        az keyvault key delete --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
+        Start-Sleep -Seconds 2
+        Write-Host "    Purging Contoso key..." -ForegroundColor Gray
+        az keyvault key purge --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
+        Start-Sleep -Seconds 5
+    }
+    
+    az keyvault key create --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName `
+        --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
+        --policy $contosoMultiPolicyPath 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "  Contoso key created: allows Contoso + Woodgrove containers"
     } else {
-        Write-Warning "  Contoso key recreation failed. Will use previous key."
+        Write-Warning "  Contoso key creation failed - attempting without policy binding"
+        az keyvault key create --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName `
+            --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true 2>&1 | Out-Null
     }
     Remove-Item $contosoMultiPolicyPath -Force -ErrorAction SilentlyContinue
     
-    # Update Fabrikam's key to allow BOTH Fabrikam AND Woodgrove containers
-    Write-Host "Updating Fabrikam key to allow Woodgrove access..." -ForegroundColor Cyan
+    # --- Create Fabrikam Key (allows Fabrikam + Woodgrove) ---
+    Write-Host "Creating Fabrikam key (multi-party: Fabrikam + Woodgrove)..." -ForegroundColor Magenta
     $fabrikamMultiPartyPolicy = @{
         version = "1.0.0"
         anyOf = @(
@@ -1062,28 +976,39 @@ function Invoke-Deploy {
     $fabrikamMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-fabrikam-multiparty.json"
     $fabrikamMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $fabrikamMultiPolicyPath -Encoding UTF8
     
-    # Delete, wait, purge, wait, then create
-    Write-Host "    Deleting Fabrikam key..." -ForegroundColor Gray
-    az keyvault key delete --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
-    Start-Sleep -Seconds 3
-    Write-Host "    Purging Fabrikam key..." -ForegroundColor Gray
-    az keyvault key purge --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
-    Start-Sleep -Seconds 5
-    Write-Host "    Creating Fabrikam key with multi-party policy..." -ForegroundColor Gray
-    $fabrikamCreateResult = az keyvault key create --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName `
-        --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
-        --policy $fabrikamMultiPolicyPath 2>&1
+    # Check if key exists and delete/purge if needed
+    $existingKey = az keyvault key show --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "  Fabrikam key updated: allows Fabrikam + Woodgrove containers"
+        Write-Host "    Deleting existing Fabrikam key..." -ForegroundColor Gray
+        az keyvault key delete --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
+        Start-Sleep -Seconds 2
+        Write-Host "    Purging Fabrikam key..." -ForegroundColor Gray
+        az keyvault key purge --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
+        Start-Sleep -Seconds 5
+    }
+    
+    az keyvault key create --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName `
+        --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
+        --policy $fabrikamMultiPolicyPath 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "  Fabrikam key created: allows Fabrikam + Woodgrove containers"
     } else {
-        Write-Warning "  Fabrikam key recreation failed. Will use previous key."
+        Write-Warning "  Fabrikam key creation failed - attempting without policy binding"
+        az keyvault key create --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName `
+            --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true 2>&1 | Out-Null
     }
     Remove-Item $fabrikamMultiPolicyPath -Force -ErrorAction SilentlyContinue
     
-    # Add policy hash to Woodgrove deployment parameters
-    $params_companyC.parameters['securityPolicyHash'] = @{ 'value' = $woodgrovePolicyInfo.PolicyHash }
-    $params_companyC | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-woodgrove.json'
+    # --- Create Woodgrove Key (Woodgrove only) ---
+    Write-Host "Creating Woodgrove key (single-party: Woodgrove only)..." -ForegroundColor Yellow
+    $woodgroveReleasePolicy = Update-KeyReleasePolicy `
+        -KeyVaultName $woodgroveConfig.keyVaultName `
+        -KeyName $woodgroveConfig.skrKeyName `
+        -MaaEndpoint $config.skrMaaEndpoint `
+        -PolicyHash $woodgrovePolicyInfo.PolicyHash `
+        -CompanyName "Woodgrove"
     
+    # ========== Display Security Summary ==========
     Write-Host ""
     Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
     Write-Host "║  SECURITY POLICY BINDING SUMMARY                                             ║" -ForegroundColor Cyan
@@ -1096,15 +1021,44 @@ function Invoke-Deploy {
     Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
     Write-Host ""
     
-    Write-Host "Deploying Woodgrove-Bank container..."
+    # ========== PHASE 3: Deploy All Containers ==========
+    Write-Header "Phase 3: Deploying All Containers"
+    
+    # Add policy hashes to deployment parameters for UI display
+    $params_companyA.parameters['securityPolicyHash'] = @{ 'value' = $contosoPolicyInfo.PolicyHash }
+    $params_companyA | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-contoso.json'
+    
+    $params_companyB.parameters['securityPolicyHash'] = @{ 'value' = $fabrikamPolicyInfo.PolicyHash }
+    $params_companyB | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-fabrikam.json'
+    
+    $params_companyC.parameters['securityPolicyHash'] = @{ 'value' = $woodgrovePolicyInfo.PolicyHash }
+    $params_companyC | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-woodgrove.json'
+    
+    # Deploy Contoso
+    Write-Host "Deploying Contoso container..." -ForegroundColor Cyan
+    az deployment group create `
+        --resource-group $resource_group `
+        --template-file deployment-template-contoso.json `
+        --parameters '@deployment-params-contoso.json' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Contoso container" }
+    Write-Success "Contoso container deployed!"
+    
+    # Deploy Fabrikam
+    Write-Host "Deploying Fabrikam container..." -ForegroundColor Magenta
+    az deployment group create `
+        --resource-group $resource_group `
+        --template-file deployment-template-fabrikam.json `
+        --parameters '@deployment-params-fabrikam.json' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Fabrikam container" }
+    Write-Success "Fabrikam container deployed!"
+    
+    # Deploy Woodgrove
+    Write-Host "Deploying Woodgrove-Bank container..." -ForegroundColor Yellow
     az deployment group create `
         --resource-group $resource_group `
         --template-file deployment-template-woodgrove.json `
         --parameters '@deployment-params-woodgrove.json' | Out-Null
-    
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to deploy Woodgrove-Bank container"
-    }
+    if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Woodgrove-Bank container" }
     Write-Success "Woodgrove-Bank container deployed!"
     
     # ========== Wait for All Containers ==========
