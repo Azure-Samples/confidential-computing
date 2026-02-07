@@ -182,7 +182,64 @@ The SKR binary is extracted from `mcr.microsoft.com/aci/skr:2.13` during the Doc
 |----------|--------|-------------|
 | `/attest/maa` | POST | Request MAA attestation token |
 | `/attest/raw` | POST | Get raw SNP attestation report |
+| `/key/release` | POST | Release a key from Azure Key Vault |
 | `/status` | GET | SKR service health status |
+
+### How Secure Key Release Works
+
+SKR is a cryptographic protocol that allows Azure Key Vault to release encryption keys **only** to containers that can prove they are running in a genuine hardware TEE. The process involves:
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Container     │     │  SKR Sidecar    │     │  Azure MAA      │     │  Azure Key Vault│
+│   (app.py)      │     │  (port 8080)    │     │                 │     │  (Premium HSM)  │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │                       │
+         │  POST /key/release    │                       │                       │
+         │──────────────────────>│                       │                       │
+         │                       │                       │                       │
+         │                       │  Get SNP Report       │                       │
+         │                       │  (AMD Hardware)       │                       │
+         │                       │──────────┐            │                       │
+         │                       │          │            │                       │
+         │                       │<─────────┘            │                       │
+         │                       │                       │                       │
+         │                       │  POST /attest/maa     │                       │
+         │                       │──────────────────────>│                       │
+         │                       │                       │                       │
+         │                       │  JWT Token (signed)   │                       │
+         │                       │<──────────────────────│                       │
+         │                       │                       │                       │
+         │                       │  POST /keys/{name}/release                    │
+         │                       │  (with MAA JWT)       │                       │
+         │                       │──────────────────────────────────────────────>│
+         │                       │                       │                       │
+         │                       │                       │    Verify JWT claims  │
+         │                       │                       │    Check policy hash  │
+         │                       │                       │    Match hostdata     │
+         │                       │                       │                       │
+         │                       │                       │    Released Key (JWE) │
+         │                       │<──────────────────────────────────────────────│
+         │                       │                       │                       │
+         │  Decrypted Key (RSA)  │                       │                       │
+         │<──────────────────────│                       │                       │
+```
+
+### Policy Hash Binding
+
+**Critical**: The `x-ms-sevsnpvm-hostdata` claim in the MAA JWT contains a hash that identifies the container's security policy. Azure Key Vault compares this against the hash specified in the key's release policy.
+
+The policy hash is computed by `az confcom acipolicygen` and output to stdout as a 64-character hex string. **This is NOT the same as SHA256 of the base64-encoded policy!**
+
+```powershell
+# Correct way to get the policy hash (from confcom output)
+$output = az confcom acipolicygen -a template.json --parameters params.json --disable-stdio 2>&1
+$policyHash = ($output | Where-Object { $_ -match '^[a-f0-9]{64}$' } | Select-Object -Last 1).Trim()
+
+# This is WRONG - produces different hash:
+# $policyBase64 = $template.properties.confidentialComputeProperties.ccePolicy
+# $wrongHash = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($policyBase64))).Replace("-","").ToLower()
+```
 
 ### MAA Request Format
 
@@ -198,6 +255,30 @@ The SKR binary is extracted from `mcr.microsoft.com/aci/skr:2.13` during the Doc
 ```json
 {
   "token": "<jwt-attestation-token>"
+}
+```
+
+### Key Release Request Format
+
+```json
+{
+  "maa_endpoint": "sharedeus.eus.attest.azure.net",
+  "akv_endpoint": "mykeyvault.vault.azure.net",
+  "kid": "my-secret-key"
+}
+```
+
+### Key Release Response (Success)
+
+```json
+{
+  "key": {
+    "kty": "RSA",
+    "n": "<modulus>",
+    "e": "AQAB",
+    "d": "<private-exponent>",
+    "key_ops": ["encrypt", "decrypt", "wrapKey", "unwrapKey"]
+  }
 }
 ```
 
@@ -230,6 +311,116 @@ The web UI dynamically updates security feature indicators based on attestation 
 
 ## Troubleshooting Attestation
 
+### Debug API Endpoints
+
+The Flask application exposes several debugging endpoints:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/debug/attestation-claims` | GET | Get MAA attestation and decode JWT claims - **critical for debugging SKR failures** |
+| `/skr/config` | GET | View SKR configuration (endpoints, key names, policy hashes) |
+| `/skr/key-status` | GET | Check if a key has been released |
+| `/skr/release` | POST | Attempt Secure Key Release |
+| `/info` | GET | Full container info with live attestation test |
+| `/health` | GET | Simple health check |
+
+### Using `/debug/attestation-claims`
+
+This is the **most important debugging endpoint** for SKR failures. It shows:
+- The **actual** `x-ms-sevsnpvm-hostdata` from hardware attestation
+- The **expected** policy hash from deployment configuration
+- Whether they **match** (if not, SKR will fail with 403)
+
+```powershell
+# Test attestation claims
+Invoke-RestMethod -Uri "http://contoso-YYYYMMDD.eastus.azurecontainer.io/debug/attestation-claims" | ConvertTo-Json -Depth 10
+```
+
+**Example response (mismatch detected):**
+```json
+{
+  "status": "success",
+  "comparison": {
+    "actual_hostdata": "49ca0663a1f128f90a4e7f58db9bf9dedb374f52491826e3480845ec7ccbe4a7",
+    "expected_policy_hash": "a3d2e479...",
+    "match": false,
+    "attestation_type": "sevsnpvm"
+  },
+  "diagnosis": {
+    "problem": "MISMATCH - The actual hostdata does not match the expected policy hash!",
+    "solution": "The policy hash computed during deployment does not match what Azure puts in x-ms-sevsnpvm-hostdata. Check the hash computation method."
+  }
+}
+```
+
+### Using `/skr/release`
+
+Test key release directly:
+
+```powershell
+# Test SKR
+Invoke-RestMethod -Uri "http://contoso-YYYYMMDD.eastus.azurecontainer.io/skr/release" -Method POST -ContentType "application/json" -Body "{}" | ConvertTo-Json -Depth 5
+```
+
+**Success response:**
+```json
+{
+  "status": "success",
+  "message": "Secure Key Release successful!",
+  "key": { "kty": "RSA", "n": "...", "e": "AQAB", ... },
+  "release_policy": {
+    "maa_endpoint": "https://sharedeus.eus.attest.azure.net",
+    "required_claims": [
+      { "claim": "x-ms-attestation-type", "value": "sevsnpvm" },
+      { "claim": "x-ms-sevsnpvm-hostdata", "value": "49ca0663..." }
+    ]
+  }
+}
+```
+
+**Error response (403 - policy mismatch):**
+```json
+{
+  "status": "error",
+  "message": "Secure Key Release failed with status 403",
+  "failure_reason": "Forbidden - attestation failed to meet key release policy requirements",
+  "diagnosis": {
+    "likely_cause": "The x-ms-sevsnpvm-hostdata claim does not match the key's release policy"
+  }
+}
+```
+
+### Using `/skr/config`
+
+View the current SKR configuration:
+
+```powershell
+Invoke-RestMethod -Uri "http://contoso-YYYYMMDD.eastus.azurecontainer.io/skr/config" | ConvertTo-Json
+```
+
+### Common SKR Errors and Solutions
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| **403 Forbidden** | Policy hash mismatch | Use `/debug/attestation-claims` to compare hashes. The policy hash in the key's release policy must match `x-ms-sevsnpvm-hostdata` from attestation |
+| **500 Internal Error** | No TEE hardware | Container deployed with Standard SKU. Redeploy with Confidential SKU |
+| **Connection refused** | SKR sidecar not running | Check container logs; wait for full startup |
+| **401 Unauthorized** | Key Vault permissions | Grant container identity access to Key Vault keys |
+| **404 Not Found** | Key doesn't exist | Check key name matches what's in Key Vault |
+
+### Root Cause: Policy Hash Computation
+
+The most common SKR failure is a 403 due to policy hash mismatch. The `x-ms-sevsnpvm-hostdata` claim is set by Azure from the security policy hash computed by `az confcom acipolicygen`.
+
+**Important**: This hash is output to stdout by confcom - it is NOT the SHA256 of the base64-encoded policy string!
+
+```powershell
+# CORRECT: Capture hash from confcom output
+$output = az confcom acipolicygen -a template.json --parameters params.json --disable-stdio 2>&1
+$policyHash = ($output | Where-Object { $_ -match '^[a-f0-9]{64}$' } | Select-Object -Last 1).Trim()
+Write-Host "Use this hash in release policy: $policyHash"
+```
+
 ### "Connection refused" error
 
 The SKR service is not running. Check container logs to verify supervisord started both processes:
@@ -259,6 +450,58 @@ az container show --name <name> --resource-group <rg> --query "sku"
 ### Attestation fails on Snooper container
 
 This is expected. The Snooper container is deployed with Standard SKU (no TEE hardware), so attestation will fail. The error response from the SKR service will be displayed in the UI, demonstrating what happens when a non-confidential container attempts to access protected resources.
+
+## Complete API Reference
+
+### Flask Application Endpoints (Port 80)
+
+| Endpoint | Method | Description | Use Case |
+|----------|--------|-------------|----------|
+| `/` | GET | Main web UI | Interactive demo |
+| `/health` | GET | Health check | Load balancer probes |
+| `/info` | GET | Deployment info with live attestation test | Debugging container state |
+| `/attest/maa` | POST | Get MAA attestation token | Verify TEE status |
+| `/attest/raw` | POST | Get raw SNP attestation report | Low-level debugging |
+| `/skr/release` | POST | Release key from Azure Key Vault | Main SKR operation |
+| `/skr/config` | GET | View SKR configuration | Check setup |
+| `/skr/key-status` | GET | Check if key is released | Verify key availability |
+| `/skr/release-partner` | POST | Release partner company's key (Woodgrove only) | Multi-party analytics |
+| `/debug/attestation-claims` | GET | **Decode attestation JWT and compare hashes** | **Critical for SKR debugging** |
+| `/encrypt-data` | POST | Encrypt data using released key | Demo encryption |
+| `/decrypt-data` | POST | Decrypt data using released key | Demo decryption |
+
+### SKR Sidecar Endpoints (Port 8080 - Internal)
+
+These endpoints are called by the Flask app, not directly by users:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/attest/maa` | POST | Request MAA JWT token |
+| `/attest/raw` | POST | Get raw SNP report |
+| `/key/release` | POST | Release key from Key Vault |
+| `/status` | GET | Sidecar health status |
+
+### Quick Debugging Commands
+
+```powershell
+# Check if container is confidential
+az container show --name <name> --resource-group <rg> --query "sku"
+
+# View container logs
+az container logs -g <rg> -n <name> --container-name attestation-demo
+
+# Test attestation claims (most important for SKR debugging)
+Invoke-RestMethod -Uri "http://<fqdn>/debug/attestation-claims" | ConvertTo-Json -Depth 10
+
+# Test SKR
+Invoke-RestMethod -Uri "http://<fqdn>/skr/release" -Method POST -Body "{}" -ContentType "application/json"
+
+# Check SKR config
+Invoke-RestMethod -Uri "http://<fqdn>/skr/config" | ConvertTo-Json
+
+# Full deployment info
+Invoke-RestMethod -Uri "http://<fqdn>/info" | ConvertTo-Json -Depth 5
+```
 
 ## References
 
