@@ -85,7 +85,7 @@ def generate_record():
     name = f'{random.choice(first_names)} {random.choice(last_names)}'
     phone = generate_phone(info['code'])
     age = random.randint(18, 65)
-    salary = random.randint(30000, 200000)
+    salary = random.randint(18000, 450000)  # Wider range: $18K - $450K
     eye_color = random.choices(eye_colors, weights=eye_weights)[0]
     fav_color = random.choice(favorite_colors)
     address = f'{random.randint(100, 9999)} {random.choice(street_names)} {random.choice(street_types)}'
@@ -103,9 +103,9 @@ def main():
     with open(contoso_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['name', 'phone', 'age', 'salary', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
-        for _ in range(800):
+        for _ in range(250):
             writer.writerow(generate_record())
-    print(f'Generated 800 records for contoso-data.csv')
+    print(f'Generated 250 records for contoso-data.csv')
 
     # Generate Fabrikam data with different seed
     random.seed(20260207)
@@ -113,9 +113,9 @@ def main():
     with open(fabrikam_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['name', 'phone', 'age', 'salary', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
-        for _ in range(800):
+        for _ in range(250):
             writer.writerow(generate_record())
-    print(f'Generated 800 records for fabrikam-data.csv')
+    print(f'Generated 250 records for fabrikam-data.csv')
 
 if __name__ == '__main__':
     main()
