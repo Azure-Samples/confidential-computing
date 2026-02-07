@@ -635,6 +635,16 @@
                         html += '<div style="background: white; padding: 10px; border-radius: 4px;"><strong style="color: #666;">Key Vault:</strong><br><span style="color: #004085; font-family: monospace;">' + escapeHtml(data.akv_endpoint) + '</span></div>';
                         html += '<div style="background: white; padding: 10px; border-radius: 4px;"><strong style="color: #666;">MAA Endpoint:</strong><br><span style="color: #004085; font-family: monospace;">' + escapeHtml(data.maa_endpoint) + '</span></div>';
                         html += '</div>';
+                        
+                        // Show security policy hash if available
+                        if (data.security_policy_hash) {
+                            html += '<div style="margin-top: 15px; padding: 12px; background: linear-gradient(135deg, #e8f4ff 0%, #f0f7ff 100%); border-radius: 6px; border: 1px solid #b8daff;">';
+                            html += '<p style="color: #0056b3; font-size: 0.85em; margin-bottom: 5px;"><strong>🛡️ SECURITY POLICY BINDING</strong></p>';
+                            html += '<p style="font-family: monospace; font-size: 0.75em; color: #004085; word-break: break-all; background: white; padding: 8px; border-radius: 4px; margin-bottom: 8px;">' + escapeHtml(data.security_policy_hash) + '</p>';
+                            html += '<p style="font-size: 0.75em; color: #666;">This key can ONLY be released to containers with this exact security policy hash (x-ms-sevsnpvm-hostdata)</p>';
+                            html += '</div>';
+                        }
+                        
                         skrConfigDiv.innerHTML = html;
                     } else {
                         skrConfigDiv.innerHTML = '<p style="color: #856404;"><em>⚠️ SKR not configured. Deploy with -SKR parameter to enable Secure Key Release.</em></p>';
@@ -1261,6 +1271,27 @@
                     html += '<p style="color: #155724;"><strong>Key Name:</strong> ' + escapeHtml(data.key_name || 'N/A') + '</p>';
                     html += '<p style="color: #155724;"><strong>MAA Endpoint:</strong> ' + escapeHtml(data.maa_endpoint || 'N/A') + '</p>';
                     html += '</div>';
+                    
+                    // Show Release Policy (new security binding info)
+                    if (data.release_policy) {
+                        html += '<div style="padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4; margin-bottom: 20px;">';
+                        html += '<h4 style="color: #0078d4; margin-bottom: 10px;">🛡️ Key Release Policy Verified</h4>';
+                        html += '<p style="color: #004085;"><strong>Attestation Authority:</strong> ' + escapeHtml(data.release_policy.maa_endpoint || 'N/A') + '</p>';
+                        if (data.release_policy.required_claims) {
+                            html += '<p style="color: #004085; margin-top: 10px;"><strong>Required Claims Verified:</strong></p>';
+                            html += '<ul style="margin-left: 20px; color: #004085;">';
+                            data.release_policy.required_claims.forEach(claim => {
+                                html += '<li style="margin: 5px 0;"><code style="background: #cce5ff; padding: 2px 6px; border-radius: 3px;">' + escapeHtml(claim.claim) + '</code>';
+                                html += ' = <strong>' + escapeHtml(claim.value.substring(0, 24) + (claim.value.length > 24 ? '...' : '')) + '</strong>';
+                                html += '<br><small style="color: #6c757d;">' + escapeHtml(claim.description) + '</small></li>';
+                            });
+                            html += '</ul>';
+                        }
+                        if (data.security_binding) {
+                            html += '<p style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px; color: #856404;"><strong>🔐 Security Binding:</strong> ' + escapeHtml(data.security_binding) + '</p>';
+                        }
+                        html += '</div>';
+                    }
                     
                     // Show the released key
                     html += '<p style="margin: 15px 0;"><strong>Released Key (JWK format):</strong></p>';

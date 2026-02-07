@@ -86,6 +86,13 @@
       "metadata": {
         "description": "Resource group name for unique blob naming"
       }
+    },
+    "securityPolicyHash": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "SHA256 hash of the container security policy (x-ms-sevsnpvm-hostdata)"
+      }
     }
   },
   "resources": [
@@ -131,6 +138,10 @@
                 {
                   "name": "RESOURCE_GROUP_NAME",
                   "value": "[parameters('resourceGroupName')]"
+                },
+                {
+                  "name": "SECURITY_POLICY_HASH",
+                  "value": "[parameters('securityPolicyHash')]"
                 }
               ],
               "resources": {

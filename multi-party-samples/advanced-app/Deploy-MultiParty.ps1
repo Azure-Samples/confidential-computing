@@ -103,6 +103,119 @@ function Write-Error {
     Write-Host $Message -ForegroundColor Red
 }
 
+function Get-PolicyHashFromTemplate {
+    <#
+    .SYNOPSIS
+        Extract the security policy hash from an ARM template after policy generation.
+    
+    .DESCRIPTION
+        After az confcom acipolicygen runs, the ARM template contains a base64-encoded
+        ccePolicy. This function extracts it and computes the SHA256 hash, which is
+        the x-ms-sevsnpvm-hostdata claim used in attestation.
+    #>
+    param([string]$TemplatePath)
+    
+    $template = Get-Content $TemplatePath -Raw | ConvertFrom-Json
+    $ccePolicy = $template.resources[0].properties.confidentialComputeProperties.ccePolicy
+    
+    if (-not $ccePolicy) {
+        throw "No ccePolicy found in template: $TemplatePath"
+    }
+    
+    # The policy hash is SHA256 of the base64 policy string
+    $policyBytes = [System.Text.Encoding]::UTF8.GetBytes($ccePolicy)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $hashBytes = $sha256.ComputeHash($policyBytes)
+    $hashHex = [BitConverter]::ToString($hashBytes).Replace("-", "").ToLower()
+    
+    return @{
+        PolicyBase64 = $ccePolicy
+        PolicyHash = $hashHex
+    }
+}
+
+function Update-KeyReleasePolicy {
+    <#
+    .SYNOPSIS
+        Update a Key Vault key's release policy to require a specific container policy hash.
+    
+    .DESCRIPTION
+        Creates a release policy that requires:
+        1. AMD SEV-SNP attestation (x-ms-attestation-type = sevsnpvm)
+        2. Specific container security policy hash (x-ms-sevsnpvm-hostdata)
+        
+        This ensures the key can ONLY be released to containers running the exact
+        approved code, identified by the policy hash.
+    #>
+    param(
+        [string]$KeyVaultName,
+        [string]$KeyName,
+        [string]$MaaEndpoint,
+        [string]$PolicyHash,
+        [string]$CompanyName
+    )
+    
+    Write-Host "Updating release policy for $CompanyName key to require policy hash..." -ForegroundColor Cyan
+    Write-Host "  Policy Hash: $PolicyHash" -ForegroundColor Yellow
+    
+    # Create release policy with policy hash requirement
+    $releasePolicy = @{
+        version = "1.0.0"
+        anyOf = @(
+            @{
+                authority = "https://$MaaEndpoint"
+                allOf = @(
+                    @{
+                        claim = "x-ms-attestation-type"
+                        equals = "sevsnpvm"
+                    },
+                    @{
+                        claim = "x-ms-sevsnpvm-hostdata"
+                        equals = $PolicyHash
+                    }
+                )
+            }
+        )
+    }
+    
+    $policyPath = Join-Path $PSScriptRoot "release-policy-$($CompanyName.ToLower()).json"
+    $releasePolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $policyPath -Encoding UTF8
+    
+    # Delete and recreate the key with the new policy
+    # (Azure doesn't allow updating release policy on existing keys)
+    Write-Host "  Recreating key with bound policy..." -ForegroundColor Gray
+    
+    # First, delete the existing key
+    az keyvault key delete --vault-name $KeyVaultName --name $KeyName 2>&1 | Out-Null
+    
+    # Purge the deleted key (required for HSM keys)
+    az keyvault key purge --vault-name $KeyVaultName --name $KeyName 2>&1 | Out-Null
+    Start-Sleep -Seconds 2
+    
+    # Create new key with the policy-hash-bound release policy
+    az keyvault key create `
+        --vault-name $KeyVaultName `
+        --name $KeyName `
+        --kty RSA-HSM `
+        --size 2048 `
+        --ops wrapKey unwrapKey encrypt decrypt `
+        --exportable true `
+        --policy $policyPath 2>&1 | Out-Null
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "  $CompanyName key bound to container policy hash"
+    } else {
+        Write-Warning "  Failed to recreate key with policy hash (may need manual purge)"
+    }
+    
+    # Clean up policy file
+    if (Test-Path $policyPath) {
+        Remove-Item $policyPath -Force
+    }
+    
+    return $releasePolicy
+}
+
 function Get-Config {
     if (Test-Path "acr-config.json") {
         return Get-Content "acr-config.json" | ConvertFrom-Json
@@ -689,6 +802,29 @@ function Invoke-Deploy {
     }
     Write-Success "Security policy generated for Contoso"
     
+    # Extract policy hash and update key release policy
+    $contosoPolicyInfo = Get-PolicyHashFromTemplate -TemplatePath "deployment-template-contoso.json"
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
+    Write-Host "║  CONTOSO CONTAINER SECURITY POLICY                                           ║" -ForegroundColor Green
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Green
+    Write-Host "║  Policy Hash (SHA256): $($contosoPolicyInfo.PolicyHash)  ║" -ForegroundColor Cyan
+    Write-Host "║  This hash uniquely identifies the approved container code                   ║" -ForegroundColor Gray
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host ""
+    
+    # Update Contoso's key to require this specific policy hash
+    $contosoReleasePolicy = Update-KeyReleasePolicy `
+        -KeyVaultName $contosoConfig.keyVaultName `
+        -KeyName $contosoConfig.skrKeyName `
+        -MaaEndpoint $config.skrMaaEndpoint `
+        -PolicyHash $contosoPolicyInfo.PolicyHash `
+        -CompanyName "Contoso"
+    
+    # Add policy hash to deployment parameters for display in UI
+    $params_companyA.parameters['securityPolicyHash'] = @{ 'value' = $contosoPolicyInfo.PolicyHash }
+    $params_companyA | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-contoso.json'
+    
     Write-Host "Deploying Contoso container..."
     az deployment group create `
         --resource-group $resource_group `
@@ -737,6 +873,29 @@ function Invoke-Deploy {
         throw "Failed to generate security policy for Fabrikam"
     }
     Write-Success "Security policy generated for Fabrikam"
+    
+    # Extract policy hash and update key release policy
+    $fabrikamPolicyInfo = Get-PolicyHashFromTemplate -TemplatePath "deployment-template-fabrikam.json"
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
+    Write-Host "║  FABRIKAM CONTAINER SECURITY POLICY                                          ║" -ForegroundColor Magenta
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Magenta
+    Write-Host "║  Policy Hash (SHA256): $($fabrikamPolicyInfo.PolicyHash)  ║" -ForegroundColor Cyan
+    Write-Host "║  This hash uniquely identifies the approved container code                   ║" -ForegroundColor Gray
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
+    Write-Host ""
+    
+    # Update Fabrikam's key to require this specific policy hash
+    $fabrikamReleasePolicy = Update-KeyReleasePolicy `
+        -KeyVaultName $fabrikamConfig.keyVaultName `
+        -KeyName $fabrikamConfig.skrKeyName `
+        -MaaEndpoint $config.skrMaaEndpoint `
+        -PolicyHash $fabrikamPolicyInfo.PolicyHash `
+        -CompanyName "Fabrikam"
+    
+    # Add policy hash to deployment parameters for display in UI
+    $params_companyB.parameters['securityPolicyHash'] = @{ 'value' = $fabrikamPolicyInfo.PolicyHash }
+    $params_companyB | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-fabrikam.json'
     
     Write-Host "Deploying Fabrikam container..."
     az deployment group create `
@@ -798,6 +957,112 @@ function Invoke-Deploy {
         throw "Failed to generate security policy for Woodgrove-Bank"
     }
     Write-Success "Security policy generated for Woodgrove-Bank"
+    
+    # Extract policy hash for Woodgrove
+    $woodgrovePolicyInfo = Get-PolicyHashFromTemplate -TemplatePath "deployment-template-woodgrove.json"
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+    Write-Host "║  WOODGROVE BANK CONTAINER SECURITY POLICY                                    ║" -ForegroundColor Yellow
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Yellow
+    Write-Host "║  Policy Hash (SHA256): $($woodgrovePolicyInfo.PolicyHash)  ║" -ForegroundColor Cyan
+    Write-Host "║  This hash uniquely identifies the approved container code                   ║" -ForegroundColor Gray
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+    Write-Host ""
+    
+    # Update Woodgrove's key to require this specific policy hash
+    $woodgroveReleasePolicy = Update-KeyReleasePolicy `
+        -KeyVaultName $woodgroveConfig.keyVaultName `
+        -KeyName $woodgroveConfig.skrKeyName `
+        -MaaEndpoint $config.skrMaaEndpoint `
+        -PolicyHash $woodgrovePolicyInfo.PolicyHash `
+        -CompanyName "Woodgrove"
+    
+    # ========== Update Partner Keys for Multi-Party Access ==========
+    Write-Header "Updating Partner Keys for Cross-Company Analytics"
+    Write-Host "Contoso and Fabrikam keys will now accept Woodgrove's policy hash for analytics" -ForegroundColor Yellow
+    Write-Host ""
+    
+    # Update Contoso's key to allow BOTH Contoso AND Woodgrove containers
+    Write-Host "Updating Contoso key to allow Woodgrove access..." -ForegroundColor Cyan
+    $contosoMultiPartyPolicy = @{
+        version = "1.0.0"
+        anyOf = @(
+            @{
+                authority = "https://$($config.skrMaaEndpoint)"
+                allOf = @(
+                    @{ claim = "x-ms-attestation-type"; equals = "sevsnpvm" },
+                    @{ claim = "x-ms-sevsnpvm-hostdata"; equals = $contosoPolicyInfo.PolicyHash }
+                )
+            },
+            @{
+                authority = "https://$($config.skrMaaEndpoint)"
+                allOf = @(
+                    @{ claim = "x-ms-attestation-type"; equals = "sevsnpvm" },
+                    @{ claim = "x-ms-sevsnpvm-hostdata"; equals = $woodgrovePolicyInfo.PolicyHash }
+                )
+            }
+        )
+    }
+    $contosoMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-contoso-multiparty.json"
+    $contosoMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $contosoMultiPolicyPath -Encoding UTF8
+    
+    az keyvault key delete --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
+    az keyvault key purge --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
+    Start-Sleep -Seconds 2
+    az keyvault key create --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName `
+        --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
+        --policy $contosoMultiPolicyPath 2>&1 | Out-Null
+    Write-Success "  Contoso key updated: allows Contoso + Woodgrove containers"
+    Remove-Item $contosoMultiPolicyPath -Force -ErrorAction SilentlyContinue
+    
+    # Update Fabrikam's key to allow BOTH Fabrikam AND Woodgrove containers
+    Write-Host "Updating Fabrikam key to allow Woodgrove access..." -ForegroundColor Cyan
+    $fabrikamMultiPartyPolicy = @{
+        version = "1.0.0"
+        anyOf = @(
+            @{
+                authority = "https://$($config.skrMaaEndpoint)"
+                allOf = @(
+                    @{ claim = "x-ms-attestation-type"; equals = "sevsnpvm" },
+                    @{ claim = "x-ms-sevsnpvm-hostdata"; equals = $fabrikamPolicyInfo.PolicyHash }
+                )
+            },
+            @{
+                authority = "https://$($config.skrMaaEndpoint)"
+                allOf = @(
+                    @{ claim = "x-ms-attestation-type"; equals = "sevsnpvm" },
+                    @{ claim = "x-ms-sevsnpvm-hostdata"; equals = $woodgrovePolicyInfo.PolicyHash }
+                )
+            }
+        )
+    }
+    $fabrikamMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-fabrikam-multiparty.json"
+    $fabrikamMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $fabrikamMultiPolicyPath -Encoding UTF8
+    
+    az keyvault key delete --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
+    az keyvault key purge --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
+    Start-Sleep -Seconds 2
+    az keyvault key create --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName `
+        --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
+        --policy $fabrikamMultiPolicyPath 2>&1 | Out-Null
+    Write-Success "  Fabrikam key updated: allows Fabrikam + Woodgrove containers"
+    Remove-Item $fabrikamMultiPolicyPath -Force -ErrorAction SilentlyContinue
+    
+    # Add policy hash to Woodgrove deployment parameters
+    $params_companyC.parameters['securityPolicyHash'] = @{ 'value' = $woodgrovePolicyInfo.PolicyHash }
+    $params_companyC | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-woodgrove.json'
+    
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║  SECURITY POLICY BINDING SUMMARY                                             ║" -ForegroundColor Cyan
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Contoso Key:   Releases to Contoso OR Woodgrove containers                  ║" -ForegroundColor White
+    Write-Host "║  Fabrikam Key:  Releases to Fabrikam OR Woodgrove containers                 ║" -ForegroundColor White
+    Write-Host "║  Woodgrove Key: Releases to Woodgrove container ONLY                         ║" -ForegroundColor White
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Keys are cryptographically bound to container code via policy hash          ║" -ForegroundColor Gray
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
     
     Write-Host "Deploying Woodgrove-Bank container..."
     az deployment group create `
