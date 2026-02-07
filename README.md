@@ -23,9 +23,23 @@ urlFragment: confidential-computing-samples
 
 **Last Updated:** February 2026
 
-Security is a key driver accelerating the adoption of cloud computing, but it’s also a major concern when you’re moving extremely sensitive IP and data scenarios to the cloud.
+Security is a key driver accelerating the adoption of cloud computing, but it's also a major concern when you're moving extremely sensitive IP and data scenarios to the cloud.
 
-Confidential computing is the protection of data-in-use through isolating computations to a hardware-based trusted execution environment (TEE). While data is traditionally encrypted at rest and in transit, confidential computing protects your data while it’s being processed. A TEE provides a protected container by securing a portion of the hardware’s processor and memory. You can run software on top of the protected environment to shield portions of your code and data from view or modification from outside of the TEE. [read more](https://azure.microsoft.com/en-us/solutions/confidential-compute/)
+Confidential computing is the protection of data-in-use through isolating computations to a hardware-based trusted execution environment (TEE). While data is traditionally encrypted at rest and in transit, confidential computing protects your data while it's being processed. A TEE provides a protected container by securing a portion of the hardware's processor and memory. You can run software on top of the protected environment to shield portions of your code and data from view or modification from outside of the TEE. [read more](https://azure.microsoft.com/en-us/solutions/confidential-compute/)
+
+## ⚠️ Disclaimer
+
+**IMPORTANT:** This repository contains sample code for educational and demonstration purposes only. 
+
+- **No Warranty:** This code is provided "AS IS" without warranty of any kind, express or implied
+- **Not Production-Ready:** These samples are not intended for production use without thorough review and modification
+- **User Responsibility:** Users are solely responsible for:
+  - Reviewing and testing all code before deployment
+  - Ensuring compliance with their organization's security policies
+  - Validating cryptographic implementations meet their security requirements
+  - Proper key management and secret handling
+  - Any data processed using these samples
+- **AI-Generated Content:** The multi-party demonstration samples were created with assistance from AI (GitHub Copilot with Claude) to showcase modern AI-assisted development capabilities. While functional, AI-generated code should always be reviewed by qualified security professionals before use in sensitive scenarios.
 
 ## Prerequisites
 
@@ -43,22 +57,35 @@ Azure Container Instances with AMD SEV-SNP confidential computing:
 - **BuildRandomACI.ps1** - Create confidential ACI with hello-world container
 - **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA), includes side-by-side comparison mode
 
-### [Multi-Party Samples](/multi-party-samples/demo-app/README-MultiParty.md) ⭐ NEW
-Secure multi-party computation demonstration with Azure Confidential Containers:
-- **Deploy-MultiParty.ps1** - Deploy 3 containers (Contoso, Fabrikam, Snooper) to demonstrate:
-  - 🔐 **Hardware-based isolation** - AMD SEV-SNP TEE protects data in memory
-  - 🛡️ **Remote attestation** - Cryptographic proof of TEE environment
-  - 🔑 **Secure Key Release (SKR)** - Keys only released to attested containers
-  - 🏢 **Company isolation** - Each party can only decrypt their own data
-  - 👁️ **Attacker view** - Snooper container sees only encrypted data
-  - 📦 **Shared storage** - Encrypted data from all parties in single blob
-  - 🔓 **TEE-only decryption** - Data decrypted only inside hardware-protected memory
+### [Multi-Party Samples](/multi-party-samples/README.md) ⭐ FEATURED
+Secure multi-party computation demonstrations with Azure Confidential Containers. Two versions available:
 
-![Multi-Party Architecture](/multi-party-samples/demo-app/MultiPartyArchitecture.svg)
+#### [Advanced App](/multi-party-samples/advanced-app/README.md) - Full-Featured Demo
+Comprehensive 3-container demonstration with partner analytics:
+
+![Multi-Party Topology](/multi-party-samples/advanced-app/MultiPartyTopology.svg)
+
+- **Contoso Corporation** - Corporate data provider with encrypted employee records (🏢)
+- **Fabrikam Fashion** - Online retailer with encrypted customer records (👗)
+- **Woodgrove Bank** - Trusted analytics partner with cross-company key access (🏦)
+
+**Key Features:**
+- 🔐 **Hardware-based isolation** - AMD SEV-SNP TEE protects data in memory
+- 🛡️ **Remote attestation** - Cryptographic proof of TEE environment via MAA
+- 🔑 **Secure Key Release (SKR)** - HSM keys only released to attested containers
+- 🏦 **Partner Analytics** - Woodgrove Bank analyzes encrypted partner data inside TEE
+- 📊 **Real-time Progress** - SSE streaming with progress bars and time estimates
+- 🌍 **Demographics Analysis** - Top countries, cities, generations by company, salary world map
+- 🔓 **TEE-only decryption** - Data decrypted only inside hardware-protected memory
+
+![Multi-Party Architecture](/multi-party-samples/advanced-app/MultiPartyArchitecture.svg)
 
 **Encrypted Data Flow:** Data remains encrypted in storage and transit; decryption only occurs inside the TEE.
 
-![Data Flow Diagram](/multi-party-samples/demo-app/DataFlowDiagram.svg)
+![Data Flow Diagram](/multi-party-samples/advanced-app/DataFlowDiagram.svg)
+
+#### [Demo App](/multi-party-samples/demo-app/README-MultiParty.md) - Basic Demo
+Simpler 2-container demonstration (Contoso, Fabrikam Fashion) without partner analytics.
 
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:
@@ -83,6 +110,18 @@ Reusable PowerShell snippets for common confidential computing tasks:
 Enclave-aware container samples for AKS with Intel SGX:
 - **HelloWorld** - Simple enclave creation and function calls
 - **Attested-TLS** - Secure communication channel between enclaves
+
+## 🤖 AI-Assisted Development Note
+
+The **multi-party-samples** in this repository were entirely created using AI-assisted development with **GitHub Copilot** powered by **Claude**. This demonstrates the capabilities of modern AI models for:
+
+- Complex infrastructure-as-code (ARM templates, PowerShell)
+- Cryptographic implementations (AES-256-GCM encryption/decryption)
+- Web application development (Flask, HTML/CSS/JavaScript)
+- Security-focused architecture design
+- Documentation and diagram generation
+
+While these samples are functional and demonstrate real Azure Confidential Computing capabilities, **they should be reviewed by qualified security professionals** before use in production scenarios.
  
 ## Contributing
 
@@ -97,3 +136,12 @@ provided by the bot. You will only need to do this once across all repos using o
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
 contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
+
+**By using this code, you acknowledge that:**
+- You have read and understood the disclaimer above
+- You accept full responsibility for any use of this code
+- You will conduct appropriate security reviews before any production deployment

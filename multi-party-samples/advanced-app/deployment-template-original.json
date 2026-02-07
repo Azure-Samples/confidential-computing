@@ -1,0 +1,177 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "containerGroupName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name for the container group"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    },
+    "appImage": {
+      "type": "string",
+      "metadata": {
+        "description": "Container image for the combined application (Flask + SKR)"
+      }
+    },
+    "registryServer": {
+      "type": "string",
+      "metadata": {
+        "description": "Container registry server"
+      }
+    },
+    "registryUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "Container registry username"
+      }
+    },
+    "registryPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Container registry password"
+      }
+    },
+    "dnsNameLabel": {
+      "type": "string",
+      "metadata": {
+        "description": "DNS name label for the public IP"
+      }
+    },
+    "skrKeyName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the SKR-protected key in Key Vault"
+      }
+    },
+    "skrMaaEndpoint": {
+      "type": "string",
+      "defaultValue": "sharedeus.eus.attest.azure.net",
+      "metadata": {
+        "description": "MAA endpoint for Secure Key Release attestation"
+      }
+    },
+    "skrAkvEndpoint": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure Key Vault endpoint for Secure Key Release"
+      }
+    },
+    "identityResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resource ID of the user-assigned managed identity for SKR"
+      }
+    },
+    "storageConnectionString": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure Storage connection string with SAS token for external blob access"
+      }
+    },
+    "resourceGroupName": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().name]",
+      "metadata": {
+        "description": "Resource group name for unique blob naming"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2023-05-01",
+      "name": "[parameters('containerGroupName')]",
+      "location": "[parameters('location')]",
+      "identity": "[if(empty(parameters('identityResourceId')), null(), createObject('type', 'UserAssigned', 'userAssignedIdentities', createObject(parameters('identityResourceId'), createObject())))]",
+      "properties": {
+        "sku": "Confidential",
+        "confidentialComputeProperties": {
+          "ccePolicy": ""
+        },
+        "containers": [
+          {
+            "name": "attestation-demo",
+            "properties": {
+              "image": "[parameters('appImage')]",
+              "ports": [
+                {
+                  "protocol": "TCP",
+                  "port": 80
+                }
+              ],
+              "environmentVariables": [
+                {
+                  "name": "SKR_KEY_NAME",
+                  "value": "[parameters('skrKeyName')]"
+                },
+                {
+                  "name": "SKR_MAA_ENDPOINT",
+                  "value": "[parameters('skrMaaEndpoint')]"
+                },
+                {
+                  "name": "SKR_AKV_ENDPOINT",
+                  "value": "[parameters('skrAkvEndpoint')]"
+                },
+                {
+                  "name": "AZURE_STORAGE_CONNECTION_STRING",
+                  "secureValue": "[parameters('storageConnectionString')]"
+                },
+                {
+                  "name": "RESOURCE_GROUP_NAME",
+                  "value": "[parameters('resourceGroupName')]"
+                }
+              ],
+              "resources": {
+                "requests": {
+                  "memoryInGB": 2,
+                  "cpu": 1
+                }
+              }
+            }
+          }
+        ],
+        "imageRegistryCredentials": [
+          {
+            "server": "[parameters('registryServer')]",
+            "username": "[parameters('registryUsername')]",
+            "password": "[parameters('registryPassword')]"
+          }
+        ],
+        "ipAddress": {
+          "ports": [
+            {
+              "protocol": "TCP",
+              "port": 80
+            }
+          ],
+          "type": "Public",
+          "dnsNameLabel": "[parameters('dnsNameLabel')]"
+        },
+        "osType": "Linux",
+        "restartPolicy": "Always"
+      }
+    }
+  ],
+  "outputs": {
+    "containerGroupId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))]"
+    },
+    "fqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.fqdn]"
+    }
+  }
+}
