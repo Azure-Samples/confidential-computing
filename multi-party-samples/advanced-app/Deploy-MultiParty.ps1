@@ -146,6 +146,9 @@ function Update-KeyReleasePolicy {
         
         This ensures the key can ONLY be released to containers running the exact
         approved code, identified by the policy hash.
+        
+        Note: Azure Key Vault doesn't allow updating release policy on existing keys.
+        We delete and recreate the key. If soft-delete is enabled, we need to purge first.
     #>
     param(
         [string]$KeyVaultName,
@@ -181,31 +184,58 @@ function Update-KeyReleasePolicy {
     $policyPath = Join-Path $PSScriptRoot "release-policy-$($CompanyName.ToLower()).json"
     $releasePolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $policyPath -Encoding UTF8
     
-    # Delete and recreate the key with the new policy
-    # (Azure doesn't allow updating release policy on existing keys)
     Write-Host "  Recreating key with bound policy..." -ForegroundColor Gray
     
-    # First, delete the existing key
+    # Step 1: Delete existing key (if exists)
+    Write-Host "    Step 1/3: Deleting existing key..." -ForegroundColor Gray
     az keyvault key delete --vault-name $KeyVaultName --name $KeyName 2>&1 | Out-Null
-    
-    # Purge the deleted key (required for HSM keys)
-    az keyvault key purge --vault-name $KeyVaultName --name $KeyName 2>&1 | Out-Null
     Start-Sleep -Seconds 2
     
-    # Create new key with the policy-hash-bound release policy
-    az keyvault key create `
+    # Step 2: Purge the deleted key (if soft-delete is enabled)
+    Write-Host "    Step 2/3: Purging deleted key (if soft-delete enabled)..." -ForegroundColor Gray
+    $purgeResult = az keyvault key purge --vault-name $KeyVaultName --name $KeyName 2>&1
+    Start-Sleep -Seconds 3
+    
+    # Step 3: Create new key with policy binding
+    Write-Host "    Step 3/3: Creating new key with policy hash binding..." -ForegroundColor Gray
+    $createResult = az keyvault key create `
         --vault-name $KeyVaultName `
         --name $KeyName `
         --kty RSA-HSM `
         --size 2048 `
         --ops wrapKey unwrapKey encrypt decrypt `
         --exportable true `
-        --policy $policyPath 2>&1 | Out-Null
+        --policy $policyPath 2>&1
     
     if ($LASTEXITCODE -eq 0) {
         Write-Success "  $CompanyName key bound to container policy hash"
     } else {
-        Write-Warning "  Failed to recreate key with policy hash (may need manual purge)"
+        $createError = $createResult -join " "
+        
+        # If key still exists in deleted state, try waiting and retrying
+        if ($createError -match "conflict" -or $createError -match "already exists") {
+            Write-Warning "  Key still in deleted state. Waiting 15 seconds for propagation..."
+            Start-Sleep -Seconds 15
+            
+            $retryResult = az keyvault key create `
+                --vault-name $KeyVaultName `
+                --name $KeyName `
+                --kty RSA-HSM `
+                --size 2048 `
+                --ops wrapKey unwrapKey encrypt decrypt `
+                --exportable true `
+                --policy $policyPath 2>&1
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "  $CompanyName key bound to container policy hash (after retry)"
+            } else {
+                Write-Warning "  Could not bind key to policy hash. Deployment will continue with generic policy."
+                Write-Host "    Note: For strict security, manually delete key '$KeyName' from Key Vault '$KeyVaultName'" -ForegroundColor Yellow
+                Write-Host "          then re-run with -Deploy only" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Warning "  Key creation failed: $createError"
+        }
     }
     
     # Clean up policy file
@@ -430,12 +460,14 @@ function Invoke-Build {
     $SkrKeyNameA = "contoso-secret-key"
     
     Write-Host "Creating Key Vault for Contoso: $KeyVaultNameA..." -ForegroundColor Green
+    # Note: --enable-soft-delete false allows immediate key deletion/recreation for policy updates
     az keyvault create `
         --resource-group $ResourceGroup `
         --name $KeyVaultNameA `
         --location $Location `
         --sku premium `
-        --enable-rbac-authorization false | Out-Null
+        --enable-rbac-authorization false `
+        --enable-soft-delete false | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create Key Vault for Contoso"
     }
@@ -472,12 +504,14 @@ function Invoke-Build {
     $SkrKeyNameB = "fabrikam-secret-key"
     
     Write-Host "Creating Key Vault for Fabrikam: $KeyVaultNameB..." -ForegroundColor Green
+    # Note: --enable-soft-delete false allows immediate key deletion/recreation for policy updates
     az keyvault create `
         --resource-group $ResourceGroup `
         --name $KeyVaultNameB `
         --location $Location `
         --sku premium `
-        --enable-rbac-authorization false | Out-Null
+        --enable-rbac-authorization false `
+        --enable-soft-delete false | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create Key Vault for Fabrikam"
     }
@@ -514,12 +548,14 @@ function Invoke-Build {
     $SkrKeyNameC = "woodgrove-secret-key"
     
     Write-Host "Creating Key Vault for Woodgrove-Bank: $KeyVaultNameC..." -ForegroundColor Green
+    # Note: --enable-soft-delete false allows immediate key deletion/recreation for policy updates
     az keyvault create `
         --resource-group $ResourceGroup `
         --name $KeyVaultNameC `
         --location $Location `
         --sku premium `
-        --enable-rbac-authorization false | Out-Null
+        --enable-rbac-authorization false `
+        --enable-soft-delete false | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create Key Vault for Woodgrove-Bank"
     }
@@ -1006,13 +1042,22 @@ function Invoke-Deploy {
     $contosoMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-contoso-multiparty.json"
     $contosoMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $contosoMultiPolicyPath -Encoding UTF8
     
+    # Delete, wait, purge, wait, then create
+    Write-Host "    Deleting Contoso key..." -ForegroundColor Gray
     az keyvault key delete --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
+    Start-Sleep -Seconds 3
+    Write-Host "    Purging Contoso key..." -ForegroundColor Gray
     az keyvault key purge --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
-    Start-Sleep -Seconds 2
-    az keyvault key create --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName `
+    Start-Sleep -Seconds 5
+    Write-Host "    Creating Contoso key with multi-party policy..." -ForegroundColor Gray
+    $contosoCreateResult = az keyvault key create --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName `
         --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
-        --policy $contosoMultiPolicyPath 2>&1 | Out-Null
-    Write-Success "  Contoso key updated: allows Contoso + Woodgrove containers"
+        --policy $contosoMultiPolicyPath 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "  Contoso key updated: allows Contoso + Woodgrove containers"
+    } else {
+        Write-Warning "  Contoso key recreation failed. Will use previous key."
+    }
     Remove-Item $contosoMultiPolicyPath -Force -ErrorAction SilentlyContinue
     
     # Update Fabrikam's key to allow BOTH Fabrikam AND Woodgrove containers
@@ -1039,13 +1084,22 @@ function Invoke-Deploy {
     $fabrikamMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-fabrikam-multiparty.json"
     $fabrikamMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $fabrikamMultiPolicyPath -Encoding UTF8
     
+    # Delete, wait, purge, wait, then create
+    Write-Host "    Deleting Fabrikam key..." -ForegroundColor Gray
     az keyvault key delete --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
+    Start-Sleep -Seconds 3
+    Write-Host "    Purging Fabrikam key..." -ForegroundColor Gray
     az keyvault key purge --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
-    Start-Sleep -Seconds 2
-    az keyvault key create --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName `
+    Start-Sleep -Seconds 5
+    Write-Host "    Creating Fabrikam key with multi-party policy..." -ForegroundColor Gray
+    $fabrikamCreateResult = az keyvault key create --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName `
         --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
-        --policy $fabrikamMultiPolicyPath 2>&1 | Out-Null
-    Write-Success "  Fabrikam key updated: allows Fabrikam + Woodgrove containers"
+        --policy $fabrikamMultiPolicyPath 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "  Fabrikam key updated: allows Fabrikam + Woodgrove containers"
+    } else {
+        Write-Warning "  Fabrikam key recreation failed. Will use previous key."
+    }
     Remove-Item $fabrikamMultiPolicyPath -Force -ErrorAction SilentlyContinue
     
     # Add policy hash to Woodgrove deployment parameters
