@@ -137,7 +137,7 @@ function Get-PolicyHashFromTemplate {
 function Update-KeyReleasePolicy {
     <#
     .SYNOPSIS
-        Update a Key Vault key's release policy to require a specific container policy hash.
+        Create a Key Vault key with a release policy bound to a specific container policy hash.
     
     .DESCRIPTION
         Creates a release policy that requires:
@@ -146,9 +146,6 @@ function Update-KeyReleasePolicy {
         
         This ensures the key can ONLY be released to containers running the exact
         approved code, identified by the policy hash.
-        
-        Note: Azure Key Vault doesn't allow updating release policy on existing keys.
-        We delete and recreate the key. If soft-delete is enabled, we need to purge first.
     #>
     param(
         [string]$KeyVaultName,
@@ -158,7 +155,7 @@ function Update-KeyReleasePolicy {
         [string]$CompanyName
     )
     
-    Write-Host "Updating release policy for $CompanyName key to require policy hash..." -ForegroundColor Cyan
+    Write-Host "Creating key for $CompanyName with policy hash binding..." -ForegroundColor Cyan
     Write-Host "  Policy Hash: $PolicyHash" -ForegroundColor Yellow
     
     # Create release policy with policy hash requirement
@@ -184,20 +181,22 @@ function Update-KeyReleasePolicy {
     $policyPath = Join-Path $PSScriptRoot "release-policy-$($CompanyName.ToLower()).json"
     $releasePolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $policyPath -Encoding UTF8
     
-    Write-Host "  Recreating key with bound policy..." -ForegroundColor Gray
+    # Check if key already exists
+    $existingKey = az keyvault key show --vault-name $KeyVaultName --name $KeyName 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Key already exists. Deleting and recreating with new policy..." -ForegroundColor Yellow
+        
+        # Delete existing key
+        az keyvault key delete --vault-name $KeyVaultName --name $KeyName 2>&1 | Out-Null
+        Start-Sleep -Seconds 2
+        
+        # Purge deleted key
+        az keyvault key purge --vault-name $KeyVaultName --name $KeyName 2>&1 | Out-Null
+        Start-Sleep -Seconds 3
+    }
     
-    # Step 1: Delete existing key (if exists)
-    Write-Host "    Step 1/3: Deleting existing key..." -ForegroundColor Gray
-    az keyvault key delete --vault-name $KeyVaultName --name $KeyName 2>&1 | Out-Null
-    Start-Sleep -Seconds 2
-    
-    # Step 2: Purge the deleted key (if soft-delete is enabled)
-    Write-Host "    Step 2/3: Purging deleted key (if soft-delete enabled)..." -ForegroundColor Gray
-    $purgeResult = az keyvault key purge --vault-name $KeyVaultName --name $KeyName 2>&1
-    Start-Sleep -Seconds 3
-    
-    # Step 3: Create new key with policy binding
-    Write-Host "    Step 3/3: Creating new key with policy hash binding..." -ForegroundColor Gray
+    # Create key with policy binding
+    Write-Host "  Creating key with policy hash binding..." -ForegroundColor Gray
     $createResult = az keyvault key create `
         --vault-name $KeyVaultName `
         --name $KeyName `
@@ -208,13 +207,13 @@ function Update-KeyReleasePolicy {
         --policy $policyPath 2>&1
     
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "  $CompanyName key bound to container policy hash"
+        Write-Success "  $CompanyName key created with policy hash binding"
     } else {
         $createError = $createResult -join " "
         
-        # If key still exists in deleted state, try waiting and retrying
+        # If key still exists in deleted state, wait and retry
         if ($createError -match "conflict" -or $createError -match "already exists") {
-            Write-Warning "  Key still in deleted state. Waiting 15 seconds for propagation..."
+            Write-Warning "  Key in deleted state. Waiting 15 seconds..."
             Start-Sleep -Seconds 15
             
             $retryResult = az keyvault key create `
@@ -227,11 +226,26 @@ function Update-KeyReleasePolicy {
                 --policy $policyPath 2>&1
             
             if ($LASTEXITCODE -eq 0) {
-                Write-Success "  $CompanyName key bound to container policy hash (after retry)"
+                Write-Success "  $CompanyName key created with policy hash binding (after retry)"
             } else {
-                Write-Warning "  Could not bind key to policy hash. Deployment will continue with generic policy."
-                Write-Host "    Note: For strict security, manually delete key '$KeyName' from Key Vault '$KeyVaultName'" -ForegroundColor Yellow
-                Write-Host "          then re-run with -Deploy only" -ForegroundColor Yellow
+                Write-Warning "  Could not create key with policy binding. Creating with generic policy..."
+                # Create with generic sevsnpvm-only policy as fallback
+                $genericPolicy = @{
+                    version = "1.0.0"
+                    anyOf = @(@{
+                        authority = "https://$MaaEndpoint"
+                        allOf = @(@{ claim = "x-ms-attestation-type"; equals = "sevsnpvm" })
+                    })
+                }
+                $genericPolicyPath = Join-Path $PSScriptRoot "release-policy-generic.json"
+                $genericPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $genericPolicyPath -Encoding UTF8
+                
+                az keyvault key create --vault-name $KeyVaultName --name $KeyName `
+                    --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt `
+                    --exportable true --policy $genericPolicyPath 2>&1 | Out-Null
+                
+                Remove-Item $genericPolicyPath -Force -ErrorAction SilentlyContinue
+                Write-Warning "  Key created with generic policy (no container binding)"
             }
         } else {
             Write-Warning "  Key creation failed: $createError"
@@ -460,14 +474,12 @@ function Invoke-Build {
     $SkrKeyNameA = "contoso-secret-key"
     
     Write-Host "Creating Key Vault for Contoso: $KeyVaultNameA..." -ForegroundColor Green
-    # Note: --enable-soft-delete false allows immediate key deletion/recreation for policy updates
     az keyvault create `
         --resource-group $ResourceGroup `
         --name $KeyVaultNameA `
         --location $Location `
         --sku premium `
-        --enable-rbac-authorization false `
-        --enable-soft-delete false | Out-Null
+        --enable-rbac-authorization false | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create Key Vault for Contoso"
     }
@@ -482,19 +494,9 @@ function Invoke-Build {
     Write-Host "Granting Contoso identity access to Key Vault..." -ForegroundColor Green
     az keyvault set-policy --name $KeyVaultNameA --object-id $IdentityPrincipalIdA --key-permissions get release | Out-Null
     
-    Write-Host "Creating SKR key for Contoso: $SkrKeyNameA..." -ForegroundColor Green
-    az keyvault key create `
-        --vault-name $KeyVaultNameA `
-        --name $SkrKeyNameA `
-        --kty RSA-HSM `
-        --size 2048 `
-        --ops wrapKey unwrapKey encrypt decrypt `
-        --exportable true `
-        --policy $releasePolicyPath | Out-Null
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Contoso: Key Vault '$KeyVaultNameA' with key '$SkrKeyNameA' created"
-    }
+    # NOTE: Key will be created during Deploy phase with proper policy hash binding
+    Write-Host "Key '$SkrKeyNameA' will be created during Deploy with security policy binding" -ForegroundColor Cyan
+    Write-Success "Contoso: Key Vault '$KeyVaultNameA' created (key created during Deploy)"
     
     # ========== Create Key Vault and Identity for Fabrikam ==========
     Write-Header "Creating Resources for Fabrikam"
@@ -504,14 +506,12 @@ function Invoke-Build {
     $SkrKeyNameB = "fabrikam-secret-key"
     
     Write-Host "Creating Key Vault for Fabrikam: $KeyVaultNameB..." -ForegroundColor Green
-    # Note: --enable-soft-delete false allows immediate key deletion/recreation for policy updates
     az keyvault create `
         --resource-group $ResourceGroup `
         --name $KeyVaultNameB `
         --location $Location `
         --sku premium `
-        --enable-rbac-authorization false `
-        --enable-soft-delete false | Out-Null
+        --enable-rbac-authorization false | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create Key Vault for Fabrikam"
     }
@@ -526,19 +526,9 @@ function Invoke-Build {
     Write-Host "Granting Fabrikam identity access to Key Vault..." -ForegroundColor Green
     az keyvault set-policy --name $KeyVaultNameB --object-id $IdentityPrincipalIdB --key-permissions get release | Out-Null
     
-    Write-Host "Creating SKR key for Fabrikam: $SkrKeyNameB..." -ForegroundColor Green
-    az keyvault key create `
-        --vault-name $KeyVaultNameB `
-        --name $SkrKeyNameB `
-        --kty RSA-HSM `
-        --size 2048 `
-        --ops wrapKey unwrapKey encrypt decrypt `
-        --exportable true `
-        --policy $releasePolicyPath | Out-Null
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Fabrikam: Key Vault '$KeyVaultNameB' with key '$SkrKeyNameB' created"
-    }
+    # NOTE: Key will be created during Deploy phase with proper policy hash binding
+    Write-Host "Key '$SkrKeyNameB' will be created during Deploy with security policy binding" -ForegroundColor Cyan
+    Write-Success "Fabrikam: Key Vault '$KeyVaultNameB' created (key created during Deploy)"
     
     # ========== Create Key Vault and Identity for Woodgrove-Bank ==========
     Write-Header "Creating Resources for Woodgrove-Bank"
@@ -548,14 +538,12 @@ function Invoke-Build {
     $SkrKeyNameC = "woodgrove-secret-key"
     
     Write-Host "Creating Key Vault for Woodgrove-Bank: $KeyVaultNameC..." -ForegroundColor Green
-    # Note: --enable-soft-delete false allows immediate key deletion/recreation for policy updates
     az keyvault create `
         --resource-group $ResourceGroup `
         --name $KeyVaultNameC `
         --location $Location `
         --sku premium `
-        --enable-rbac-authorization false `
-        --enable-soft-delete false | Out-Null
+        --enable-rbac-authorization false | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to create Key Vault for Woodgrove-Bank"
     }
@@ -570,19 +558,9 @@ function Invoke-Build {
     Write-Host "Granting Woodgrove-Bank identity access to its own Key Vault..." -ForegroundColor Green
     az keyvault set-policy --name $KeyVaultNameC --object-id $IdentityPrincipalIdC --key-permissions get release | Out-Null
     
-    Write-Host "Creating SKR key for Woodgrove-Bank: $SkrKeyNameC..." -ForegroundColor Green
-    az keyvault key create `
-        --vault-name $KeyVaultNameC `
-        --name $SkrKeyNameC `
-        --kty RSA-HSM `
-        --size 2048 `
-        --ops wrapKey unwrapKey encrypt decrypt `
-        --exportable true `
-        --policy $releasePolicyPath | Out-Null
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Woodgrove-Bank: Key Vault '$KeyVaultNameC' with key '$SkrKeyNameC' created"
-    }
+    # NOTE: Key will be created during Deploy phase with proper policy hash binding
+    Write-Host "Key '$SkrKeyNameC' will be created during Deploy with security policy binding" -ForegroundColor Cyan
+    Write-Success "Woodgrove-Bank: Key Vault '$KeyVaultNameC' created (key created during Deploy)"
     
     # ========== Grant Woodgrove-Bank Access to Partner Key Vaults ==========
     Write-Header "Granting Woodgrove-Bank Cross-Company Access"
