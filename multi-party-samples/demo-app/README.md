@@ -4,7 +4,47 @@
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
 **Last Updated:** February 2026
 
+## 🤖 AI-Generated Content
+
+> **Note:** This entire multi-party demonstration was **created using AI-assisted development** with GitHub Copilot powered by Claude. While functional, AI-generated code should always be reviewed by qualified security professionals before use in production scenarios.
+
 A demonstration of Azure Confidential Container Instances (ACI) with AMD SEV-SNP hardware protection, showing how multiple parties can securely collaborate while protecting their data from each other and from infrastructure operators.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Demo App - 2 Party Architecture                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│   ┌──────────────────────────┐   ┌────────────────────────────┐   │
+│   │     Contoso 🏢           │   │   Fabrikam Fashion 👗    │   │
+│   │   Confidential ACI      │   │   Confidential ACI       │   │
+│   │   AMD SEV-SNP TEE       │   │   AMD SEV-SNP TEE        │   │
+│   │                        │   │                          │   │
+│   │   ✓ Attestation         │   │   ✓ Attestation          │   │
+│   │   ✓ Own key release     │   │   ✓ Own key release      │   │
+│   │   ✗ Cannot access       │   │   ✗ Cannot access        │   │
+│   │     Fabrikam's key     │   │     Contoso's key       │   │
+│   └────────────┬─────────────┘   └─────────────┬──────────────┘   │
+│                │                           │                    │
+│                ▼                           ▼                    │
+│   ┌───────────────────────────────────────────────────────┐   │
+│   │                Azure Blob Storage                          │   │
+│   │              consolidated-records-{rg}.json                 │   │
+│   │    ┌───────────────────┐    ┌──────────────────────┐      │   │
+│   │    │ Contoso Records   │    │  Fabrikam Records    │      │   │
+│   │    │ (RSA Encrypted)   │    │  (RSA Encrypted)     │      │   │
+│   │    └───────────────────┘    └──────────────────────┘      │   │
+│   └───────────────────────────────────────────────────────┘   │
+│                                                                    │
+│   ┌──────────────────────────┐   ┌────────────────────────────┐   │
+│   │     Key Vault A          │   │     Key Vault B            │   │
+│   │     (Contoso Key)        │   │     (Fabrikam Key)         │   │
+│   │     SKR Protected        │   │     SKR Protected          │   │
+│   └──────────────────────────┘   └────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Overview
 
@@ -61,10 +101,10 @@ The demo deploys:
 
 ## Prerequisites
 
-- **Azure CLI** (v2.50+) - [Install Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
+- **Azure CLI** (v2.60+) - [Install Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
 - **Azure Subscription** - With permissions to create Container Instances, Container Registry, and Key Vault
 - **Docker Desktop** - [Download Docker Desktop](https://www.docker.com/products/docker-desktop/) (required for confidential container policy generation)
-- **PowerShell** - Version 5.1 or later ([PowerShell 7+ recommended](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell))
+- **PowerShell** - Version 7.0+ recommended ([PowerShell 7+ download](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell))
 
 ### Azure CLI Extensions
 
@@ -73,7 +113,7 @@ The demo deploys:
 az extension add --name confcom --upgrade
 
 # Verify installation
-az confcom --help
+az confcom --version
 ```
 
 ## Quick Start
@@ -81,11 +121,13 @@ az confcom --help
 ### Step 1: Build the Container Image
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Build
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build
 ```
 
+> **Prefix**: Use a short, unique identifier (3-8 chars) like your initials (`jd01`), team code (`team42`), or project name (`demo`). This helps identify resource ownership in shared subscriptions.
+
 This creates:
-- **Azure Resource Group** - Named `sgall<registryname>-rg` in East US
+- **Azure Resource Group** - Named `<prefix><registryname>-rg` in East US
 - **Azure Container Registry (ACR)** - Basic SKU with admin enabled
 - **Contoso Key Vault** - Premium HSM with `contoso-secret-key`
 - **Fabrikam Key Vault** - Premium HSM with `fabrikam-secret-key`
@@ -95,7 +137,7 @@ This creates:
 ### Step 2: Deploy All Containers
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Deploy
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy
 ```
 
 Deploys three containers:
@@ -108,19 +150,20 @@ Deploys three containers:
 ### Combined Build and Deploy
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Build -Deploy
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
 ```
 
 ### Cleanup All Resources
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Cleanup
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Cleanup
 ```
 
 ## Command Reference
 
 | Parameter | Description |
 |-----------|-------------|
+| `-Prefix <code>` | **REQUIRED.** Short unique identifier (3-8 chars, e.g., `jd01`, `dev`, `team42`) |
 | `-Build` | Build and push container image to ACR (creates RG, ACR, Key Vaults) |
 | `-Deploy` | Deploy all 3 containers (Contoso, Fabrikam, Snooper) |
 | `-Cleanup` | Delete all Azure resources in the resource group |
@@ -135,8 +178,11 @@ Deploys three containers:
 # Show help and current configuration
 .\Deploy-MultiParty.ps1
 
+# Build with your initials as prefix
+.\Deploy-MultiParty.ps1 -Prefix jd01 -Build
+
 # Build with custom registry name
-.\Deploy-MultiParty.ps1 -Build -RegistryName "myregistry"
+.\Deploy-MultiParty.ps1 -Prefix dev -Build -RegistryName "myregistry"
 
 # Deploy and skip browser
 .\Deploy-MultiParty.ps1 -Deploy -SkipBrowser

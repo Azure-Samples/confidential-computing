@@ -44,10 +44,10 @@ The screenshot below shows the attestation demo running side-by-side: with AMD S
 
 ## Prerequisites
 
-- **Azure CLI** (v2.50+) - [Install Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
+- **Azure CLI** (v2.60+) - [Install Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
 - **Azure Subscription** - With permissions to create Container Instances, Container Registry, and Key Vault
 - **Docker Desktop** - [Download Docker Desktop](https://www.docker.com/products/docker-desktop/) (required for confidential mode policy generation)
-- **PowerShell** - Version 5.1 or later ([PowerShell 7+ recommended](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell))
+- **PowerShell** - Version 7.0+ recommended ([PowerShell 7+ download](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell))
 
 ### Azure CLI Extensions
 
@@ -58,7 +58,7 @@ The confidential mode requires the `confcom` extension for security policy gener
 az extension add --name confcom --upgrade
 
 # Verify installation
-az confcom --help
+az confcom --version
 ```
 
 ## Quick Start

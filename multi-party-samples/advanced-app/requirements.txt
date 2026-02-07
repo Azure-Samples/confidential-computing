@@ -1,0 +1,8 @@
+# Flask web application framework
+flask>=3.0.0
+
+# HTTP requests library for API calls
+requests>=2.31.0
+
+# Cryptography library for RSA encryption/decryption
+cryptography>=42.0.0

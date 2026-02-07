@@ -2759,13 +2759,167 @@ def encrypted_data_status():
         }), 500
 
 # =============================================================================
-# AUTO-INITIALIZATION ON STARTUP (For Contoso and Fabrikam containers)
+# AUTO-INITIALIZATION ON STARTUP
 # =============================================================================
+
+def auto_initialize_woodgrove(key_name, maa_endpoint, akv_endpoint):
+    """
+    Auto-initialize Woodgrove Bank container:
+    1. Wait for SKR sidecar
+    2. Release Woodgrove's own key
+    3. Release partner keys from Contoso and Fabrikam Key Vaults
+    """
+    import time
+    global _released_key
+    global _released_key_name
+    
+    print(f"\n[WOODGROVE] Starting Woodgrove Bank auto-initialization...")
+    
+    # Step 1: Wait for SKR sidecar to be ready
+    print(f"\n[STEP 1/4] Waiting for SKR sidecar to be ready...")
+    max_retries = 30
+    sidecar_ready = False
+    
+    for i in range(max_retries):
+        try:
+            response = requests.get("http://localhost:8080/", timeout=2)
+            sidecar_ready = True
+            print(f"           SKR sidecar is ready (attempt {i+1}/{max_retries})")
+            break
+        except:
+            if i < max_retries - 1:
+                time.sleep(2)
+    
+    if not sidecar_ready:
+        print(f"\n[ERROR] Woodgrove auto-init FAILED: SKR sidecar not available")
+        print(f"{'='*60}\n")
+        return
+    
+    # Step 2: Release Woodgrove's own key
+    print(f"\n[STEP 2/4] Releasing Woodgrove's key...")
+    try:
+        akv_clean = akv_endpoint.replace('https://', '').replace('http://', '')
+        maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+        
+        response = requests.post(
+            "http://localhost:8080/key/release",
+            json={
+                "maa_endpoint": maa_clean,
+                "akv_endpoint": akv_clean,
+                "kid": key_name
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            skr_response = response.json()
+            key_data = skr_response.get('key', skr_response)
+            if isinstance(key_data, str):
+                try:
+                    key_data = json.loads(key_data)
+                except:
+                    pass
+            
+            _released_key = key_data
+            _released_key_name = key_name
+            print(f"           [SUCCESS] Woodgrove key released: {key_name}")
+        else:
+            print(f"           [FAILED] Woodgrove key release failed: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"           [ERROR] Woodgrove key release error: {str(e)}")
+    
+    # Step 3: Release Contoso partner key
+    print(f"\n[STEP 3/4] Releasing partner keys...")
+    partner_contoso_akv = os.environ.get('PARTNER_CONTOSO_AKV_ENDPOINT', '')
+    partner_fabrikam_akv = os.environ.get('PARTNER_FABRIKAM_AKV_ENDPOINT', '')
+    maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+    
+    contoso_success = False
+    fabrikam_success = False
+    
+    if partner_contoso_akv:
+        try:
+            akv_clean = partner_contoso_akv.replace('https://', '').replace('http://', '')
+            print(f"           Releasing Contoso key from {akv_clean}...")
+            
+            response = requests.post(
+                "http://localhost:8080/key/release",
+                json={
+                    "maa_endpoint": maa_clean,
+                    "akv_endpoint": akv_clean,
+                    "kid": "contoso-secret-key"
+                },
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                skr_response = response.json()
+                key_data = skr_response.get('key', skr_response)
+                if isinstance(key_data, str):
+                    try:
+                        key_data = json.loads(key_data)
+                    except:
+                        pass
+                store_partner_key('contoso', key_data)
+                contoso_success = True
+                print(f"           [SUCCESS] Contoso partner key released and stored")
+            else:
+                print(f"           [FAILED] Contoso key release: HTTP {response.status_code}")
+        except Exception as e:
+            print(f"           [ERROR] Contoso key release: {str(e)}")
+    else:
+        print(f"           [SKIP] PARTNER_CONTOSO_AKV_ENDPOINT not configured")
+    
+    # Step 4: Release Fabrikam partner key
+    if partner_fabrikam_akv:
+        try:
+            akv_clean = partner_fabrikam_akv.replace('https://', '').replace('http://', '')
+            print(f"           Releasing Fabrikam key from {akv_clean}...")
+            
+            response = requests.post(
+                "http://localhost:8080/key/release",
+                json={
+                    "maa_endpoint": maa_clean,
+                    "akv_endpoint": akv_clean,
+                    "kid": "fabrikam-secret-key"
+                },
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                skr_response = response.json()
+                key_data = skr_response.get('key', skr_response)
+                if isinstance(key_data, str):
+                    try:
+                        key_data = json.loads(key_data)
+                    except:
+                        pass
+                store_partner_key('fabrikam', key_data)
+                fabrikam_success = True
+                print(f"           [SUCCESS] Fabrikam partner key released and stored")
+            else:
+                print(f"           [FAILED] Fabrikam key release: HTTP {response.status_code}")
+        except Exception as e:
+            print(f"           [ERROR] Fabrikam key release: {str(e)}")
+    else:
+        print(f"           [SKIP] PARTNER_FABRIKAM_AKV_ENDPOINT not configured")
+    
+    # Summary
+    print(f"\n{'='*60}")
+    print(f"WOODGROVE AUTO-INITIALIZATION COMPLETED")
+    print(f"{'='*60}")
+    print(f"  Own Key Released:     {'YES' if _released_key else 'NO'}")
+    print(f"  Contoso Key:          {'YES' if contoso_success else 'NO'}")
+    print(f"  Fabrikam Key:         {'YES' if fabrikam_success else 'NO'}")
+    print(f"  Ready for Analytics:  {'YES' if (contoso_success and fabrikam_success) else 'PARTIAL'}")
+    print(f"{'='*60}\n")
+
+
 def auto_initialize_container():
     """
     Automatically perform attestation, key release, and CSV encryption on startup.
-    This only runs for Contoso and Fabrikam containers (which have CSV files).
-    Woodgrove and Snooper containers skip this process.
+    - Contoso/Fabrikam: Release key, encrypt CSV data
+    - Woodgrove: Release own key + partner keys for cross-company analytics
     """
     import time
     import csv
@@ -2782,6 +2936,8 @@ def auto_initialize_container():
         company = 'contoso'
     elif 'fabrikam' in key_name.lower():
         company = 'fabrikam'
+    elif 'woodgrove' in key_name.lower():
+        company = 'woodgrove'
     
     # Log startup info
     print(f"\n{'='*60}")
@@ -2791,6 +2947,11 @@ def auto_initialize_container():
     print(f"SKR_MAA_ENDPOINT: {maa_endpoint}")
     print(f"SKR_AKV_ENDPOINT: {akv_endpoint or '(not set)'}")
     print(f"Detected Company: {company or '(unknown)'}")
+    
+    # Handle Woodgrove separately - it needs partner key release
+    if company == 'woodgrove':
+        auto_initialize_woodgrove(key_name, maa_endpoint, akv_endpoint)
+        return
     
     # Skip if not Contoso or Fabrikam
     if not company or company not in ['contoso', 'fabrikam']:

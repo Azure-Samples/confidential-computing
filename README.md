@@ -44,9 +44,20 @@ Confidential computing is the protection of data-in-use through isolating comput
 ## Prerequisites
 
 - [Azure subscription](https://azure.microsoft.com/free/)
-- [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest) (v2.50+)
-- [Azure PowerShell](https://learn.microsoft.com/en-us/powershell/azure/install-azure-powershell?view=azps-latest)
+- [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest) (v2.60+) with `confcom` extension
+- [Azure PowerShell](https://learn.microsoft.com/en-us/powershell/azure/install-azure-powershell?view=azps-latest) (Az module 12.0+)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for confidential container policy generation)
+- [Python 3.11+](https://www.python.org/downloads/) (for local development/testing)
+
+### Quick Setup
+
+```powershell
+# Install required Azure CLI extension
+az extension add --name confcom --upgrade
+
+# Verify installation
+az confcom --version
+```
 
 ## Sample Categories
 
@@ -55,7 +66,10 @@ This repository is organized by Azure service type and deployment method:
 ### [ACI Samples](/aci-samples/README.md)
 Azure Container Instances with AMD SEV-SNP confidential computing:
 - **BuildRandomACI.ps1** - Create confidential ACI with hello-world container
-- **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA), includes side-by-side comparison mode
+- **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA)
+  - Side-by-side comparison mode (Confidential vs Standard SKU)
+  - Real-time encryption with SKR-released keys
+  - Live diagnostics and TEE hardware detection
 
 ### [Multi-Party Samples](/multi-party-samples/README.md) ⭐ FEATURED
 Secure multi-party computation demonstrations with Azure Confidential Containers. Two versions available:
@@ -89,9 +103,13 @@ Simpler 2-container demonstration (Contoso, Fabrikam Fashion) without partner an
 
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:
-- **BuildRandomCVM.ps1** - Deploy CVMs with Customer Managed Keys, Confidential Disk Encryption, and attestation (Windows Server, Windows 11, Ubuntu, RHEL)
+- **BuildRandomCVM.ps1** - Deploy CVMs with Customer Managed Keys, Confidential Disk Encryption, and attestation
+  - Windows Server 2022 Datacenter
+  - Windows 11 Enterprise 24H2
+  - Ubuntu 24.04 LTS
+  - RHEL 9.5
 - **BuildCVMWithPrivateMAA.ps1** - CVM with private Azure Attestation provider *(experimental)*
-- **BuildRandomSQLCVM.ps1** - SQL Server on Confidential VM
+- **BuildRandomSQLCVM.ps1** - SQL Server 2022 on Confidential VM
 
 ### [AKS Samples](/aks-samples/README.md)
 Azure Kubernetes Service with AMD SEV-SNP confidential computing:

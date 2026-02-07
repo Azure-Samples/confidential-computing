@@ -3,7 +3,42 @@
 **Last Updated:** February 2026
 
 ## Overview
-This folder contains scripts and samples for creating Confidential Azure Container Instances (ACIs) using Azure's confidential computing SKUs with AMD SEV-SNP hardware protection.
+
+Scripts and samples for creating Confidential Azure Container Instances (ACIs) using Azure's confidential computing SKUs with AMD SEV-SNP hardware protection.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Confidential ACI Architecture                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│   ┌────────────────────────────────────────────────────────┐   │
+│   │           Azure Container Instance (Confidential SKU)        │   │
+│   │  ┌────────────────────────────────────────────────────┐  │   │
+│   │  │              Combined Container (supervisord)            │  │   │
+│   │  │  ┌───────────────────┐     ┌─────────────────────┐       │  │   │
+│   │  │  │  Flask Web App    │     │  SKR Service        │       │  │   │
+│   │  │  │  (Port 80)        │◀───▶│  (Port 8080)        │       │  │   │
+│   │  │  │                   │     │  mcr.microsoft.com/ │       │  │   │
+│   │  │  │  - Attestation UI │     │  aci/skr:2.13       │       │  │   │
+│   │  │  │  - Key Release    │     │                     │       │  │   │
+│   │  │  │  - Encryption     │     └──────────┬──────────┘       │  │   │
+│   │  │  └───────────────────┘              │                  │  │   │
+│   │  └─────────────────────────────────┬──────────────────┘  │   │
+│   │                                    │                          │   │
+│   │            AMD SEV-SNP TEE         │                          │   │
+│   │         (Hardware Memory Encryption)│                          │   │
+│   └─────────────────────────────────────┬──────────────────┘   │
+│                                        │                              │
+│                                        ▼                              │
+│   ┌───────────────────┐  ┌─────────────────┐  ┌──────────────────┐  │
+│   │  Azure Key Vault   │  │  Azure            │  │  Azure Container │  │
+│   │  (Premium HSM)     │  │  Attestation      │  │  Registry (ACR)  │  │
+│   │                   │  │  (MAA)            │  │                  │  │
+│   └───────────────────┘  └─────────────────┘  └──────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Samples
 

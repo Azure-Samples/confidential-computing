@@ -17,14 +17,13 @@ This demonstration shows how Azure Confidential Containers enable secure multi-p
 
 ## Overview
 
-The demo deploys **four containers** running identical code, demonstrating how hardware-based security provides protection that software alone cannot achieve:
+The demo deploys **three confidential containers** running identical code, demonstrating how hardware-based security and partner trust relationships enable secure multi-party data sharing:
 
 | Container | SKU | Hardware | Can Attest? | Can Get Keys? | Can Decrypt Data? |
 |-----------|-----|----------|-------------|---------------|-------------------|
 | **Contoso** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
-| **Fabrikam** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
-| **Woodgrove Bank** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own + Partner | ✅ Partner data |
-| **Snooper** | Standard | None | ❌ No | ❌ No keys | ❌ No data |
+| **Fabrikam Fashion** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
+| **Woodgrove Bank** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own + Partner | ✅ All partner data |
 
 ## Key Concepts
 
@@ -37,18 +36,6 @@ In traditional cloud computing, infrastructure operators (cloud providers, IT ad
 3. **Secure Key Release (SKR)**: Keys are only released to attested environments
 4. **Company Isolation**: Each company's key is bound to their container identity
 
-### The Snooper Problem
-
-The `snooper` container represents:
-- A malicious container trying to intercept data
-- An infrastructure operator trying to peek at secrets
-- A compromised container without TEE protection
-
-**Even though snooper runs the same code**, it cannot:
-- Generate valid attestation tokens (no `/dev/sev-guest` device)
-- Release cryptographic keys from Azure Key Vault
-- Decrypt data protected by SKR-released keys
-
 ### Woodgrove Bank: Trusted Partner Analytics
 
 Woodgrove Bank demonstrates a **trusted third-party analytics** scenario:
@@ -57,22 +44,22 @@ Woodgrove Bank demonstrates a **trusted third-party analytics** scenario:
 - Woodgrove must still pass TEE attestation to release partner keys
 - Enables aggregate demographic analysis while maintaining cryptographic guarantees
 
-**Key differences from Snooper:**
+**Key features:**
 - Woodgrove runs in a **Confidential** container (can attest)
 - Woodgrove has **explicit permission** from partners (Key Vault access policies)
 - All access is **audited** in Azure for compliance
 
 ### Cross-Company Isolation
 
-Even between trusted parties (Contoso and Fabrikam):
+Even between trusted parties (Contoso and Fabrikam Fashion):
 - Each company has a **separate Key Vault key** with its own release policy
 - Contoso's key is bound to Contoso's container identity
 - Fabrikam cannot access Contoso's key, and vice versa
-- Shared storage contains encrypted data from both, but each can only decrypt their own
 
-**Woodgrove exception:**
-- Woodgrove can access both keys because partners **explicitly granted** access
-- This is not a security bypass - it's intentional delegation
+**Woodgrove Bank exception:**
+- Woodgrove can access both partner keys because partners **explicitly granted** access
+- This is not a security bypass - it's intentional delegation for analytics
+- Enables cross-company demographic analysis inside TEE-protected memory
 
 ## Traffic Flow
 
@@ -113,31 +100,19 @@ Woodgrove Container → SKR Sidecar (:8080)
                     Partner Data Analysis
 ```
 
-### Failed Attestation (Snooper)
-
-```
-User Browser → Flask App (:80) → SKR Sidecar (:8080)
-                                        ↓
-                              ❌ No /dev/sev-guest device
-                              ❌ Cannot generate TEE evidence
-                              ❌ Attestation fails
-                              ❌ No JWT token
-                              ❌ Key Vault denies access
-```
-
 ### Data Protection Flow
 
 The following diagram shows how encrypted data flows from storage to the TEE where it is decrypted:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        UNTRUSTED ZONE                                    │
-│  (Data always encrypted - attackers see only ciphertext)                │
+│                        DATA SOURCES                                      │
+│  (Raw data encrypted before entering system)                            │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │   ┌─────────────────┐         ┌─────────────────┐                       │
 │   │   contoso.csv   │         │  fabrikam.csv   │                       │
-│   │   (9 records)   │         │   (9 records)   │                       │
+│   │  (800 records)  │         │  (800 records)  │                       │
 │   └────────┬────────┘         └────────┬────────┘                       │
 │            │                           │                                 │
 │            ▼                           ▼                                 │
@@ -150,12 +125,10 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 │            └─────────────┬─────────────┘                                │
 │                          ▼                                               │
 │              ┌───────────────────────┐                                  │
-│              │  consolidated-        │        ┌──────────────┐          │
-│              │  records-{rg}.json    │◄───────│   Snooper    │          │
-│              │  (Azure Blob Storage) │        │  Can READ    │          │
-│              │  Mixed encrypted data │        │  but NOT     │          │
-│              └───────────┬───────────┘        │  DECRYPT ❌  │          │
-│                          │                    └──────────────┘          │
+│              │  Encrypted records    │                                  │
+│              │  stored in memory     │                                  │
+│              └───────────┬───────────┘                                  │
+│                          │                                              │
 └──────────────────────────┼──────────────────────────────────────────────┘
                            │
 ┌──────────────────────────┼──────────────────────────────────────────────┐
@@ -165,7 +138,7 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 │                          ▼                                               │
 │              ┌───────────────────────┐                                  │
 │              │  1️⃣ Fetch encrypted   │                                  │
-│              │     data from blob    │                                  │
+│              │     data              │                                  │
 │              └───────────┬───────────┘                                  │
 │                          │                                               │
 │                          ▼                                               │
@@ -190,14 +163,13 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 │  │     🔓 Even hypervisor cannot read TEE memory                     │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                          │                                               │
-│            ┌─────────────┼─────────────┬─────────────┐                  │
-│            │             │             │             │                   │
-│            ▼             ▼             ▼             ▼                   │
-│        Contoso       Fabrikam      Woodgrove      Snooper               │
-│       Decrypts      Decrypts      Decrypts       ❌ Cannot              │
-│       own 9         own 9         Partner        attest                 │
-│       records       records       Data           ❌ No key              │
-│                                                  ❌ No decrypt          │
+│            ┌─────────────┼─────────────┐                                │
+│            │             │             │                                │
+│            ▼             ▼             ▼                                │
+│        Contoso       Fabrikam      Woodgrove                            │
+│       Decrypts      Decrypts      Decrypts                              │
+│       own 800       own 800       ALL partner                           │
+│       records       records       records                               │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -205,44 +177,46 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 
 ### Prerequisites
 
-- Azure CLI with `confcom` extension (`az extension add --name confcom`)
+- Azure CLI (v2.60+) with `confcom` extension (`az extension add --name confcom --upgrade`)
 - Docker Desktop (for security policy generation)
 - Azure subscription with Confidential Container support
-- PowerShell 5.1 or later
+- PowerShell 7.0+ recommended
 
 ### Deploy
 
 ```powershell
 # Build the container image (first time only)
-.\Deploy-MultiParty.ps1 -Build
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build
 
-# Deploy all 4 containers
-.\Deploy-MultiParty.ps1 -Deploy
+# Deploy all 3 containers
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy
 
 # Or build and deploy in one command
-.\Deploy-MultiParty.ps1 -Build -Deploy
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
 ```
+
+> **Note:** Replace `<yourcode>` with a short unique identifier (3-8 chars) like your initials or team code.
 
 ### Clean Up
 
 ```powershell
-# Delete all Azure resources (containers, Key Vault keys, blob data)
-.\Deploy-MultiParty.ps1 -Cleanup
+# Delete all Azure resources (containers, Key Vault keys)
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Cleanup
 ```
 
 ## What You'll See
 
-After deployment, a browser opens with a 4-pane side-by-side view:
+After deployment, a browser opens with a 3-pane side-by-side view:
 
 ```
-+------------------+------------------+------------------+------------------+
-|     CONTOSO      |     FABRIKAM     |  WOODGROVE BANK  |     SNOOPER      |
-| (Confidential)   | (Confidential)   |  (Confidential)  |  (Standard)      |
-|                  |                  |                  |                  |
-| ✅ Attestation   | ✅ Attestation   | ✅ Attestation   | ❌ Attestation   |
-| ✅ Key Release   | ✅ Key Release   | ✅ Key Release   | ❌ Key Release   |
-| ✅ Own data      | ✅ Own data      | ✅ Partner data  | 👁️ Encrypted    |
-+------------------+------------------+------------------+------------------+
++------------------+------------------+------------------+
+|     CONTOSO      | FABRIKAM FASHION |  WOODGROVE BANK  |
+| (Confidential)   |  (Confidential)  |  (Confidential)  |
+|       🏢         |       👗         |       🏦         |
+| ✅ Attestation   | ✅ Attestation   | ✅ Attestation   |
+| ✅ Key Release   | ✅ Key Release   | ✅ Key Release   |
+| ✅ Own data      | ✅ Own data      | ✅ Partner data  |
++------------------+------------------+------------------+
 ```
 
 ### Woodgrove Bank Features
@@ -251,36 +225,29 @@ After deployment, a browser opens with a 4-pane side-by-side view:
 - **Partner Demographic Analysis** section
 - **Progress indicators** for Contoso and Fabrikam key release
 - **Real-time analysis log**
+- **Demographics**: Top 10 countries with top 3 cities, generational breakdown, salary world map
 
 ## Demo Script
 
 ### Basic Attestation Demo
 
 1. **Show Contoso**: Click "Get Raw Report" - attestation succeeds
-2. **Show Fabrikam**: Same result - both can attest
-3. **Show Woodgrove**: Attestation succeeds with green bank theme
-4. **Show Snooper**: Click "Get Raw Report" - fails with error message
+2. **Show Fabrikam Fashion**: Same result - attestation succeeds (pink fashion theme)
+3. **Show Woodgrove Bank**: Attestation succeeds with green bank theme
 
 ### Secure Key Release Demo
 
-5. **Release Key on Contoso**: Expand "Secure Key Release" section, click release
-6. **Try on Snooper**: Same action fails - no attestation = no key
-7. **Cross-Company Test**: Contoso tries to access Fabrikam's key - denied
+4. **Release Key on Contoso**: Expand "Secure Key Release" section, click release
+5. **Cross-Company Test**: Contoso tries to access Fabrikam Fashion's key - denied
 
-### Partner Analysis Demo (Woodgrove Only)
+### Partner Analysis Demo (Woodgrove Bank)
 
-8. **Open Woodgrove Bank pane**: Notice green bank branding
-9. **Expand "Partner Demographic Analysis"** section
-10. **Click "Start Partner Demographic Analysis"**
-11. **Watch progress**: Contoso ✅ → Fabrikam ✅
-12. **Review log**: Shows both partner keys released successfully
-
-### Data Protection Demo
-
-13. **Expand "Protect Data"**: Section auto-imports CSV records
-14. **Show encrypted storage**: Records encrypted with company-specific keys
-15. **Decrypt Toggle**: Press "Decrypt" to see plaintext (only for own data)
-16. **Switch to Snooper**: Show auto-refreshing attacker view with encrypted blobs
+6. **Open Woodgrove Bank pane**: Notice green bank branding with 🏦 logo
+7. **Expand "Partner Demographic Analysis"** section
+8. **Click "Start Partner Demographic Analysis"**
+9. **Watch progress**: Contoso ✅ → Fabrikam ✅
+10. **Review results**: Demographics by country, generation breakdown by company, salary world map
+11. **Review log**: Shows both partner keys released successfully
 
 ## Security Model
 
@@ -324,25 +291,25 @@ Azure Key Vault: kv<registry>c (Woodgrove Bank)
 
 This means:
 - Only containers with `x-ms-attestation-type: sevsnpvm` can release the key
-- The snooper container cannot fake this claim - it's verified by AMD hardware
-- Each company's key has its own policy tied to their container
+- Non-confidential containers cannot obtain this claim - it's verified by AMD hardware
+- Each company's key has its own policy tied to their container identity
 - Woodgrove has access to partner keys via explicit Key Vault permissions
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `Deploy-MultiParty.ps1` | Main deployment script with -Build, -Deploy, -Cleanup |
+| `Deploy-MultiParty.ps1` | Main deployment script with -Prefix, -Build, -Deploy, -Cleanup |
 | `app.py` | Flask application with all API endpoints |
 | `Dockerfile` | Multi-stage build with SKR sidecar |
 | `templates/index.html` | Interactive web UI with all demo features |
-| `contoso-data.csv` | Sample data for Contoso (9 records) |
-| `fabrikam-data.csv` | Sample data for Fabrikam (9 records) |
+| `templates/index-woodgrove.html` | Woodgrove Bank custom UI with partner analytics |
+| `contoso-data.csv` | Sample data for Contoso (800 records) |
+| `fabrikam-data.csv` | Sample data for Fabrikam Fashion (800 records) |
 | `deployment-template-original.json` | ARM template for Confidential SKU |
 | `deployment-template-woodgrove-base.json` | ARM template for Woodgrove with partner env vars |
-| `deployment-template-standard.json` | ARM template for Standard SKU |
-| `multiparty-view.html` | 4-pane view for side-by-side comparison |
 | `MultiPartyArchitecture.svg` | High-level architecture diagram |
+| `MultiPartyTopology.svg` | Multi-party topology diagram |
 | `DataFlowDiagram.svg` | Encrypted data flow showing TEE decryption model |
 
 ## API Endpoints
@@ -359,11 +326,7 @@ This means:
 | `/encrypt` | POST | Encrypt data with released key |
 | `/decrypt` | POST | Decrypt data with released key |
 | `/company/info` | GET | Get company identity |
-| `/company/save` | POST | Save encrypted record to blob |
-| `/company/populate` | POST | Import CSV and encrypt to blob |
-| `/company/list` | GET | List company's encrypted records |
-| `/storage/config` | GET | Get blob storage configuration |
-| `/storage/list` | GET | List all blobs (for snooper view) |
+| `/demographics/analyze` | POST | Partner demographic analysis (SSE streaming) |
 | `/container/info` | GET | Get container metadata |
 | `/health` | GET | Health check endpoint |
 

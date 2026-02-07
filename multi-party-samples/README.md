@@ -2,6 +2,41 @@
 
 Secure multi-party computation demonstrations using Azure Confidential Containers with AMD SEV-SNP hardware protection.
 
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                Multi-Party Confidential Computing                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌───────────────────┐  ┌───────────────────┐  ┌─────────────────────┐   │
+│  │  Contoso 🏢        │  │  Fabrikam 👗      │  │  Woodgrove Bank 🏦   │   │
+│  │  (Confidential)   │  │  (Confidential)   │  │  (Confidential)      │   │
+│  │                   │  │                   │  │  Partner Analytics   │   │
+│  │  • Own key only   │  │  • Own key only   │  │  • Own + Partner    │   │
+│  │  • Own data       │  │  • Own data       │  │    keys            │   │
+│  │  • TEE protected  │  │  • TEE protected  │  │  • Cross-company   │   │
+│  └─────────┬─────────┘  └─────────┬─────────┘  └──────────┬──────────┘   │
+│            │                    │                     │                  │
+│            ▼                    ▼                     ▼                  │
+│  ┌────────────────────────────────────────────────────────────────┐   │
+│  │                  Azure Blob Storage                                 │   │
+│  │               Encrypted Data (consolidated-records-{rg}.json)       │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌───────────────────┐   │   │
+│  │  │ Contoso Data    │  │ Fabrikam Data   │  │ Accessible to:    │   │   │
+│  │  │ (RSA encrypted) │  │ (RSA encrypted) │  │ • Own container   │   │   │
+│  │  │                 │  │                 │  │ • Woodgrove only  │   │   │
+│  │  └─────────────────┘  └─────────────────┘  └───────────────────┘   │   │
+│  └────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  ┌───────────────────┐  ┌───────────────────┐  ┌─────────────────────┐   │
+│  │  Key Vault A       │  │  Key Vault B      │  │  Key Vault C         │   │
+│  │  (Contoso Key)     │  │  (Fabrikam Key)   │  │  (Woodgrove Key)     │   │
+│  │  SKR Protected     │  │  SKR Protected    │  │  + Access to A & B  │   │
+│  └───────────────────┘  └───────────────────┘  └─────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
 ## 🤖 AI-Generated Content
 
 > **Note:** These multi-party demonstration samples were **entirely created using AI-assisted development** with GitHub Copilot powered by Claude. This showcases the capabilities of modern AI models for developing complex security-focused applications, including:
@@ -52,8 +87,10 @@ A comprehensive 3-container demonstration with **partner analytics** capabilitie
 
 ```powershell
 cd advanced-app
-.\Deploy-MultiParty.ps1 -Build -Deploy
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
 ```
+
+> **Note:** Replace `<yourcode>` with a short unique identifier (3-8 chars) like your initials or team code.
 
 See the [full documentation](advanced-app/README.md) for detailed instructions.
 
@@ -72,15 +109,15 @@ A simpler 2-container demonstration without partner analytics:
 
 ```powershell
 cd demo-app
-.\Deploy-MultiParty.ps1 -Build -Deploy
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
 ```
 
 ## Prerequisites
 
-- **Azure CLI** (v2.50+) with `confcom` extension
+- **Azure CLI** (v2.60+) with `confcom` extension
 - **Docker Desktop** - Required for security policy generation
 - **Azure subscription** with Confidential Container support
-- **PowerShell** 5.1+ (PowerShell 7+ recommended)
+- **PowerShell** 7.0+ recommended (5.1+ minimum)
 
 ### Install Azure CLI Extension
 

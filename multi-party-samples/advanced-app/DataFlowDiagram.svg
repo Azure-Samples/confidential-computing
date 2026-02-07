@@ -41,45 +41,22 @@
   
   <!-- Title -->
   <text x="550" y="30" text-anchor="middle" font-family="Segoe UI, Arial" font-size="22" font-weight="bold" fill="#333">Encrypted Data Flow - Multi-Party TEE Decryption Model</text>
-  <text x="550" y="50" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#666">4 Containers: Contoso, Fabrikam, Woodgrove Bank (Confidential) + Snooper (Standard)</text>
+  <text x="550" y="50" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#666">3 Confidential Containers: Contoso, Fabrikam Fashion, Woodgrove Bank (Partner Analytics)</text>
   
-  <!-- ============ UNTRUSTED ZONE (Left) ============ -->
-  <rect x="25" y="70" width="280" height="560" rx="15" fill="#fff5f5" stroke="#dc3545" stroke-width="2" stroke-dasharray="8,4"/>
-  <text x="45" y="95" font-family="Segoe UI, Arial" font-size="13" fill="#dc3545" font-weight="bold">⚠️ UNTRUSTED ZONE</text>
-  <text x="45" y="112" font-family="Segoe UI, Arial" font-size="9" fill="#dc3545">Data always encrypted here</text>
+  <!-- ============ EXTERNAL DATA ZONE (Left) ============ -->
+  <rect x="25" y="70" width="280" height="200" rx="15" fill="#fff8e6" stroke="#ffc107" stroke-width="2" stroke-dasharray="8,4"/>
+  <text x="45" y="95" font-family="Segoe UI, Arial" font-size="13" fill="#856404" font-weight="bold">📁 External Data Sources</text>
+  <text x="45" y="112" font-family="Segoe UI, Arial" font-size="9" fill="#856404">Data encrypted before entering TEE</text>
   
-  <!-- Azure Blob Storage -->
+  <!-- Data Sources -->
   <g filter="url(#shadow)">
-    <rect x="45" y="130" width="240" height="130" rx="10" fill="url(#storageGrad)" stroke="#ffc107" stroke-width="2"/>
+    <rect x="45" y="130" width="240" height="120" rx="10" fill="#fff" stroke="#ffc107" stroke-width="2"/>
     <rect x="45" y="130" width="240" height="28" rx="10" fill="#ffc107"/>
-    <text x="165" y="150" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#333" font-weight="bold">📦 Azure Blob Storage</text>
-    <text x="165" y="175" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">consolidated-records-{rg}.json</text>
-    
-    <!-- Encrypted records representation -->
-    <rect x="60" y="190" width="210" height="55" rx="5" fill="#2d2d2d"/>
-    <text x="75" y="208" font-family="Courier New, monospace" font-size="8" fill="#ff6b6b">🔒 {"name": "base64cipher..."}</text>
-    <text x="75" y="222" font-family="Courier New, monospace" font-size="8" fill="#ff6b6b">🔒 {"phone": "base64cipher..."}</text>
-    <text x="75" y="236" font-family="Courier New, monospace" font-size="8" fill="#888">// Anyone can read, nobody can decrypt</text>
-  </g>
-  
-  <!-- Snooper/Attacker -->
-  <g filter="url(#shadow)">
-    <rect x="45" y="280" width="240" height="100" rx="10" fill="#f8d7da" stroke="#dc3545" stroke-width="2"/>
-    <rect x="45" y="280" width="240" height="26" rx="10" fill="#dc3545"/>
-    <text x="165" y="298" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#fff" font-weight="bold">🕵️ Snooper / Attacker</text>
-    <text x="165" y="320" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#721c24">Standard Container (No TEE)</text>
-    <text x="165" y="338" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#721c24">❌ No /dev/sev-guest device</text>
-    <text x="165" y="356" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#721c24">❌ Cannot attest to Key Vault</text>
-    <text x="165" y="374" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#721c24">❌ Sees only encrypted gibberish</text>
-  </g>
-  
-  <!-- Network/Cloud Operator -->
-  <g filter="url(#shadow)">
-    <rect x="45" y="400" width="240" height="70" rx="10" fill="#fff3cd" stroke="#856404" stroke-width="2"/>
-    <rect x="45" y="400" width="240" height="24" rx="10" fill="#ffc107"/>
-    <text x="165" y="417" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333" font-weight="bold">☁️ Infrastructure Operator</text>
-    <text x="165" y="440" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#856404">Can see encrypted network traffic</text>
-    <text x="165" y="458" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#856404">Cannot decrypt - no TEE access</text>
+    <text x="165" y="150" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#333" font-weight="bold">📊 Partner Data</text>
+    <text x="165" y="175" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">contoso-data.csv (800 records)</text>
+    <text x="165" y="195" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">fabrikam-data.csv (800 records)</text>
+    <text x="165" y="220" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#666">Encrypted with RSA-OAEP-256</text>
+    <text x="165" y="240" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#666">Keys from respective Key Vaults</text>
   </g>
   
   <!-- ============ TRUSTED ZONE (Right) ============ -->
@@ -174,7 +151,7 @@
   
   <!-- ============ FLOW ARROWS ============ -->
   
-  <!-- Encrypted data from blob to TEE -->
+  <!-- Encrypted data from external to TEE -->
   <path d="M 285 195 L 340 350" stroke="#ffc107" stroke-width="3" fill="none" marker-end="url(#arrowOrange)"/>
   <text x="300" y="280" font-family="Segoe UI, Arial" font-size="9" fill="#856404">1️⃣ Encrypted</text>
   <text x="300" y="293" font-family="Segoe UI, Arial" font-size="9" fill="#856404">data</text>
@@ -200,48 +177,35 @@
   <path d="M 780 315 Q 700 280 620 210" stroke="#1a472a" stroke-width="1.5" stroke-dasharray="3,2" fill="none" marker-end="url(#arrowBank)"/>
   <text x="600" y="275" font-family="Segoe UI, Arial" font-size="7" fill="#1a472a">Partner keys</text>
   
-  <!-- Snooper denied arrow -->
-  <path d="M 285 340 L 340 340" stroke="#dc3545" stroke-width="2" fill="none" stroke-dasharray="5,3"/>
-  <text x="305" y="330" font-family="Segoe UI, Arial" font-size="9" fill="#dc3545" font-weight="bold">❌</text>
-  <line x1="325" y1="325" x2="355" y2="355" stroke="#dc3545" stroke-width="3"/>
-  <line x1="325" y1="355" x2="355" y2="325" stroke="#dc3545" stroke-width="3"/>
-  
   <!-- ============ LEGEND ============ -->
-  <rect x="25" y="490" width="280" height="140" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
-  <text x="45" y="515" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Data Flow Legend:</text>
+  <rect x="25" y="290" width="280" height="120" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
+  <text x="45" y="315" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Data Flow Legend:</text>
   
-  <line x1="45" y1="535" x2="85" y2="535" stroke="#ffc107" stroke-width="3"/>
-  <text x="95" y="540" font-family="Segoe UI, Arial" font-size="9" fill="#333">1️⃣ Encrypted data from blob</text>
+  <line x1="45" y1="335" x2="85" y2="335" stroke="#ffc107" stroke-width="3"/>
+  <text x="95" y="340" font-family="Segoe UI, Arial" font-size="9" fill="#333">1️⃣ Encrypted data to TEE</text>
   
-  <line x1="45" y1="555" x2="85" y2="555" stroke="#0078d4" stroke-width="2" stroke-dasharray="5,3"/>
-  <text x="95" y="560" font-family="Segoe UI, Arial" font-size="9" fill="#333">2️⃣ TEE attestation to MAA</text>
+  <line x1="45" y1="355" x2="85" y2="355" stroke="#0078d4" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="95" y="360" font-family="Segoe UI, Arial" font-size="9" fill="#333">2️⃣ TEE attestation to MAA</text>
   
-  <line x1="45" y1="575" x2="85" y2="575" stroke="#28a745" stroke-width="2"/>
-  <text x="95" y="580" font-family="Segoe UI, Arial" font-size="9" fill="#333">3️⃣ Key release to TEE</text>
+  <line x1="45" y1="375" x2="85" y2="375" stroke="#28a745" stroke-width="2"/>
+  <text x="95" y="380" font-family="Segoe UI, Arial" font-size="9" fill="#333">3️⃣ Key release to TEE</text>
   
-  <line x1="45" y1="595" x2="85" y2="595" stroke="#1a472a" stroke-width="2" stroke-dasharray="3,2"/>
-  <text x="95" y="600" font-family="Segoe UI, Arial" font-size="9" fill="#333">Woodgrove partner access</text>
-  
-  <line x1="45" y1="615" x2="85" y2="615" stroke="#dc3545" stroke-width="2" stroke-dasharray="5,3"/>
-  <text x="95" y="620" font-family="Segoe UI, Arial" font-size="9" fill="#333">❌ Snooper denied</text>
+  <line x1="45" y1="395" x2="85" y2="395" stroke="#1a472a" stroke-width="2" stroke-dasharray="3,2"/>
+  <text x="95" y="400" font-family="Segoe UI, Arial" font-size="9" fill="#333">Woodgrove partner access</text>
   
   <!-- Result summary -->
-  <rect x="330" y="530" width="720" height="100" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
+  <rect x="330" y="530" width="550" height="100" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
   <text x="350" y="555" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Decryption Results by Container:</text>
   
-  <rect x="350" y="570" width="150" height="45" rx="5" fill="#d4edda" stroke="#28a745"/>
-  <text x="425" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">Contoso ✅</text>
-  <text x="425" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Decrypts own 9 records</text>
+  <rect x="350" y="570" width="160" height="45" rx="5" fill="#d4edda" stroke="#28a745"/>
+  <text x="430" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">Contoso ✅</text>
+  <text x="430" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Decrypts own 800 records</text>
   
-  <rect x="520" y="570" width="150" height="45" rx="5" fill="#d4edda" stroke="#28a745"/>
-  <text x="595" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">Fabrikam ✅</text>
-  <text x="595" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Decrypts own 9 records</text>
+  <rect x="530" y="570" width="160" height="45" rx="5" fill="#d4edda" stroke="#28a745"/>
+  <text x="610" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">Fabrikam ✅</text>
+  <text x="610" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Decrypts own 800 records</text>
   
-  <rect x="690" y="570" width="170" height="45" rx="5" fill="#d4edda" stroke="#1a472a"/>
-  <text x="775" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#1a472a" font-weight="bold">Woodgrove Bank ✅</text>
-  <text x="775" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#1a472a">Decrypts partner data</text>
-  
-  <rect x="880" y="570" width="150" height="45" rx="5" fill="#f8d7da" stroke="#dc3545"/>
-  <text x="955" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#721c24" font-weight="bold">Snooper ❌</text>
-  <text x="955" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#721c24">Cannot decrypt anything</text>
+  <rect x="710" y="570" width="160" height="45" rx="5" fill="#d4edda" stroke="#1a472a"/>
+  <text x="790" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#1a472a" font-weight="bold">Woodgrove Bank ✅</text>
+  <text x="790" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#1a472a">Decrypts all partner data</text>
 </svg>

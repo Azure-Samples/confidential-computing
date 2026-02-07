@@ -1,6 +1,41 @@
 # Confidential Virtual Machines
 
-**Last Updated:** January 2026
+**Last Updated:** February 2026
+
+## Overview
+
+Deploy Confidential Virtual Machines (CVMs) with AMD SEV-SNP hardware protection, Customer Managed Keys (CMK), and automated attestation.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     Confidential VM Architecture                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                    Confidential VM (DCasv5)                       │   │
+│  │  ┌────────────────────────────────────────────────────────────┐  │   │
+│  │  │                  Guest OS (Windows/Linux)                   │  │   │
+│  │  │  ┌─────────────────┐    ┌─────────────────────────────┐   │  │   │
+│  │  │  │  Application    │    │  Attestation Agent          │   │  │   │
+│  │  │  │  Workload       │    │  (Proves TEE Integrity)     │   │  │   │
+│  │  │  └─────────────────┘    └──────────────┬──────────────┘   │  │   │
+│  │  └────────────────────────────────────────┼───────────────────┘  │   │
+│  │                                           │                       │   │
+│  │              AMD SEV-SNP TEE              │                       │   │
+│  │         (Memory Encrypted at CPU)         │                       │   │
+│  └───────────────────────────────────────────┼───────────────────────┘   │
+│                                              │                           │
+│                                              ▼                           │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                     Azure Infrastructure                          │  │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐   │  │
+│  │  │  Key Vault      │  │  Azure          │  │  Azure Bastion  │   │  │
+│  │  │  (Premium HSM)  │  │  Attestation    │  │  (Secure RDP/   │   │  │
+│  │  │                 │  │  (MAA)          │  │  SSH Access)    │   │  │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ## Available Scripts
 
@@ -39,7 +74,7 @@ The script will generate a random complex password and output it to the terminal
 
 ## OS Type Options:
 - **Windows**: Windows Server 2022 Datacenter (supports RDP via Bastion)
-- **Windows11**: Windows 11 Enterprise 23H2 (supports RDP via Bastion)
+- **Windows11**: Windows 11 Enterprise 24H2 (supports RDP via Bastion)
 - **Ubuntu**: Ubuntu 24.04 LTS CVM (supports SSH via Bastion)  
 - **RHEL**: Red Hat Enterprise Linux 9.5 CVM (supports SSH via Bastion)
 

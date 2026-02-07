@@ -1,11 +1,66 @@
-# Enclave Aware Container Samples
+# Enclave Aware Container Samples (Intel SGX)
 
-The samples include respective Dockerfile and yaml files. You can use the Dockerfile to build sample application docker image, and push to Microsoft container registry or docker hub. You can use yaml file for your [Azure Kubernetes Service (AKS) deployments with confidential computing nodes](https://docs.microsoft.com/en-us/azure/confidential-computing/confidential-nodes-aks-get-started) .
+**Last Updated:** February 2026
 
-## [HelloWorld](helloworld/README.md)
+## Overview
 
-- Simple HelloWorld application to create an enclave and to call simple function inside enclave to print a hello world message.
+These samples demonstrate Intel SGX enclave-aware containers for Azure Kubernetes Service (AKS). Intel SGX provides hardware-based memory encryption and isolation for sensitive workloads.
 
-## [Attested-TLS](attested-tls/README.md)
+> **Note:** For AMD SEV-SNP based confidential containers, see the [ACI Samples](../aci-samples/README.md) and [Multi-Party Samples](../multi-party-samples/README.md).
 
-- This sample showcases two applications with one in an enclave that establishes an attested tls channel for communication between them.
+## Architecture
+
+```
+┌───────────────────────────────────────────────────────────┐
+│           Intel SGX Enclave Architecture                    │
+├───────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌───────────────────────────────────────────────────┐   │
+│  │                 Container Application                   │   │
+│  │  ┌─────────────────────────────────────────────┐    │   │
+│  │  │            Intel SGX Enclave                      │    │   │
+│  │  │  ┌──────────────────┐  ┌──────────────────┐  │    │   │
+│  │  │  │  Trusted Code    │  │  Sealed Data     │  │    │   │
+│  │  │  │  (ECALLs)        │  │  (Encrypted)    │  │    │   │
+│  │  │  └──────────────────┘  └──────────────────┘  │    │   │
+│  │  │  Hardware Memory Encryption (MEE)               │    │   │
+│  │  └─────────────────────────────────────────────┘    │   │
+│  └───────────────────────────────────────────────────┘   │
+│                                                              │
+│  ┌───────────────────────────────────────────────────┐   │
+│  │  AKS with Intel SGX Node Pool (DCsv2/DCsv3)            │   │
+│  └───────────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────────────────┘
+```
+
+## Samples
+
+The samples include Dockerfiles and Kubernetes YAML files for deploying enclave-aware applications to AKS with [confidential computing nodes](https://docs.microsoft.com/azure/confidential-computing/confidential-nodes-aks-get-started).
+
+### [HelloWorld](helloworld/README.md)
+
+Simple demonstration of enclave creation and function calls:
+- Create an Intel SGX enclave
+- Call trusted functions inside the enclave
+- Print a hello world message from protected memory
+
+### [Attested-TLS](attested-tls/README.md)
+
+Secure communication channel between enclaves:
+- Server enclave with TLS endpoint
+- Client enclave verifying server attestation
+- Mutual attestation handshake
+- Encrypted communication channel
+
+## Hardware Requirements
+
+| VM Series | Hardware | Use Case |
+|-----------|----------|----------|
+| DCsv2 | Intel SGX | Legacy enclave workloads |
+| DCsv3 | Intel SGX | Current enclave workloads |
+
+## References
+
+- [Intel SGX Overview](https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/overview.html)
+- [AKS Confidential Computing Nodes](https://docs.microsoft.com/azure/confidential-computing/confidential-nodes-aks-get-started)
+- [Open Enclave SDK](https://openenclave.io/sdk/)

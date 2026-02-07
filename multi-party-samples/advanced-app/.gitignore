@@ -15,6 +15,7 @@ multiparty-view*.html
 
 # Temp files
 *.txt
+!requirements.txt
 *.log
 *.tmp
 

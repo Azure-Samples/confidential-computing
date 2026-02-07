@@ -1,5 +1,23 @@
 ## Azure Confidential Computing Samples Changelog
 
+<a name="2.1.0"></a>
+# 2.1.0 (2026-02-07)
+
+*Documentation*
+* **Comprehensive README refresh** - All sample documentation updated with current architectures
+* **ASCII Architecture Diagrams** - Added visual flow diagrams to all major README files
+* **Updated Prerequisites** - Azure CLI 2.60+, PowerShell 7.0+, Python 3.11+
+* **Windows 11 24H2** - Updated CVM samples to support latest Windows 11 Enterprise
+* **Enhanced AKS Documentation** - Complete rewrite with architecture diagrams and deployment guide
+* **Attestation Flow Diagrams** - Visual representation of MAA attestation process
+* **Multi-Party Architecture** - Detailed diagrams showing container isolation and key access patterns
+
+*Improvements*
+* Standardized documentation format across all sample folders
+* Added Quick Setup section to main README
+* Enhanced troubleshooting sections with common error scenarios
+* Updated all Azure service references to current API versions
+
 <a name="2.0.0"></a>
 # 2.0.0 (2026-02-03)
 

@@ -144,29 +144,31 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 
 ### Prerequisites
 
-- Azure CLI with `confcom` extension (`az extension add --name confcom`)
+- Azure CLI (v2.60+) with `confcom` extension (`az extension add --name confcom --upgrade`)
 - Docker Desktop (for security policy generation)
 - Azure subscription with Confidential Container support
-- PowerShell 5.1 or later
+- PowerShell 7.0+ recommended
 
 ### Deploy
 
 ```powershell
 # Build the container image (first time only)
-.\Deploy-MultiParty.ps1 -Build
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build
 
 # Deploy all 2 containers
-.\Deploy-MultiParty.ps1 -Deploy
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy
 
 # Or build and deploy in one command
-.\Deploy-MultiParty.ps1 -Build -Deploy
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
 ```
+
+> **Note:** Replace `<yourcode>` with a short unique identifier (3-8 chars) like your initials or team code.
 
 ### Clean Up
 
 ```powershell
 # Delete all Azure resources (containers, Key Vault keys, blob data)
-.\Deploy-MultiParty.ps1 -Cleanup
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Cleanup
 ```
 
 ## What You'll See
