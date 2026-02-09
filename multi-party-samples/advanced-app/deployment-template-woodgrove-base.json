@@ -114,6 +114,13 @@
       "metadata": {
         "description": "Fabrikam's container URL (for fetching encrypted data)"
       }
+    },
+    "securityPolicyHash": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "SHA256 hash of the container security policy (x-ms-sevsnpvm-hostdata)"
+      }
     }
   },
   "resources": [
@@ -175,6 +182,10 @@
                 {
                   "name": "PARTNER_FABRIKAM_URL",
                   "value": "[parameters('partnerFabrikamUrl')]"
+                },
+                {
+                  "name": "SECURITY_POLICY_HASH",
+                  "value": "[parameters('securityPolicyHash')]"
                 }
               ],
               "resources": {

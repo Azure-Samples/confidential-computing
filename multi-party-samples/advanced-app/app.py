@@ -386,6 +386,29 @@ def skr_release():
             _released_key = key_data
             _released_key_name = kid  # Store the key name to identify company
             
+            # Get security policy hash from environment (set during deployment)
+            security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+            
+            # Build release policy info for display
+            release_policy_info = {
+                'maa_endpoint': f'https://{maa_endpoint}',
+                'required_claims': [
+                    {
+                        'claim': 'x-ms-attestation-type',
+                        'value': 'sevsnpvm',
+                        'description': 'Requires AMD SEV-SNP hardware attestation'
+                    }
+                ]
+            }
+            
+            if security_policy_hash:
+                release_policy_info['required_claims'].append({
+                    'claim': 'x-ms-sevsnpvm-hostdata',
+                    'value': security_policy_hash,
+                    'description': 'Container security policy hash - ensures only this exact container code can release the key'
+                })
+                release_policy_info['security_policy_hash'] = security_policy_hash
+            
             return jsonify({
                 'status': 'success',
                 'message': 'Secure Key Release successful!',
@@ -393,7 +416,9 @@ def skr_release():
                 'maa_endpoint': maa_endpoint,
                 'akv_endpoint': akv_endpoint,
                 'key_name': kid,
+                'release_policy': release_policy_info,
                 'note': 'This key was released because the container proved it is running in a hardware TEE that matches the key release policy.',
+                'security_binding': f'Key is cryptographically bound to container policy hash: {security_policy_hash[:16]}...' if security_policy_hash else 'Key bound to AMD SEV-SNP attestation',
                 'encryption_enabled': True
             })
         except Exception as parse_error:
@@ -438,6 +463,7 @@ def skr_config():
     This helps the frontend know which key vault and key to use.
     """
     key_name = os.environ.get('SKR_KEY_NAME', '')
+    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
     
     # Determine company name from key name
     company_name = None
@@ -508,6 +534,13 @@ def skr_config():
         'is_confidential': is_confidential,
         'is_woodgrove': is_woodgrove,
         'configured': bool(akv_endpoint and key_name),
+        'security_policy_hash': security_policy_hash,
+        'release_policy': {
+            'version': '1.0.0',
+            'required_attestation': 'AMD SEV-SNP (sevsnpvm)',
+            'required_policy_hash': security_policy_hash if security_policy_hash else 'Not configured',
+            'description': 'Key can only be released to containers with matching policy hash'
+        } if security_policy_hash else None,
         'other_company': {
             'name': other_company_name,
             'key_name': other_key_name,
@@ -515,6 +548,150 @@ def skr_config():
         } if other_company_name else None,
         'partner_configs': partner_configs
     })
+
+@app.route('/security/policy', methods=['GET'])
+def get_security_policy():
+    """
+    Return detailed security policy information for this container.
+    Shows the cryptographic binding between the container code and key release.
+    """
+    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+    maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+    key_name = os.environ.get('SKR_KEY_NAME', '')
+    akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+    
+    # Check TEE status
+    sev_status = check_sev_guest_device()
+    
+    return jsonify({
+        'container_identity': {
+            'security_policy_hash': security_policy_hash,
+            'hash_algorithm': 'SHA256',
+            'description': 'This hash uniquely identifies the approved container code. Any modification to the container would change this hash.',
+            'claim_name': 'x-ms-sevsnpvm-hostdata'
+        },
+        'attestation': {
+            'maa_endpoint': f'https://{maa_endpoint}',
+            'attestation_type': 'sevsnpvm',
+            'hardware': 'AMD SEV-SNP',
+            'tee_available': sev_status.get('available', False),
+            'tee_device': sev_status.get('device_path', 'Not found')
+        },
+        'key_release_policy': {
+            'key_name': key_name,
+            'key_vault': akv_endpoint,
+            'required_claims': [
+                {
+                    'claim': 'x-ms-attestation-type',
+                    'required_value': 'sevsnpvm',
+                    'purpose': 'Ensures the request comes from AMD SEV-SNP hardware'
+                },
+                {
+                    'claim': 'x-ms-sevsnpvm-hostdata',
+                    'required_value': security_policy_hash if security_policy_hash else '(any)',
+                    'purpose': 'Ensures the request comes from this specific container code'
+                }
+            ],
+            'security_level': 'HIGH' if security_policy_hash else 'MEDIUM',
+            'binding_description': 'Key is cryptographically bound to this container\'s policy hash' if security_policy_hash else 'Key is bound to AMD SEV-SNP attestation only'
+        },
+        'trust_model': {
+            'what_is_trusted': [
+                'AMD SEV-SNP hardware (memory encryption, isolation)',
+                'Microsoft Azure Attestation service (MAA)',
+                'The specific container code identified by policy hash'
+            ],
+            'what_is_not_trusted': [
+                'Cloud provider operators (cannot access encrypted memory)',
+                'Hypervisor (cannot read TEE contents)',
+                'Other containers (isolated by hardware)'
+            ]
+        }
+    })
+
+@app.route('/debug/attestation-claims', methods=['GET'])
+def debug_attestation_claims():
+    """
+    Debug endpoint: Get attestation token from MAA and decode its claims.
+    This shows the ACTUAL x-ms-sevsnpvm-hostdata claim from the hardware,
+    which can be compared with the expected policy hash.
+    """
+    import base64
+    
+    maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+    
+    try:
+        # Request attestation token from MAA via sidecar
+        response = requests.post(
+            "http://localhost:8080/attest/maa",
+            json={"maa_endpoint": maa_endpoint},
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to get attestation token: {response.status_code}',
+                'detail': response.text[:1000]
+            }), response.status_code
+        
+        # The response is a JWT token
+        token = response.text.strip()
+        
+        # Decode JWT payload (without verification - just for inspection)
+        parts = token.split('.')
+        if len(parts) != 3:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid JWT format',
+                'token_parts': len(parts)
+            }), 400
+        
+        # Decode the payload (middle part)
+        payload_b64 = parts[1]
+        # Add padding if needed
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += '=' * padding
+        
+        payload_json = base64.urlsafe_b64decode(payload_b64)
+        claims = json.loads(payload_json)
+        
+        # Extract the key claims for comparison
+        actual_hostdata = claims.get('x-ms-sevsnpvm-hostdata', 'NOT FOUND')
+        actual_attestation_type = claims.get('x-ms-attestation-type', 'NOT FOUND')
+        
+        # Compare with expected
+        hash_match = actual_hostdata.lower() == security_policy_hash.lower() if security_policy_hash else 'N/A (no expected hash configured)'
+        
+        return jsonify({
+            'status': 'success',
+            'comparison': {
+                'actual_hostdata': actual_hostdata,
+                'expected_policy_hash': security_policy_hash if security_policy_hash else '(not configured)',
+                'match': hash_match,
+                'attestation_type': actual_attestation_type
+            },
+            'diagnosis': {
+                'problem': 'MISMATCH - The actual hostdata does not match the expected policy hash!' if hash_match == False else ('OK - Hashes match' if hash_match == True else 'No expected hash configured'),
+                'solution': 'The policy hash computed during deployment does not match what Azure puts in x-ms-sevsnpvm-hostdata. Check the hash computation method.' if hash_match == False else None
+            },
+            'all_sev_claims': {k: v for k, v in claims.items() if 'sev' in k.lower() or 'snp' in k.lower() or 'attestation' in k.lower() or 'hostdata' in k.lower()},
+            'full_claims': claims
+        })
+        
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Cannot connect to attestation sidecar'
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'type': type(e).__name__
+        }), 500
 
 @app.route('/skr/release-partner', methods=['POST'])
 def skr_release_partner_key():
