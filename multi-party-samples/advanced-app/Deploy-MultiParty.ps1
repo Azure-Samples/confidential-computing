@@ -103,34 +103,48 @@ function Write-Error {
     Write-Host $Message -ForegroundColor Red
 }
 
-function Get-PolicyHashFromTemplate {
+function Get-PolicyHashFromConfcom {
     <#
     .SYNOPSIS
-        Extract the security policy hash from an ARM template after policy generation.
+        Generate security policy using confcom and capture the hash it outputs.
     
     .DESCRIPTION
-        After az confcom acipolicygen runs, the ARM template contains a base64-encoded
-        ccePolicy. This function extracts it and computes the SHA256 hash, which is
-        the x-ms-sevsnpvm-hostdata claim used in attestation.
+        Runs az confcom acipolicygen and captures the SHA256 hash it outputs.
+        This hash is what Azure puts in the x-ms-sevsnpvm-hostdata claim during attestation.
+        
+        IMPORTANT: The hash output by confcom is NOT the same as SHA256(ccePolicy).
+        Confcom computes the hash internally and this is what we must use.
     #>
-    param([string]$TemplatePath)
+    param(
+        [string]$TemplatePath,
+        [string]$ParamsPath
+    )
     
+    # Run confcom and capture output
+    $output = az confcom acipolicygen -a $TemplatePath --parameters $ParamsPath --disable-stdio --approve-wildcards 2>&1
+    $exitCode = $LASTEXITCODE
+    
+    if ($exitCode -ne 0) {
+        Write-Error "Confcom failed: $output"
+        throw "Failed to generate security policy for $TemplatePath"
+    }
+    
+    # The hash is output as the last 64-character hex line
+    $hashLine = $output | Where-Object { $_ -match '^[a-f0-9]{64}$' } | Select-Object -Last 1
+    
+    if (-not $hashLine) {
+        Write-Warning "Could not find policy hash in confcom output. Output was:"
+        $output | ForEach-Object { Write-Host "  $_" }
+        throw "No policy hash found in confcom output"
+    }
+    
+    # Also extract the ccePolicy from the template (for reference)
     $template = Get-Content $TemplatePath -Raw | ConvertFrom-Json
     $ccePolicy = $template.resources[0].properties.confidentialComputeProperties.ccePolicy
     
-    if (-not $ccePolicy) {
-        throw "No ccePolicy found in template: $TemplatePath"
-    }
-    
-    # The policy hash is SHA256 of the base64 policy string
-    $policyBytes = [System.Text.Encoding]::UTF8.GetBytes($ccePolicy)
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    $hashBytes = $sha256.ComputeHash($policyBytes)
-    $hashHex = [BitConverter]::ToString($hashBytes).Replace("-", "").ToLower()
-    
     return @{
         PolicyBase64 = $ccePolicy
-        PolicyHash = $hashHex
+        PolicyHash = $hashLine.Trim()
     }
 }
 
@@ -778,6 +792,17 @@ function Invoke-Deploy {
     Write-Success "ACR login complete"
     Write-Host ""
     
+    # Force a fresh pull of the image from ACR to ensure local Docker cache matches ACR
+    # This is CRITICAL - the policy generator uses local Docker images, and mismatches cause deployment failures
+    Write-Host "Pulling latest image from ACR to ensure local cache matches remote..."
+    Write-Host "  Image: $FULL_IMAGE" -ForegroundColor Gray
+    docker pull $FULL_IMAGE 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to pull image from ACR. Ensure the image exists: $FULL_IMAGE"
+    }
+    Write-Success "Image pulled successfully - local Docker cache is now in sync with ACR"
+    Write-Host ""
+    
     # ========== PHASE 1: Generate All Security Policies ==========
     # We need all policy hashes BEFORE creating keys so we can set up multi-party access
     
@@ -811,10 +836,7 @@ function Invoke-Deploy {
     $params_companyA | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-contoso.json'
     Copy-Item -Path "deployment-template-original.json" -Destination "deployment-template-contoso.json" -Force
     
-    az confcom acipolicygen -a deployment-template-contoso.json --parameters deployment-params-contoso.json --disable-stdio --approve-wildcards
-    if ($LASTEXITCODE -ne 0) { throw "Failed to generate security policy for Contoso" }
-    
-    $contosoPolicyInfo = Get-PolicyHashFromTemplate -TemplatePath "deployment-template-contoso.json"
+    $contosoPolicyInfo = Get-PolicyHashFromConfcom -TemplatePath "deployment-template-contoso.json" -ParamsPath "deployment-params-contoso.json"
     Write-Success "Contoso policy hash: $($contosoPolicyInfo.PolicyHash)"
     
     # --- Fabrikam Policy Generation ---
@@ -843,10 +865,7 @@ function Invoke-Deploy {
     $params_companyB | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-fabrikam.json'
     Copy-Item -Path "deployment-template-original.json" -Destination "deployment-template-fabrikam.json" -Force
     
-    az confcom acipolicygen -a deployment-template-fabrikam.json --parameters deployment-params-fabrikam.json --disable-stdio --approve-wildcards
-    if ($LASTEXITCODE -ne 0) { throw "Failed to generate security policy for Fabrikam" }
-    
-    $fabrikamPolicyInfo = Get-PolicyHashFromTemplate -TemplatePath "deployment-template-fabrikam.json"
+    $fabrikamPolicyInfo = Get-PolicyHashFromConfcom -TemplatePath "deployment-template-fabrikam.json" -ParamsPath "deployment-params-fabrikam.json"
     Write-Success "Fabrikam policy hash: $($fabrikamPolicyInfo.PolicyHash)"
     
     # --- Woodgrove Policy Generation ---
@@ -883,10 +902,7 @@ function Invoke-Deploy {
     $params_companyC | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-woodgrove.json'
     Copy-Item -Path "deployment-template-woodgrove-base.json" -Destination "deployment-template-woodgrove.json" -Force
     
-    az confcom acipolicygen -a deployment-template-woodgrove.json --parameters deployment-params-woodgrove.json --disable-stdio --approve-wildcards
-    if ($LASTEXITCODE -ne 0) { throw "Failed to generate security policy for Woodgrove-Bank" }
-    
-    $woodgrovePolicyInfo = Get-PolicyHashFromTemplate -TemplatePath "deployment-template-woodgrove.json"
+    $woodgrovePolicyInfo = Get-PolicyHashFromConfcom -TemplatePath "deployment-template-woodgrove.json" -ParamsPath "deployment-params-woodgrove.json"
     Write-Success "Woodgrove policy hash: $($woodgrovePolicyInfo.PolicyHash)"
     
     # ========== Display All Policy Hashes ==========

@@ -609,6 +609,90 @@ def get_security_policy():
         }
     })
 
+@app.route('/debug/attestation-claims', methods=['GET'])
+def debug_attestation_claims():
+    """
+    Debug endpoint: Get attestation token from MAA and decode its claims.
+    This shows the ACTUAL x-ms-sevsnpvm-hostdata claim from the hardware,
+    which can be compared with the expected policy hash.
+    """
+    import base64
+    
+    maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+    
+    try:
+        # Request attestation token from MAA via sidecar
+        response = requests.post(
+            "http://localhost:8080/attest/maa",
+            json={"maa_endpoint": maa_endpoint},
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to get attestation token: {response.status_code}',
+                'detail': response.text[:1000]
+            }), response.status_code
+        
+        # The response is a JWT token
+        token = response.text.strip()
+        
+        # Decode JWT payload (without verification - just for inspection)
+        parts = token.split('.')
+        if len(parts) != 3:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid JWT format',
+                'token_parts': len(parts)
+            }), 400
+        
+        # Decode the payload (middle part)
+        payload_b64 = parts[1]
+        # Add padding if needed
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += '=' * padding
+        
+        payload_json = base64.urlsafe_b64decode(payload_b64)
+        claims = json.loads(payload_json)
+        
+        # Extract the key claims for comparison
+        actual_hostdata = claims.get('x-ms-sevsnpvm-hostdata', 'NOT FOUND')
+        actual_attestation_type = claims.get('x-ms-attestation-type', 'NOT FOUND')
+        
+        # Compare with expected
+        hash_match = actual_hostdata.lower() == security_policy_hash.lower() if security_policy_hash else 'N/A (no expected hash configured)'
+        
+        return jsonify({
+            'status': 'success',
+            'comparison': {
+                'actual_hostdata': actual_hostdata,
+                'expected_policy_hash': security_policy_hash if security_policy_hash else '(not configured)',
+                'match': hash_match,
+                'attestation_type': actual_attestation_type
+            },
+            'diagnosis': {
+                'problem': 'MISMATCH - The actual hostdata does not match the expected policy hash!' if hash_match == False else ('OK - Hashes match' if hash_match == True else 'No expected hash configured'),
+                'solution': 'The policy hash computed during deployment does not match what Azure puts in x-ms-sevsnpvm-hostdata. Check the hash computation method.' if hash_match == False else None
+            },
+            'all_sev_claims': {k: v for k, v in claims.items() if 'sev' in k.lower() or 'snp' in k.lower() or 'attestation' in k.lower() or 'hostdata' in k.lower()},
+            'full_claims': claims
+        })
+        
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Cannot connect to attestation sidecar'
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'type': type(e).__name__
+        }), 500
+
 @app.route('/skr/release-partner', methods=['POST'])
 def skr_release_partner_key():
     """
