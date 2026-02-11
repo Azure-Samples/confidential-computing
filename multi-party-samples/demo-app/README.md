@@ -130,7 +130,7 @@ az confcom --version
 > **Prefix**: Use a short, unique identifier (3-8 chars) like your initials (`jd01`), team code (`team42`), or project name (`demo`). This helps identify resource ownership in shared subscriptions.
 
 This creates:
-- **Azure Resource Group** - Named `<prefix><registryname>-rg` in East US
+- **Azure Resource Group** - Named `<prefix><registryname>-rg` (default: East US)
 - **Azure Container Registry (ACR)** - Basic SKU with admin enabled
 - **Contoso Key Vault** - Premium HSM with `contoso-secret-key`
 - **Fabrikam Key Vault** - Premium HSM with `fabrikam-secret-key`
@@ -172,6 +172,7 @@ Deploys three containers:
 | `-Cleanup` | Delete all Azure resources in the resource group |
 | `-SkipBrowser` | Don't open Microsoft Edge browser after deployment |
 | `-RegistryName <name>` | Custom ACR name (default: random 8-character string) |
+| `-Location <region>` | Azure region to deploy into (default: `eastus`) |
 
 **Note:** Run the script without parameters to see usage help and current configuration.
 

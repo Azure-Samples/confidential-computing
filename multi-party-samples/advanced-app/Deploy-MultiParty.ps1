@@ -36,6 +36,11 @@
     Custom name for the Azure Container Registry.
     If not provided, a random name will be generated.
 
+.PARAMETER Location
+    Azure region to deploy resources into.
+    Defaults to "eastus" if not specified.
+    Example regions: eastus, westus2, northeurope, westeurope, uksouth
+
 .PARAMETER Description
     Optional description tag to add to the resource group.
 
@@ -65,11 +70,11 @@ param(
     [switch]$Cleanup,
     [switch]$SkipBrowser,
     [string]$RegistryName,
+    [string]$Location = "eastus",
     [string]$Description
 )
 
 $ErrorActionPreference = "Stop"
-$Location = "eastus"
 $ImageName = "aci-attestation-demo"
 $ImageTag = "latest"
 
@@ -1389,6 +1394,7 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
     Write-Host "Options:"
     Write-Host "  -SkipBrowser    Don't open browser after deployment"
     Write-Host "  -RegistryName   Custom ACR name (default: random)"
+    Write-Host "  -Location       Azure region (default: eastus)"
     Write-Host "  -Description    Optional description tag for the resource group"
     Write-Host ""
     
