@@ -275,6 +275,12 @@ This ensures:
 - Each company's key has its own policy
 - Woodgrove can access partner keys only because of explicit Key Vault access grants
 
+### Single-Image Design (Demo Limitation)
+
+All containers run the **same Docker image**, which includes both `contoso-data.csv` and `fabrikam-data.csv`. At runtime, each container only reads its own CSV (determined by the released SKR key name), but the other company's file is physically present in the container filesystem.
+
+This is acceptable for a demo with synthetic data, but in production each party should build a **separate image** containing only their own data, or inject data at deploy time via secure channels (e.g. encrypted blob download inside the TEE after attestation).
+
 ## Files
 
 | File | Description |
