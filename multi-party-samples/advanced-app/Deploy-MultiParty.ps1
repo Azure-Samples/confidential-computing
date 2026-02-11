@@ -873,8 +873,8 @@ function Invoke-Deploy {
     Write-Host "[3/3] Generating Woodgrove-Bank security policy..." -ForegroundColor Yellow
     
     # Build partner container URLs based on DNS names
-    $contosoContainerUrl = "http://${dns_companyA}.${Location}.azurecontainer.io"
-    $fabrikamContainerUrl = "http://${dns_companyB}.${Location}.azurecontainer.io"
+    $contosoContainerUrl = "https://${dns_companyA}.${Location}.azurecontainer.io"
+    $fabrikamContainerUrl = "https://${dns_companyB}.${Location}.azurecontainer.io"
     
     $params_companyC = @{
         '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'

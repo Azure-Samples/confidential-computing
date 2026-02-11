@@ -144,6 +144,10 @@
                 {
                   "protocol": "TCP",
                   "port": 80
+                },
+                {
+                  "protocol": "TCP",
+                  "port": 443
                 }
               ],
               "environmentVariables": [
@@ -209,6 +213,10 @@
             {
               "protocol": "TCP",
               "port": 80
+            },
+            {
+              "protocol": "TCP",
+              "port": 443
             }
           ],
           "type": "Public",

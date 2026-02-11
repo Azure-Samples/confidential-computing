@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, render_template
 import requests
+import requests.packages.urllib3
 import json
 import os
 import re
@@ -10,6 +11,21 @@ import threading
 from functools import wraps
 import time
 import logging
+
+# ---------------------------------------------------------------------------
+# Inter-container HTTPS session (self-signed certs within trusted TEE)
+# ---------------------------------------------------------------------------
+# Containers use self-signed TLS certificates generated at build time.
+# Cross-container calls (Woodgrove→Contoso, Woodgrove→Fabrikam) go over HTTPS
+# but we must skip certificate verification since they are self-signed.
+# This is acceptable because: (1) all containers run in AMD SEV-SNP TEEs with
+# attested identities, (2) payloads are additionally RSA-encrypted, (3) the
+# self-signed cert still provides encryption in transit.
+_inter_container_session = requests.Session()
+_inter_container_session.verify = False
+
+# Suppress InsecureRequestWarning for inter-container self-signed TLS calls
+requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
@@ -1071,7 +1087,7 @@ def partner_analyze():
         if contoso_key:
             if contoso_url:
                 try:
-                    response = requests.get(f'{contoso_url}/company/list', timeout=30)
+                    response = _inter_container_session.get(f'{contoso_url}/company/list', timeout=30)
                     if response.status_code == 200:
                         contoso_data = response.json()
                         encrypted_records = contoso_data.get('records', [])
@@ -1096,7 +1112,7 @@ def partner_analyze():
         if fabrikam_key:
             if fabrikam_url:
                 try:
-                    response = requests.get(f'{fabrikam_url}/company/list', timeout=30)
+                    response = _inter_container_session.get(f'{fabrikam_url}/company/list', timeout=30)
                     if response.status_code == 200:
                         fabrikam_data = response.json()
                         encrypted_records = fabrikam_data.get('records', [])
@@ -1295,7 +1311,7 @@ def partner_analyze_stream():
         
         if contoso_key and contoso_url:
             try:
-                response = requests.get(f'{contoso_url}/company/list', timeout=30)
+                response = _inter_container_session.get(f'{contoso_url}/company/list', timeout=30)
                 if response.status_code == 200:
                     contoso_data = response.json()
                     contoso_encrypted = contoso_data.get('records', [])
@@ -1311,7 +1327,7 @@ def partner_analyze_stream():
         
         if fabrikam_key and fabrikam_url:
             try:
-                response = requests.get(f'{fabrikam_url}/company/list', timeout=30)
+                response = _inter_container_session.get(f'{fabrikam_url}/company/list', timeout=30)
                 if response.status_code == 200:
                     fabrikam_data = response.json()
                     fabrikam_encrypted = fabrikam_data.get('records', [])
@@ -1583,7 +1599,7 @@ def partner_demographics_analysis():
                 # Step 2: Fetch encrypted data from partner container
                 print(f"[ANALYTICS] Step 2: Fetching encrypted data from {partner_name}...")
                 sys.stdout.flush()
-                encrypted_response = requests.get(f'{partner_url}/company/list', timeout=30)
+                encrypted_response = _inter_container_session.get(f'{partner_url}/company/list', timeout=30)
                 
                 if encrypted_response.status_code != 200:
                     results['partners'][partner_name] = {
