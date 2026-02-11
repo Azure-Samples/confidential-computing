@@ -108,6 +108,90 @@ function Write-Error {
     Write-Host $Message -ForegroundColor Red
 }
 
+function Get-SharedMaaEndpoint {
+    <#
+    .SYNOPSIS
+        Resolve the shared Microsoft Azure Attestation (MAA) endpoint for a given Azure region.
+    
+    .DESCRIPTION
+        Returns the shared MAA endpoint URL for the specified Azure region.
+        Shared MAA endpoints follow the pattern: shared<code>.<code>.attest.azure.net
+        
+        These endpoints are required for Secure Key Release (SKR) policies in 
+        confidential container deployments, where the attestation authority in the
+        release policy must match the region where the container is deployed.
+        
+        Source: https://github.com/microsoft/confidential-sidecar-containers
+        Verify: Get-AzAttestationDefaultProvider -Location "<region>"
+        List:   (Get-AzAttestationDefaultProvider).Value | Sort-Object Location | Format-Table Location, AttestUri
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Location
+    )
+    
+    # Shared MAA endpoint mappings: region name → "shared<code>.<code>"
+    # Confirmed endpoints from Microsoft confidential-sidecar-containers documentation
+    $maaEndpoints = @{
+        # US regions
+        "eastus"            = "sharedeus.eus"
+        "eastus2"           = "sharedeus2.eus2"
+        "westus"            = "sharedwus.wus"
+        "westus2"           = "sharedwus2.wus2"
+        "westus3"           = "sharedwus3.wus3"
+        "centralus"         = "sharedcus.cus"
+        "northcentralus"    = "sharedncus.ncus"
+        "southcentralus"    = "sharedscus.scus"
+        "westcentralus"     = "sharedwcus.wcus"
+        # Canada
+        "canadacentral"     = "sharedcac.cac"
+        "canadaeast"        = "sharedcae.cae"
+        # Europe
+        "northeurope"       = "sharedneu.neu"
+        "westeurope"        = "sharedweu.weu"
+        "uksouth"           = "shareduks.uks"
+        "ukwest"            = "sharedukw.ukw"
+        "francecentral"     = "sharedfrc.frc"
+        "germanywestcentral" = "sharedgwc.gwc"
+        "switzerlandnorth"  = "sharedswn.swn"
+        "swedencentral"     = "sharedswc.swc"
+        "norwayeast"        = "sharednoe.noe"
+        # Asia Pacific
+        "eastasia"          = "sharedea.ea"
+        "southeastasia"     = "sharedsea.sea"
+        "japaneast"         = "sharedjpe.jpe"
+        "japanwest"         = "sharedjpw.jpw"
+        "koreacentral"      = "sharedkrc.krc"
+        "australiaeast"     = "sharedaue.aue"
+        "centralindia"      = "sharedinc.inc"
+        "southindia"        = "sharedins.ins"
+        # Other
+        "brazilsouth"       = "sharedbrs.brs"
+        "southafricanorth"  = "sharedsan.san"
+        "uaenorth"          = "shareduan.uan"
+    }
+    
+    $regionKey = $Location.ToLower()
+    $prefix = $maaEndpoints[$regionKey]
+    
+    if (-not $prefix) {
+        Write-Host ""
+        Write-Host "ERROR: No known shared MAA endpoint for region '$Location'" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Regions with known shared MAA endpoints:" -ForegroundColor Yellow
+        $maaEndpoints.Keys | Sort-Object | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+        Write-Host ""
+        Write-Host "To look up the MAA endpoint for your region, run:" -ForegroundColor Cyan
+        Write-Host "  Get-AzAttestationDefaultProvider -Location '$Location' | Format-Table AttestUri" -ForegroundColor White
+        Write-Host ""
+        throw "No shared MAA endpoint available for region '$Location'. Use -Location with a supported region."
+    }
+    
+    $endpoint = "$prefix.attest.azure.net"
+    Write-Host "MAA Endpoint for $($Location): $endpoint" -ForegroundColor Cyan
+    return $endpoint
+}
+
 function Get-PolicyHashFromConfcom {
     <#
     .SYNOPSIS
@@ -492,7 +576,7 @@ function Invoke-Build {
         throw "Failed to create ACR"
     }
     
-    $MaaEndpoint = "sharedeus.eus.attest.azure.net"
+    $MaaEndpoint = Get-SharedMaaEndpoint -Location $Location
     
     # Create release policy JSON for confidential containers
     $releasePolicy = @{

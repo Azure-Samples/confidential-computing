@@ -153,7 +153,7 @@ Deploys three containers:
 | `-Cleanup` | Delete all Azure resources in the resource group |
 | `-SkipBrowser` | Don't open Microsoft Edge browser after deployment |
 | `-RegistryName <name>` | Custom ACR name (default: random 8-character string) |
-| `-Location <region>` | Azure region to deploy into (default: `eastus`) |
+| `-Location <region>` | Azure region to deploy into (default: `eastus`). MAA endpoint is auto-resolved for the region. |
 | `-Description <text>` | Optional description tag for the resource group |
 
 **Note:** Run the script without parameters to see usage help and current configuration.

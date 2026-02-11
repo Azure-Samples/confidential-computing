@@ -208,8 +208,9 @@ def attest_maa():
         data = request.get_json()
         if not data:
             return jsonify({'status': 'error', 'message': 'Request body required'}), 400
-        # Use the shared MAA endpoint for East US
-        maa_endpoint = data.get('maa_endpoint', 'sharedeus.eus.attest.azure.net')
+        # Use MAA endpoint from request, env var, or default (set by deployment script based on region)
+        env_maa = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+        maa_endpoint = data.get('maa_endpoint', env_maa)
         runtime_data = data.get('runtime_data', '')
         
         # Validate and sanitise endpoint
