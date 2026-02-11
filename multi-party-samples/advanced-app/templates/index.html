@@ -769,9 +769,7 @@
                         html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.skr_binary_info.path) + '</td></tr>';
                         html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Size</td>';
                         html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + (data.skr_binary_info.size_bytes ? (data.skr_binary_info.size_bytes / 1024 / 1024).toFixed(2) + ' MB' : 'Unknown') + '</td></tr>';
-                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">MD5</td>';
-                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace; font-size: 0.85em;">' + escapeHtml(data.skr_binary_info.md5 || 'N/A') + '</td></tr>';
-                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">SHA256 (partial)</td>';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">SHA256</td>';
                         html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace; font-size: 0.85em;">' + escapeHtml(data.skr_binary_info.sha256 || 'N/A') + '</td></tr>';
                         html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Executable</td>';
                         html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + (data.skr_binary_info.executable ? '✓ Yes' : '✗ No') + '</td></tr>';
@@ -786,12 +784,12 @@
                     // Application file checksums
                     if (data.app_checksums && Object.keys(data.app_checksums).length > 0) {
                         html += '<div style="margin-bottom: 20px;">';
-                        html += '<h4 style="color: #495057; margin-bottom: 10px;">📄 Application Files (MD5 Checksums)</h4>';
+                        html += '<h4 style="color: #495057; margin-bottom: 10px;">📄 Application Files (SHA256 Checksums)</h4>';
                         html += '<table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">';
                         for (const [path, info] of Object.entries(data.app_checksums)) {
-                            if (info.md5) {
+                            if (info.sha256) {
                                 html += '<tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6; font-family: monospace; word-break: break-all;">' + escapeHtml(path) + '</td>';
-                                html += '<td style="padding: 6px; border-bottom: 1px solid #dee2e6; font-family: monospace; color: #0078d4;">' + escapeHtml(info.md5) + '</td>';
+                                html += '<td style="padding: 6px; border-bottom: 1px solid #dee2e6; font-family: monospace; color: #0078d4;">' + escapeHtml(info.sha256) + '</td>';
                                 html += '<td style="padding: 6px; border-bottom: 1px solid #dee2e6; color: #6c757d;">' + (info.size_bytes ? (info.size_bytes / 1024).toFixed(1) + ' KB' : '') + '</td></tr>';
                             }
                         }
@@ -2041,23 +2039,45 @@
                 bodyGradient: 'linear-gradient(135deg, #20c997 0%, #198754 100%)',
                 icon: '🏦',
                 title: 'Woodgrove Bank',
-                subtitle: 'Secure Financial Analytics Platform'
+                subtitle: 'Secure Financial Analytics Platform',
+                faviconColor: '#198754',
+                faviconLabel: 'W'
             },
             contoso: {
                 gradient: 'linear-gradient(135deg, #6c757d 0%, #495057 100%)',
                 bodyGradient: 'linear-gradient(135deg, #adb5bd 0%, #6c757d 100%)',
                 icon: '🏢',
                 title: 'Contoso Corporation',
-                subtitle: 'Enterprise Data Protection'
+                subtitle: 'Enterprise Data Protection',
+                faviconColor: '#0078d4',
+                faviconLabel: 'C'
             },
             fabrikam: {
                 gradient: 'linear-gradient(135deg, #e83e8c 0%, #c2185b 100%)',
                 bodyGradient: 'linear-gradient(135deg, #f8bbd9 0%, #e83e8c 100%)',
                 icon: '👗',
                 title: 'Fabrikam Fashion',
-                subtitle: 'Online Retail Data Protection'
+                subtitle: 'Online Retail Data Protection',
+                faviconColor: '#e83e8c',
+                faviconLabel: 'F'
             }
         };
+
+        function setCompanyFavicon(color, label) {
+            var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+                '<rect width="32" height="32" rx="6" fill="' + color + '"/>' +
+                '<text x="16" y="23" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="20" font-weight="bold" fill="white">' + label + '</text>' +
+                '</svg>';
+            var encoded = 'data:image/svg+xml,' + encodeURIComponent(svg);
+            var link = document.querySelector('link[rel="icon"]');
+            if (!link) {
+                link = document.createElement('link');
+                link.rel = 'icon';
+                document.head.appendChild(link);
+            }
+            link.type = 'image/svg+xml';
+            link.href = encoded;
+        }
         
         function applyCompanyBranding(companyName) {
             const header = document.querySelector('.header');
@@ -2081,6 +2101,7 @@
                 headerP.textContent = branding.subtitle;
                 document.body.style.background = branding.bodyGradient;
                 document.title = branding.title + ' - Confidential Computing';
+                setCompanyFavicon(branding.faviconColor, branding.faviconLabel);
             }
         }
         

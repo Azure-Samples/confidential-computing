@@ -46,6 +46,8 @@ The demo deploys:
 - **3 Key Vaults** - Separate Premium HSM-backed vaults for each company's encryption keys
 - **Shared Blob Storage** - Contains encrypted data from all parties
 
+> **📄 Security Policy Deep Dive:** See [SECURITY-POLICY.md](SECURITY-POLICY.md) for an annotated example of the Confidential Computing Enforcement Policy (ccePolicy) that cryptographically binds each container's identity.
+
 ## Encrypted Data Flow
 
 ![Data Flow Diagram](DataFlowDiagram.svg)
@@ -347,6 +349,8 @@ SKR sidecar not available
 
 ## References
 
+- [Security Policy Deep Dive (SECURITY-POLICY.md)](SECURITY-POLICY.md) — Annotated ccePolicy example with decoded Rego
+- [Attestation Technical Details (ATTESTATION.md)](ATTESTATION.md) — JWT structure, SKR flow, troubleshooting
 - [Azure Confidential Container Samples](https://github.com/Azure-Samples/confidential-container-samples)
 - [Azure Container Instances - Confidential Containers](https://learn.microsoft.com/en-us/azure/container-instances/container-instances-confidential-overview)
 - [Microsoft Azure Attestation](https://learn.microsoft.com/en-us/azure/attestation/overview)
