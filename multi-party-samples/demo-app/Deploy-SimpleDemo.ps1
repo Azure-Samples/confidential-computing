@@ -738,12 +738,6 @@ function Invoke-Deploy {
     # ========== Open Edge with Multi-Party View ==========
     Write-Header "Opening Multi-Party Comparison View"
     
-    Write-Host "Creating multi-party comparison view..."
-    Write-Host "  Top Left:     Contoso (Confidential) - http://$fqdn_companyA"
-    Write-Host "  Top Right:    Fabrikam (Confidential) - http://$fqdn_companyB"
-    Write-Host "  Bottom:       snooper (Standard)       - http://$fqdn_snooper"
-    Write-Host ""
-    
     # Get key names for display
     $keyNameA = $companyAConfig.skrKeyName
     $keyNameB = $companyBConfig.skrKeyName

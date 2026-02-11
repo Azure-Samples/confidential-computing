@@ -1311,12 +1311,6 @@ function Invoke-Deploy {
     # ========== Open Edge with Multi-Party View ==========
     Write-Header "Opening Multi-Party Comparison View"
     
-    Write-Host "Creating multi-party comparison view..."
-    Write-Host "  Left:    Contoso (Confidential) - http://$fqdn_companyA"
-    Write-Host "  Center:  Fabrikam (Confidential) - http://$fqdn_companyB"
-    Write-Host "  Right:   Woodgrove-Bank (Confidential + Cross-company) - http://$fqdn_companyC"
-    Write-Host ""
-    
     # Open Edge with each company website in a separate tab
     $urlA = "http://$fqdn_companyA"
     $urlB = "http://$fqdn_companyB"
