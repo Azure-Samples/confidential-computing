@@ -267,6 +267,18 @@ reason := {"errors": data.framework.errors}
 
 All runtime operations (mount, create, exec, shutdown, signal) are delegated to Microsoft's trusted infrastructure framework fragment (loaded in Section 1). The framework enforces all the container definitions and security flags defined above.
 
+The `reason` line is the **policy violation reporting mechanism**. When the ACI runtime evaluates an operation against this policy and the operation is **denied**, the framework collects error messages explaining why. For example, if someone deployed a container with a modified image layer, the framework would find the layer hash doesn't match, and `reason` would surface as:
+
+```json
+{
+  "errors": [
+    "container image layer hash does not match policy"
+  ]
+}
+```
+
+This gets logged by the ACI runtime — it's how you diagnose why a confidential container failed to start, without leaking any sensitive data from inside the TEE.
+
 ## How This Policy Enables Multi-Party Trust
 
 This policy is the **trust anchor** for the entire multi-party system:
