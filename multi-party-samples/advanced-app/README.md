@@ -14,6 +14,9 @@ A demonstration of Azure Confidential Container Instances (ACI) with AMD SEV-SNP
 
 ![Multi-Party Topology](MultiPartyTopology.svg)
 
+## Demo App Overview
+![Demo App Topology](../demo-app/demo-app-topology.jpg)
+
 ## Overview
 
 This project deploys **three containers** running identical code to demonstrate multi-party confidential computing:

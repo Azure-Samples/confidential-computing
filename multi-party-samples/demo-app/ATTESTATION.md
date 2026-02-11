@@ -218,7 +218,7 @@ The web UI dynamically updates security feature indicators based on attestation 
 
 | File | Purpose |
 |------|---------|
-| `Deploy-MultiParty.ps1` | Main script for build, deploy, cleanup |
+| `Deploy-SimpleDemo.ps1` | Main script for build, deploy, cleanup |
 | `app.py` | Flask routes, forwards attestation requests to SKR |
 | `supervisord.conf` | Process supervisor config for Flask + SKR |
 | `templates/index.html` | Interactive UI with JavaScript for attestation |

@@ -141,7 +141,7 @@ def attest_maa():
                 'diagnosis': {
                     'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
                     'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
-                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
+                    'command': '.\\Deploy-SimpleDemo.ps1 -Build -Deploy'
                 },
                 'note': 'Attestation requires AMD SEV-SNP hardware (Confidential SKU). Standard SKU containers cannot generate valid attestation evidence.',
                 'logs': read_log_files()
@@ -360,7 +360,7 @@ def skr_release():
                     'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
                     'explanation': 'Secure Key Release requires hardware attestation to prove the container is running in a TEE. Without AMD SEV-SNP, the attestation fails and the key cannot be released.',
                     'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
-                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
+                    'command': '.\\Deploy-SimpleDemo.ps1 -Build -Deploy'
                 },
                 'note': 'SKR requires: 1) Confidential SKU with AMD SEV-SNP, 2) Key Vault Premium with HSM-backed key, 3) Release policy trusting the MAA endpoint',
                 'logs': read_log_files()
@@ -1041,7 +1041,7 @@ def container_info():
                     'This device is only available when running on AMD SEV-SNP hardware with Confidential SKU. '
                     'Without TEE hardware, the SKR binary may start but cannot perform any attestation operations.'
                 ),
-                'solution': 'Deploy with Confidential SKU: .\\Deploy-MultiParty.ps1 -Build -Deploy (without -NoAcc)',
+                'solution': 'Deploy with Confidential SKU: .\\Deploy-SimpleDemo.ps1 -Build -Deploy (without -NoAcc)',
                 'technical_detail': 'The SKR binary uses the SNP_GET_REPORT ioctl on /dev/sev-guest to request attestation reports from the AMD PSP.'
             }
         else:

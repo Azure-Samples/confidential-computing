@@ -98,7 +98,11 @@ See the [full documentation](advanced-app/README.md) for detailed instructions.
 
 ### [Demo App](demo-app/README-MultiParty.md)
 
-A simpler 2-container demonstration without partner analytics:
+A simpler 2-container demonstration of two parties storing encrypted data in external, untrusted storage without partner analytics:
+
+![Demo App Topology](demo-app/demo-app-topology.jpg)
+
+
 
 | Container | Type | Purpose |
 |-----------|------|---------|
@@ -109,7 +113,7 @@ A simpler 2-container demonstration without partner analytics:
 
 ```powershell
 cd demo-app
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
+.\Deploy-SimpleDemo.ps1 -Prefix <yourcode> -Build -Deploy
 ```
 
 ## Prerequisites

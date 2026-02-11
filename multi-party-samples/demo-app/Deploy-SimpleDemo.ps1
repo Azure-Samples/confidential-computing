@@ -37,19 +37,19 @@
     If not provided, a random name will be generated.
 
 .EXAMPLE
-    .\Deploy-MultiParty.ps1 -Prefix "jd01" -Build
+    .\Deploy-SimpleDemo.ps1 -Prefix "jd01" -Build
     Build and push the container image with prefix "jd01"
 
 .EXAMPLE
-    .\Deploy-MultiParty.ps1 -Prefix "dev" -Deploy
+    .\Deploy-SimpleDemo.ps1 -Prefix "dev" -Deploy
     Deploy all three containers with prefix "dev"
 
 .EXAMPLE
-    .\Deploy-MultiParty.ps1 -Prefix "team42" -Build -Deploy
+    .\Deploy-SimpleDemo.ps1 -Prefix "team42" -Build -Deploy
     Build and deploy in one command with prefix "team42"
 
 .EXAMPLE
-    .\Deploy-MultiParty.ps1 -Prefix "acme" -Cleanup
+    .\Deploy-SimpleDemo.ps1 -Prefix "acme" -Cleanup
     Delete all Azure resources with prefix "acme"
 #>
 
@@ -902,10 +902,10 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
     Write-Host "  snooper:   Standard (No TEE)         - CANNOT attest" -ForegroundColor Red
     Write-Host ""
     Write-Host "Usage:" -ForegroundColor Yellow
-    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Build         # Build container image"
-    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Deploy        # Deploy all 3 containers"
-    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Build -Deploy # Build and deploy"
-    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Cleanup       # Delete all resources"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix <code> -Build         # Build container image"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix <code> -Deploy        # Deploy all 3 containers"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix <code> -Build -Deploy # Build and deploy"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix <code> -Cleanup       # Delete all resources"
     Write-Host ""
     Write-Host "Required Parameter:" -ForegroundColor Yellow
     Write-Host "  -Prefix <code>  A short, unique identifier (3-8 lowercase alphanumeric chars)"
@@ -940,9 +940,9 @@ if (-not $Prefix) {
     Write-Host "to prefix all Azure resources. This helps identify who owns the resources."
     Write-Host ""
     Write-Host "Examples:" -ForegroundColor Cyan
-    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix jd01 -Build      # Use your initials + number"
-    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix dev -Build       # Use a project code"
-    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix team42 -Build    # Use your team identifier"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix jd01 -Build      # Use your initials + number"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix dev -Build       # Use a project code"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix team42 -Build    # Use your team identifier"
     Write-Host ""
     Write-Host "The prefix must be:" -ForegroundColor Gray
     Write-Host "  - 3 to 8 characters long"

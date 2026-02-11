@@ -12,6 +12,9 @@ A demonstration of Azure Confidential Container Instances (ACI) with AMD SEV-SNP
 
 ## Architecture
 
+![Demo App Topology](demo-app-topology.jpg)
+
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │              Demo App - 2 Party Architecture                        │
@@ -121,7 +124,7 @@ az confcom --version
 ### Step 1: Build the Container Image
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build
+.\Deploy-SimpleDemo.ps1 -Prefix <yourcode> -Build
 ```
 
 > **Prefix**: Use a short, unique identifier (3-8 chars) like your initials (`jd01`), team code (`team42`), or project name (`demo`). This helps identify resource ownership in shared subscriptions.
@@ -137,7 +140,7 @@ This creates:
 ### Step 2: Deploy All Containers
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy
+.\Deploy-SimpleDemo.ps1 -Prefix <yourcode> -Deploy
 ```
 
 Deploys three containers:
@@ -150,13 +153,13 @@ Deploys three containers:
 ### Combined Build and Deploy
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
+.\Deploy-SimpleDemo.ps1 -Prefix <yourcode> -Build -Deploy
 ```
 
 ### Cleanup All Resources
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Cleanup
+.\Deploy-SimpleDemo.ps1 -Prefix <yourcode> -Cleanup
 ```
 
 ## Command Reference
@@ -176,22 +179,22 @@ Deploys three containers:
 
 ```powershell
 # Show help and current configuration
-.\Deploy-MultiParty.ps1
+.\Deploy-SimpleDemo.ps1
 
 # Build with your initials as prefix
-.\Deploy-MultiParty.ps1 -Prefix jd01 -Build
+.\Deploy-SimpleDemo.ps1 -Prefix jd01 -Build
 
 # Build with custom registry name
-.\Deploy-MultiParty.ps1 -Prefix dev -Build -RegistryName "myregistry"
+.\Deploy-SimpleDemo.ps1 -Prefix dev -Build -RegistryName "myregistry"
 
 # Deploy and skip browser
-.\Deploy-MultiParty.ps1 -Deploy -SkipBrowser
+.\Deploy-SimpleDemo.ps1 -Deploy -SkipBrowser
 
 # Full workflow: build and deploy
-.\Deploy-MultiParty.ps1 -Build -Deploy
+.\Deploy-SimpleDemo.ps1 -Build -Deploy
 
 # Delete all resources
-.\Deploy-MultiParty.ps1 -Cleanup
+.\Deploy-SimpleDemo.ps1 -Cleanup
 ```
 
 ## What You'll See
@@ -278,7 +281,7 @@ This ensures:
 
 | File | Description |
 |------|-------------|
-| `Deploy-MultiParty.ps1` | Main deployment script |
+| `Deploy-SimpleDemo.ps1` | Main deployment script |
 | `app.py` | Flask application with all API endpoints |
 | `Dockerfile` | Multi-stage build with SKR sidecar |
 | `templates/index.html` | Interactive web UI |
@@ -307,7 +310,7 @@ Failed to generate security policy
 ```
 acr-config.json not found. Run with -Build first.
 ```
-**Solution:** Run `.\Deploy-MultiParty.ps1 -Build` before deploying.
+**Solution:** Run `.\Deploy-SimpleDemo.ps1 -Build` before deploying.
 
 ### Attestation fails on confidential container
 ```
