@@ -142,6 +142,23 @@ function Get-PolicyHashFromConfcom {
     $template = Get-Content $TemplatePath -Raw | ConvertFrom-Json
     $ccePolicy = $template.resources[0].properties.confidentialComputeProperties.ccePolicy
     
+    # Decode and display the confcom security policy (Rego)
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor DarkCyan
+    Write-Host "║  DECODED CONFCOM SECURITY POLICY (Rego)                                      ║" -ForegroundColor DarkCyan
+    Write-Host "║  Template: $($TemplatePath.PadRight(63))║" -ForegroundColor DarkCyan
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor DarkCyan
+    try {
+        $decodedPolicy = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($ccePolicy))
+        $decodedPolicy -split "`n" | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    } catch {
+        Write-Host "  (Could not decode base64 policy: $_)" -ForegroundColor Yellow
+    }
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor DarkCyan
+    Write-Host "║  Policy Hash: $($hashLine.Trim())  ║" -ForegroundColor White
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor DarkCyan
+    Write-Host ""
+    
     return @{
         PolicyBase64 = $ccePolicy
         PolicyHash = $hashLine.Trim()
@@ -193,7 +210,17 @@ function Update-KeyReleasePolicy {
     }
     
     $policyPath = Join-Path $PSScriptRoot "release-policy-$($CompanyName.ToLower()).json"
-    $releasePolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $policyPath -Encoding UTF8
+    $releasePolicyJson = $releasePolicy | ConvertTo-Json -Depth 10
+    $releasePolicyJson | Out-File -FilePath $policyPath -Encoding UTF8
+    
+    # Display release policy on the console
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+    Write-Host "║  $($CompanyName.ToUpper().PadRight(8)) KEY RELEASE POLICY (Single-Party)                            ║" -ForegroundColor Yellow
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Yellow
+    $releasePolicyJson -split "`n" | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+    Write-Host ""
     
     # Check if key already exists
     $existingKey = az keyvault key show --vault-name $KeyVaultName --name $KeyName 2>&1
@@ -477,8 +504,18 @@ function Invoke-Build {
             }
         )
     }
+    $releasePolicyJson = $releasePolicy | ConvertTo-Json -Depth 10
     $releasePolicyPath = Join-Path $PSScriptRoot "skr-release-policy.json"
-    $releasePolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $releasePolicyPath -Encoding UTF8
+    $releasePolicyJson | Out-File -FilePath $releasePolicyPath -Encoding UTF8
+    
+    # Display the release policy on the console
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor DarkCyan
+    Write-Host "║  SECURE KEY RELEASE POLICY (Build Phase - Generic)                           ║" -ForegroundColor DarkCyan
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor DarkCyan
+    $releasePolicyJson -split "`n" | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor DarkCyan
+    Write-Host ""
     
     # ========== Create Key Vault and Identity for Contoso ==========
     Write-Header "Creating Resources for Contoso"
@@ -943,7 +980,17 @@ function Invoke-Deploy {
         )
     }
     $contosoMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-contoso-multiparty.json"
-    $contosoMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $contosoMultiPolicyPath -Encoding UTF8
+    $contosoMultiPolicyJson = $contosoMultiPartyPolicy | ConvertTo-Json -Depth 10
+    $contosoMultiPolicyJson | Out-File -FilePath $contosoMultiPolicyPath -Encoding UTF8
+    
+    # Display Contoso release policy on the console
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
+    Write-Host "║  CONTOSO KEY RELEASE POLICY (Multi-Party: Contoso + Woodgrove)               ║" -ForegroundColor Green
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Green
+    $contosoMultiPolicyJson -split "`n" | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host ""
     
     # Check if key exists and delete/purge if needed
     $existingKey = az keyvault key show --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1
@@ -990,7 +1037,17 @@ function Invoke-Deploy {
         )
     }
     $fabrikamMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-fabrikam-multiparty.json"
-    $fabrikamMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $fabrikamMultiPolicyPath -Encoding UTF8
+    $fabrikamMultiPolicyJson = $fabrikamMultiPartyPolicy | ConvertTo-Json -Depth 10
+    $fabrikamMultiPolicyJson | Out-File -FilePath $fabrikamMultiPolicyPath -Encoding UTF8
+    
+    # Display Fabrikam release policy on the console
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
+    Write-Host "║  FABRIKAM KEY RELEASE POLICY (Multi-Party: Fabrikam + Woodgrove)              ║" -ForegroundColor Magenta
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Magenta
+    $fabrikamMultiPolicyJson -split "`n" | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
+    Write-Host ""
     
     # Check if key exists and delete/purge if needed
     $existingKey = az keyvault key show --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1
