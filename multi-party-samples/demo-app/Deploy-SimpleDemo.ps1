@@ -386,24 +386,8 @@ function Invoke-Deploy {
     Write-Success "Credentials retrieved successfully"
     Write-Host ""
     
-    # Load storage connection string from .env file if it exists
-    $StorageConnectionString = ""
-    $envFilePath = Join-Path $PSScriptRoot ".env"
-    if (Test-Path $envFilePath) {
-        Write-Host "Loading storage connection string from .env file..."
-        $envContent = Get-Content $envFilePath
-        foreach ($line in $envContent) {
-            if ($line -match "^AZURE_STORAGE_CONNECTION_STRING=(.+)$") {
-                $StorageConnectionString = $matches[1]
-                Write-Success "Storage connection string loaded"
-                break
-            }
-        }
-    } else {
-        Write-Warning "No .env file found. Storage access will use public anonymous access only."
-        Write-Host "Create a .env file with AZURE_STORAGE_CONNECTION_STRING to enable authenticated access."
-    }
-    Write-Host ""
+    # Use storage connection string validated at script startup
+    $StorageConnectionString = $script:StorageConnectionString
     
     # Generate unique names for all containers
     $timestamp = Get-Date -Format "MMddHHmm"
@@ -843,28 +827,21 @@ function Invoke-Cleanup {
     # Construct the blob name that matches the deployment
     $blobName = "consolidated-records-$resource_group.json"
     
-    # Load storage connection string from .env file
-    if (Test-Path ".env") {
-        $envContent = Get-Content ".env" -Raw
-        # Handle both quoted and unquoted values
-        if ($envContent -match 'AZURE_STORAGE_CONNECTION_STRING=([^\r\n]+)') {
-            $connectionString = $matches[1].Trim('"').Trim("'")
-            
-            # Delete consolidated records blob from external storage
-            Write-Host "  Deleting $blobName..."
-            $deleteResult = az storage blob delete `
-                --name $blobName `
-                --container-name "privateappdata" `
-                --connection-string $connectionString `
-                --only-show-errors 2>&1
-            
-            # Any result is fine - either deleted or didn't exist
-            Write-Host "  Blob cleanup complete" -ForegroundColor Green
-        } else {
-            Write-Warning "Could not find storage connection string in .env file"
-        }
+    # Use storage connection string validated at script startup
+    $connectionString = $script:StorageConnectionString
+    if ($connectionString) {
+        # Delete consolidated records blob from external storage
+        Write-Host "  Deleting $blobName..."
+        $deleteResult = az storage blob delete `
+            --name $blobName `
+            --container-name "privateappdata" `
+            --connection-string $connectionString `
+            --only-show-errors 2>&1
+        
+        # Any result is fine - either deleted or didn't exist
+        Write-Host "  Blob cleanup complete" -ForegroundColor Green
     } else {
-        Write-Warning "No .env file found - skipping blob cleanup"
+        Write-Warning "No storage connection string available - skipping blob cleanup"
     }
     
     Write-Host ""
@@ -950,6 +927,90 @@ if (-not $Prefix) {
     Write-Host ""
     exit 1
 }
+
+# ============================================================================
+# Validate Storage Connection String (.env)
+# ============================================================================
+
+$script:StorageConnectionString = ""
+$envFilePath = Join-Path $PSScriptRoot ".env"
+
+if (Test-Path $envFilePath) {
+    $envContent = Get-Content $envFilePath
+    foreach ($line in $envContent) {
+        if ($line -match "^AZURE_STORAGE_CONNECTION_STRING=(.+)$") {
+            $value = $matches[1].Trim('"').Trim("'")
+            if ($value -and $value -ne "your_connection_string_here") {
+                $script:StorageConnectionString = $value
+            }
+            break
+        }
+    }
+}
+
+if (-not $script:StorageConnectionString) {
+    Write-Host ""
+    Write-Host "No valid Azure Storage connection string found." -ForegroundColor Yellow
+    Write-Host "The demo requires an Azure Storage Account to store encrypted data externally."
+    Write-Host ""
+    Write-Host "You can create one by running:" -ForegroundColor Cyan
+    Write-Host "  .\Create-StorageAccount.ps1"
+    Write-Host ""
+    Write-Host "Then copy the connection string from the output, or find it in the Azure Portal" -ForegroundColor Gray
+    Write-Host "under Storage Account > Access keys > Connection string." -ForegroundColor Gray
+    Write-Host ""
+    $input = Read-Host "Paste your Azure Storage connection string (or press Enter to abort)"
+    $input = $input.Trim('"').Trim("'")
+
+    if (-not $input -or $input -eq "your_connection_string_here") {
+        Write-Host ""
+        Write-Host "ERROR: A valid Azure Storage connection string is required." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "To get a connection string:" -ForegroundColor Yellow
+        Write-Host "  1. Run .\Create-StorageAccount.ps1 to create a new storage account, or"
+        Write-Host "  2. Use an existing storage account from the Azure Portal:"
+        Write-Host "     Portal > Storage Account > Security + networking > Access keys > Connection string"
+        Write-Host ""
+        Write-Host "Then either:" -ForegroundColor Yellow
+        Write-Host "  a) Re-run this script and paste the connection string when prompted, or"
+        Write-Host "  b) Create a .env file in this folder with the following content:"
+        Write-Host ""
+        Write-Host "     AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=..." -ForegroundColor Gray
+        Write-Host ""
+        exit 1
+    }
+
+    # Validate it looks like a connection string
+    if ($input -notmatch "DefaultEndpointsProtocol=.+;AccountName=.+;AccountKey=.+") {
+        Write-Host ""
+        Write-Host "ERROR: That doesn't look like a valid Azure Storage connection string." -ForegroundColor Red
+        Write-Host "Expected format: DefaultEndpointsProtocol=https;AccountName=<name>;AccountKey=<key>;..." -ForegroundColor Gray
+        Write-Host ""
+        exit 1
+    }
+
+    # Save to .env file
+    $script:StorageConnectionString = $input
+    @(
+        "# Azure Storage Connection String",
+        "# Auto-generated by Deploy-SimpleDemo.ps1 on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+        "# NEVER commit this file to git!",
+        "",
+        "AZURE_STORAGE_CONNECTION_STRING=$input"
+    ) | Set-Content -Path $envFilePath -Encoding UTF8
+
+    Write-Success "Connection string saved to .env file."
+    Write-Host "  You won't be prompted again for future runs." -ForegroundColor Gray
+}
+
+Write-Host ""
+Write-Success "Storage connection string validated"
+
+# Extract account name for display
+if ($script:StorageConnectionString -match 'AccountName=([^;]+)') {
+    Write-Host "  Storage Account: $($matches[1])" -ForegroundColor Gray
+}
+Write-Host ""
 
 # Execute requested actions
 try {
