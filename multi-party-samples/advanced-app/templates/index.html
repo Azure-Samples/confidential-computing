@@ -890,6 +890,336 @@
         function escapeHtml(text) {
         }
         
+        // Detailed explanations for MAA attestation token claims
+        function getClaimExplanation(key, value) {
+            const explanations = {
+                'exp': {
+                    title: 'Token Expiration Time',
+                    icon: '⏰',
+                    category: 'JWT Standard',
+                    description: 'Unix timestamp after which this attestation token is no longer valid. Tokens are short-lived to prevent replay attacks. After expiry, a new attestation must be performed.',
+                    detail: value ? 'Expires: ' + new Date(value * 1000).toUTCString() : null
+                },
+                'iat': {
+                    title: 'Token Issued At',
+                    icon: '📅',
+                    category: 'JWT Standard',
+                    description: 'Unix timestamp when this attestation token was issued by the MAA service. Used together with "exp" to determine the token\'s validity window.',
+                    detail: value ? 'Issued: ' + new Date(value * 1000).toUTCString() : null
+                },
+                'iss': {
+                    title: 'Token Issuer',
+                    icon: '🏛️',
+                    category: 'JWT Standard',
+                    description: 'The Microsoft Azure Attestation (MAA) endpoint that issued this token. This is the shared attestation provider for the Azure region where the container is deployed. Relying parties should verify this matches the expected MAA endpoint.'
+                },
+                'jti': {
+                    title: 'JWT Token ID',
+                    icon: '🆔',
+                    category: 'JWT Standard',
+                    description: 'A unique identifier for this specific attestation token. Prevents token replay attacks — each attestation request produces a token with a unique JTI that can be tracked by relying parties.'
+                },
+                'nbf': {
+                    title: 'Not Valid Before',
+                    icon: '⏳',
+                    category: 'JWT Standard',
+                    description: 'Unix timestamp before which this token should not be accepted. Typically the same as "iat" (issued at). Prevents tokens from being used before they were created.',
+                    detail: value ? 'Valid from: ' + new Date(value * 1000).toUTCString() : null
+                },
+                'nonce': {
+                    title: 'Attestation Nonce',
+                    icon: '🎲',
+                    category: 'Request Binding',
+                    description: 'A random value provided by the client during the attestation request. Included in the signed token to prove freshness — ensures this token was generated in response to this specific request and is not a replay of an old attestation.'
+                },
+                'x-ms-attestation-type': {
+                    title: 'Attestation Type',
+                    icon: '🔐',
+                    category: 'Platform Identity',
+                    description: 'Identifies the type of Trusted Execution Environment (TEE) that was attested. "sevsnpvm" means AMD SEV-SNP (Secure Encrypted Virtualization - Secure Nested Paging), the hardware-level confidential computing technology protecting this VM.',
+                    detail: value === 'sevsnpvm' ? '✅ AMD SEV-SNP hardware attestation confirmed' : null
+                },
+                'x-ms-compliance-status': {
+                    title: 'Compliance Status',
+                    icon: '✅',
+                    category: 'Platform Identity',
+                    description: 'Indicates the compliance status of the Utility VM (UVM) running the container. "azure-compliant-uvm" means the VM image has been verified by Microsoft as meeting Azure\'s confidential computing security requirements.',
+                    detail: value === 'azure-compliant-uvm' ? '✅ Running Microsoft-verified compliant UVM' : null
+                },
+                'x-ms-policy-hash': {
+                    title: 'Attestation Policy Hash',
+                    icon: '📜',
+                    category: 'Policy',
+                    description: 'SHA-256 hash of the attestation policy applied by the MAA service when evaluating this attestation. This allows relying parties to verify which policy rules were enforced when the token was issued.'
+                },
+                'x-ms-runtime': {
+                    title: 'Runtime Data',
+                    icon: '📦',
+                    category: 'Request Binding',
+                    description: 'Custom data provided by the application at attestation time and included in the signed token. This binds application-specific context (like timestamps or session IDs) to the hardware attestation, proving the data originated from inside the TEE.'
+                },
+                'x-ms-sevsnpvm-authorkeydigest': {
+                    title: 'Author Key Digest',
+                    icon: '✍️',
+                    category: 'SEV-SNP Identity',
+                    description: 'SHA-384 hash of the author signing key used to sign the guest firmware. All zeros indicates the guest was launched with the default (unsigned) author key. In production, this would identify the specific entity that authored the VM firmware.'
+                },
+                'x-ms-sevsnpvm-bootloader-svn': {
+                    title: 'Bootloader Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number (SVN) of the AMD SEV-SNP bootloader. This version number is monotonically increasing — higher values indicate newer security patches. Used in release policies to ensure the platform has minimum required security patches.'
+                },
+                'x-ms-sevsnpvm-chip-family': {
+                    title: 'CPU Chip Family',
+                    icon: '🖥️',
+                    category: 'Hardware Identity',
+                    description: 'The AMD CPU family running this confidential VM. "Milan" is AMD\'s 3rd Gen EPYC processor series (Zen 3), one of the first to support SEV-SNP. Other values include "Genoa" (4th Gen EPYC, Zen 4) which offers enhanced security features.'
+                },
+                'x-ms-sevsnpvm-chipid': {
+                    title: 'Chip Unique ID',
+                    icon: '🔧',
+                    category: 'Hardware Identity',
+                    description: 'Unique cryptographic identifier of the specific AMD physical processor chip running this VM. This 64-byte value is derived from the chip\'s fused secrets and can be used to track workloads to specific physical hardware — important for compliance and audit scenarios.'
+                },
+                'x-ms-sevsnpvm-ciphertext-hiding-dram-enabled': {
+                    title: 'Ciphertext-Hiding DRAM',
+                    icon: '🛡️',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether the hardware protects against side-channel attacks that observe ciphertext patterns in DRAM. When enabled, even the encrypted memory patterns are obfuscated, providing protection against sophisticated physical attacks on memory.'
+                },
+                'x-ms-sevsnpvm-cxl-allowed': {
+                    title: 'CXL Memory Allowed',
+                    icon: '🔌',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether Compute Express Link (CXL) attached memory is allowed. CXL memory is external to the CPU and may have different security properties. When false, only CPU-attached DRAM is used, ensuring all memory is protected by the CPU\'s encryption engine.'
+                },
+                'x-ms-sevsnpvm-familyId': {
+                    title: 'VM Family ID',
+                    icon: '👨‍👩‍👧',
+                    category: 'SEV-SNP Identity',
+                    description: 'A 16-byte identifier set by the hypervisor to group related VMs into a "family." VMs in the same family can optionally share migration keys. Used for VM lifecycle management in confidential computing environments.'
+                },
+                'x-ms-sevsnpvm-guestsvn': {
+                    title: 'Guest Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number of the guest VM firmware. This allows relying parties to enforce minimum guest versions in key release policies, ensuring the guest has all required security patches before secrets are released.'
+                },
+                'x-ms-sevsnpvm-hostdata': {
+                    title: 'Host Data (Security Policy Hash)',
+                    icon: '🔒',
+                    category: 'Container Identity',
+                    description: 'SHA-256 hash of the confidential computing security policy (ccePolicy) set by the host at VM launch time. This is the CRITICAL binding between the container\'s security policy and the hardware attestation. Key release policies compare this value to ensure only containers with the approved security policy can access secrets.',
+                    detail: '🔑 This value is used in SKR key release policies to bind keys to specific container configurations'
+                },
+                'x-ms-sevsnpvm-idkeydigest': {
+                    title: 'ID Key Digest',
+                    icon: '🔑',
+                    category: 'SEV-SNP Identity',
+                    description: 'SHA-384 hash of the AMD ID signing key that signed the attestation report. This identifies the specific AMD key used to certify the attestation — verifiable against AMD\'s published key certificates to prove the report came from genuine AMD hardware.'
+                },
+                'x-ms-sevsnpvm-imageId': {
+                    title: 'VM Image ID',
+                    icon: '💿',
+                    category: 'SEV-SNP Identity',
+                    description: 'A 16-byte identifier set by the hypervisor to identify the guest VM image. Used to track which specific VM image version is running, useful for compliance and version management.'
+                },
+                'x-ms-sevsnpvm-is-debuggable': {
+                    title: 'Debug Mode Status',
+                    icon: '🐛',
+                    category: 'Security State',
+                    description: 'Indicates whether the VM is running in debug mode. Debug mode allows hypervisor access to VM memory, COMPLETELY bypassing confidential computing protections. Must be FALSE for any production workload — key release policies should always reject debuggable VMs.',
+                    detail: value === false ? '✅ Debug mode disabled — memory is protected' : '⚠️ DEBUG MODE ENABLED — memory is NOT protected!'
+                },
+                'x-ms-sevsnpvm-launchmeasurement': {
+                    title: 'Launch Measurement',
+                    icon: '📏',
+                    category: 'Container Identity',
+                    description: 'SHA-384 hash of the entire VM\'s initial memory contents at launch, computed by the AMD hardware. This cryptographic measurement covers the firmware, kernel, and initial configuration — any modification to the launch environment produces a different hash. This is the hardware-rooted proof of what code is running.'
+                },
+                'x-ms-sevsnpvm-mem-aes256-xts-required': {
+                    title: 'AES-256-XTS Memory Required',
+                    icon: '🔐',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether AES-256-XTS encryption is required for memory encryption. When false, AES-128-XEX (the default for earlier SEV generations) may be used. AES-256-XTS provides stronger encryption with wider keys and the XTS mode designed for storage/memory encryption.'
+                },
+                'x-ms-sevsnpvm-microcode-svn': {
+                    title: 'Microcode Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number of the CPU microcode. Microcode updates patch CPU-level vulnerabilities (like speculative execution attacks). Higher values indicate more recent security patches. Release policies can enforce minimum microcode versions.'
+                },
+                'x-ms-sevsnpvm-migration-allowed': {
+                    title: 'VM Migration Allowed',
+                    icon: '🚚',
+                    category: 'Security State',
+                    description: 'Indicates whether live migration of the confidential VM is permitted. When false, the VM is pinned to its current physical host — its secrets cannot be transferred to another machine. This prevents attacks where a VM is migrated to compromised hardware.'
+                },
+                'x-ms-sevsnpvm-page-swap-disabled': {
+                    title: 'Page Swap Disabled',
+                    icon: '💾',
+                    category: 'Security State',
+                    description: 'Indicates whether the hypervisor is prevented from swapping VM memory pages to disk. When page swap is allowed (false), the hypervisor can move encrypted pages out to persistent storage, which may have different security properties than DRAM.'
+                },
+                'x-ms-sevsnpvm-rapl-disabled': {
+                    title: 'RAPL Power Analysis Disabled',
+                    icon: '⚡',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether Running Average Power Limit (RAPL) reporting is disabled. RAPL interfaces expose CPU power consumption data that could be used in side-channel attacks to infer information about the workload running inside the TEE (power analysis attacks).'
+                },
+                'x-ms-sevsnpvm-reportdata': {
+                    title: 'Report Data',
+                    icon: '📋',
+                    category: 'Request Binding',
+                    description: 'A 64-byte field set by the guest at attestation time, included in the hardware-signed report. Typically contains a hash of the attestation request data, binding the hardware attestation to the specific request. The first 32 bytes usually contain application data; the rest is zero-padded.'
+                },
+                'x-ms-sevsnpvm-reportid': {
+                    title: 'Report ID',
+                    icon: '🆔',
+                    category: 'SEV-SNP Identity',
+                    description: 'A unique identifier for this VM instance derived from the VM\'s identity key. Different from the chip ID — this identifies the specific VM instance on the chip, not the physical hardware. Useful for tracking individual VM attestation history.'
+                },
+                'x-ms-sevsnpvm-singlesocket': {
+                    title: 'Single Socket Platform',
+                    icon: '🖥️',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether the platform has only a single CPU socket. On multi-socket platforms, inter-socket links (like AMD Infinity Fabric) transmit encrypted memory data between CPUs, which has different attack surface than single-socket configurations.'
+                },
+                'x-ms-sevsnpvm-smt-allowed': {
+                    title: 'SMT (Hyperthreading) Allowed',
+                    icon: '🔀',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether Simultaneous Multi-Threading (SMT/hyperthreading) is enabled. SMT shares CPU resources between threads, which can be exploited in side-channel attacks (e.g., CacheOut, MDS). Some high-security workloads disable SMT for stronger isolation, at the cost of performance.'
+                },
+                'x-ms-sevsnpvm-snpfw-svn': {
+                    title: 'SNP Firmware Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number of the AMD SEV-SNP firmware (also called the PSP firmware). This firmware runs on the AMD Platform Security Processor and manages the cryptographic operations for SEV-SNP. Critical for security — release policies should enforce minimum versions.'
+                },
+                'x-ms-sevsnpvm-tee-svn': {
+                    title: 'TEE Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number of the TEE (Trusted Execution Environment) platform. Represents the overall security level of the confidential computing stack.'
+                },
+                'x-ms-sevsnpvm-uvm-endorsement': {
+                    title: 'UVM Endorsement',
+                    icon: '📝',
+                    category: 'Platform Endorsement',
+                    description: 'Microsoft\'s endorsement of the Utility VM (UVM) image. Contains the UVM\'s own guest SVN and launch measurement, signed by Microsoft. This allows relying parties to verify the UVM is a genuine Microsoft-published confidential computing image, not a modified one.'
+                },
+                'x-ms-sevsnpvm-uvm-endorsement-headers': {
+                    title: 'UVM Endorsement Headers',
+                    icon: '📋',
+                    category: 'Platform Endorsement',
+                    description: 'Metadata about the UVM endorsement signature. The "feed" identifies the endorsement source (e.g., "ContainerPlat-AMD-UVM" for Azure container platform). The "iss" is a DID (Decentralized Identifier) with the X.509 certificate chain that signed the endorsement, allowing cryptographic verification.'
+                },
+                'x-ms-sevsnpvm-vmpl': {
+                    title: 'VM Privilege Level',
+                    icon: '🏗️',
+                    category: 'Security State',
+                    description: 'The Virtual Machine Privilege Level (VMPL) at which the attestation was generated. VMPL 0 is the most privileged level (firmware), VMPL 1-3 have decreasing privileges. VMPL 0 indicates the attestation was generated by the most trusted component in the guest.',
+                    detail: value === 0 ? '✅ VMPL 0 — Attestation from most privileged level (firmware)' : null
+                },
+                'x-ms-ver': {
+                    title: 'Attestation Schema Version',
+                    icon: '📌',
+                    category: 'Metadata',
+                    description: 'Version of the MAA attestation token schema. "1.0" is the current schema version. Allows relying parties to parse tokens correctly as the schema evolves.'
+                }
+            };
+            return explanations[key] || null;
+        }
+        
+        function renderClaimExplanations(payload) {
+            // Group claims by category
+            const categoryOrder = [
+                'JWT Standard', 'Request Binding', 'Platform Identity', 'Policy',
+                'Container Identity', 'SEV-SNP Identity', 'Hardware Identity',
+                'SEV-SNP Versions', 'Security State', 'Hardware Security Features',
+                'Platform Endorsement', 'Metadata'
+            ];
+            const categoryColors = {
+                'JWT Standard': '#6c757d',
+                'Request Binding': '#0d6efd',
+                'Platform Identity': '#198754',
+                'Policy': '#6610f2',
+                'Container Identity': '#dc3545',
+                'SEV-SNP Identity': '#fd7e14',
+                'Hardware Identity': '#20c997',
+                'SEV-SNP Versions': '#0dcaf0',
+                'Security State': '#ffc107',
+                'Hardware Security Features': '#d63384',
+                'Platform Endorsement': '#6f42c1',
+                'Metadata': '#adb5bd'
+            };
+            
+            let grouped = {};
+            let unknownClaims = [];
+            
+            for (const [key, value] of Object.entries(payload)) {
+                const explanation = getClaimExplanation(key, value);
+                if (explanation) {
+                    const cat = explanation.category;
+                    if (!grouped[cat]) grouped[cat] = [];
+                    grouped[cat].push({ key, value, ...explanation });
+                } else {
+                    unknownClaims.push({ key, value });
+                }
+            }
+            
+            let html = '<div style="margin-top: 15px;">';
+            
+            for (const cat of categoryOrder) {
+                if (!grouped[cat]) continue;
+                const color = categoryColors[cat] || '#6c757d';
+                html += '<div style="margin-bottom: 20px;">';
+                html += '<h4 style="color: ' + color + '; border-bottom: 2px solid ' + color + '; padding-bottom: 6px; margin-bottom: 12px; font-size: 0.95em;">' + cat + '</h4>';
+                
+                for (const claim of grouped[cat]) {
+                    let displayValue = claim.value;
+                    if (typeof displayValue === 'object' && displayValue !== null) {
+                        displayValue = JSON.stringify(displayValue, null, 2);
+                    } else if (typeof displayValue === 'boolean') {
+                        displayValue = displayValue ? 'true' : 'false';
+                    }
+                    
+                    html += '<div style="margin-bottom: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid ' + color + ';">';
+                    html += '<div style="display: flex; align-items: center; margin-bottom: 6px;">';
+                    html += '<span style="font-size: 1.2em; margin-right: 8px;">' + claim.icon + '</span>';
+                    html += '<strong style="color: #212529;">' + escapeHtml(claim.title) + '</strong>';
+                    html += '</div>';
+                    html += '<code style="display: block; font-size: 0.8em; color: #495057; background: #e9ecef; padding: 4px 8px; border-radius: 4px; margin-bottom: 8px; word-break: break-all;">' + escapeHtml(claim.key) + '</code>';
+                    html += '<p style="margin: 0 0 8px 0; font-size: 0.85em; color: #495057; line-height: 1.5;">' + claim.description + '</p>';
+                    if (claim.detail) {
+                        html += '<p style="margin: 0 0 8px 0; font-size: 0.85em; color: #0d6efd; font-weight: 500;">' + escapeHtml(claim.detail) + '</p>';
+                    }
+                    html += '<div style="font-family: monospace; font-size: 0.78em; color: #333; background: #e9ecef; padding: 6px 10px; border-radius: 4px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">' + escapeHtml(String(displayValue)) + '</div>';
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            
+            // Show any unknown claims
+            if (unknownClaims.length > 0) {
+                html += '<div style="margin-bottom: 20px;">';
+                html += '<h4 style="color: #6c757d; border-bottom: 2px solid #6c757d; padding-bottom: 6px; margin-bottom: 12px; font-size: 0.95em;">Other Claims</h4>';
+                for (const claim of unknownClaims) {
+                    let displayValue = typeof claim.value === 'object' ? JSON.stringify(claim.value, null, 2) : String(claim.value);
+                    html += '<div style="margin-bottom: 8px; padding: 10px; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #6c757d;">';
+                    html += '<code style="font-size: 0.85em; color: #495057;">' + escapeHtml(claim.key) + '</code>';
+                    html += '<div style="font-family: monospace; font-size: 0.78em; margin-top: 4px; color: #333; background: #e9ecef; padding: 6px 10px; border-radius: 4px; word-break: break-all;">' + escapeHtml(displayValue) + '</div>';
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            
+            html += '</div>';
+            return html;
+        }
+        
         // World map rendering function for salary by country
         function renderSalaryWorldMap(salaryData) {
             // Country coordinates for Natural Earth projection (approximate)
@@ -1113,6 +1443,14 @@
                         html += '<p style="margin: 15px 0;"><strong>MAA Endpoint:</strong> ' + data.maa_endpoint + '</p>';
                         html += '<p style="margin: 15px 0;"><strong>Token Claims:</strong></p>';
                         html += '<div class="output-box"><pre>' + JSON.stringify(payload, null, 2) + '</pre></div>';
+                        
+                        // Add "Detailed Explanation" expandable section
+                        html += '<details style="margin-top: 15px; border: 2px solid #0d6efd; border-radius: 8px; overflow: hidden;">';
+                        html += '<summary style="padding: 12px 16px; background: linear-gradient(135deg, #0d6efd 0%, #0056b3 100%); color: white; cursor: pointer; font-weight: bold; font-size: 0.95em; display: flex; align-items: center; gap: 8px;">📖 Detailed Explanation of Each Claim</summary>';
+                        html += '<div style="padding: 16px; background: white;">';
+                        html += renderClaimExplanations(payload);
+                        html += '</div></details>';
+                        
                         html += '</div>';
                         
                         resultDiv.innerHTML = html;
