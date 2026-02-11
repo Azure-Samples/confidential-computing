@@ -13,7 +13,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Copy SKR binary from the sidecar image
 COPY --from=skr-source /bin/skr /usr/local/bin/skr
@@ -23,6 +24,9 @@ RUN chmod +x /usr/local/bin/skr
 COPY requirements.txt requirements.txt
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+# Create a non-root user for the application
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+
 # Copy application files
 COPY app.py .
 COPY templates/ templates/
@@ -31,8 +35,14 @@ COPY templates/ templates/
 COPY contoso-data.csv .
 COPY fabrikam-data.csv .
 
-# Create supervisord configuration to run both services
-RUN mkdir -p /var/log/supervisor
+# Create required directories with proper permissions
+RUN mkdir -p /var/log/supervisor /var/run /app/encrypted-data \
+    && chown -R appuser:appuser /app \
+    && chmod -R 755 /app \
+    && chown -R appuser:appuser /var/log/supervisor \
+    && chown -R appuser:appuser /var/run
+
+# Copy supervisord configuration
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Expose port 80 for web traffic (SKR runs internally on 8080)

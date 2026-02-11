@@ -1154,192 +1154,25 @@ function Invoke-Deploy {
     Write-Host "  Right:   Woodgrove-Bank (Confidential + Cross-company) - http://$fqdn_companyC"
     Write-Host ""
     
-    # Get key names for display
-    $keyNameA = $companyAConfig.skrKeyName
-    $keyNameB = $companyBConfig.skrKeyName
-    $keyNameC = $companyCConfig.skrKeyName
-    $kvNameA = $companyAConfig.keyVaultName
-    $kvNameB = $companyBConfig.keyVaultName
-    $kvNameC = $companyCConfig.keyVaultName
-    
-    # Create a local HTML file with iframes for multi-party view
-    $multiPartyHtml = @"
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Multi-Party Confidential Computing Demo</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { display: flex; flex-direction: column; height: 100vh; font-family: 'Segoe UI', sans-serif; background: #1a1a2e; overflow: hidden; }
-        .header { 
-            background: #1a1a2e; 
-            color: white; 
-            padding: 8px 20px;
-            text-align: center;
-            border-bottom: 2px solid #333;
-        }
-        .header h1 { font-size: 18px; font-weight: 500; margin-bottom: 4px; }
-        .header p { font-size: 12px; color: #888; }
-        .container { display: flex; flex-direction: row; flex: 1; overflow: hidden; }
-        .pane { 
-            display: flex; 
-            flex-direction: column;
-            border: 2px solid #333;
-            min-width: 200px;
-            overflow: hidden;
-        }
-        .label { 
-            padding: 8px 10px; 
-            font-weight: bold;
-            font-size: 11px;
-            text-align: center;
-            flex-shrink: 0;
-        }
-        .label.confidential { background: #28a745; color: white; }
-        .label.standard { background: #dc3545; color: white; }
-        .label .subtitle { display: block; font-size: 9px; font-weight: normal; opacity: 0.9; margin-top: 2px; }
-        .label .key-name { display: block; font-size: 9px; font-family: monospace; background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px; margin-top: 4px; }
-        iframe { flex: 1; width: 100%; border: none; background: white; }
-        .resizer {
-            width: 6px;
-            background: #333;
-            cursor: col-resize;
-            flex-shrink: 0;
-            transition: background 0.2s;
-        }
-        .resizer:hover, .resizer.active {
-            background: #0078d4;
-        }
-        .legend {
-            background: #252545;
-            padding: 6px 20px;
-            display: flex;
-            justify-content: center;
-            gap: 30px;
-            font-size: 10px;
-            color: #ccc;
-            flex-shrink: 0;
-        }
-        .legend-item { display: flex; align-items: center; gap: 6px; }
-        .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
-        .legend-dot.green { background: #28a745; }
-        .legend-dot.red { background: #dc3545; }
-        .no-select { user-select: none; -webkit-user-select: none; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🔐 Multi-Party Confidential Computing Demonstration</h1>
-        <p>Each company has their own Key Vault and SKR key - only their confidential container can release it</p>
-    </div>
-    <div class="legend">
-        <div class="legend-item">
-            <div class="legend-dot green"></div>
-            <span>All containers run in AMD SEV-SNP confidential environment with hardware attestation</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-dot green"></div>
-            <span>Woodgrove Bank has cross-company access to partner keys for joint analytics</span>
-        </div>
-    </div>
-    <div class="container" id="container">
-        <div class="pane" id="pane0" style="flex: 1;">
-            <div class="label confidential">
-                ✅ CONTOSO (Confidential) <span class="subtitle">AMD SEV-SNP TEE • Key Vault: $kvNameA</span> <span class="key-name">🔑 $keyNameA</span>
-            </div>
-            <iframe src="http://$fqdn_companyA" title="Contoso - Confidential Container"></iframe>
-        </div>
-        <div class="resizer" data-pane="0"></div>
-        <div class="pane" id="pane1" style="flex: 1;">
-            <div class="label confidential">
-                ✅ FABRIKAM (Confidential) <span class="subtitle">AMD SEV-SNP TEE • Key Vault: $kvNameB</span> <span class="key-name">🔑 $keyNameB</span>
-            </div>
-            <iframe src="http://$fqdn_companyB" title="Fabrikam - Confidential Container"></iframe>
-        </div>
-        <div class="resizer" data-pane="1"></div>
-        <div class="pane" id="pane2" style="flex: 1;">
-            <div class="label confidential">
-                ✅ WOODGROVE BANK (Confidential) <span class="subtitle">AMD SEV-SNP TEE • Key Vault: $kvNameC • Cross-company access</span> <span class="key-name">🔑 $keyNameC + Partners</span>
-            </div>
-            <iframe src="http://$fqdn_companyC" title="Woodgrove Bank - Confidential Container"></iframe>
-        </div>
-    </div>
-    <script>
-        const container = document.getElementById('container');
-        const panes = document.querySelectorAll('.pane');
-        const resizers = document.querySelectorAll('.resizer');
-        let activeResizer = null;
-        let startX = 0;
-        let startWidths = [];
-
-        resizers.forEach(resizer => {
-            resizer.addEventListener('mousedown', (e) => {
-                activeResizer = resizer;
-                activeResizer.classList.add('active');
-                startX = e.clientX;
-                document.body.classList.add('no-select');
-                
-                // Store current widths in pixels
-                startWidths = Array.from(panes).map(p => p.getBoundingClientRect().width);
-                
-                // Disable pointer events on iframes during resize
-                document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = 'none');
-                
-                e.preventDefault();
-            });
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!activeResizer) return;
-            
-            const paneIndex = parseInt(activeResizer.dataset.pane);
-            const delta = e.clientX - startX;
-            
-            const newWidth1 = Math.max(200, startWidths[paneIndex] + delta);
-            const newWidth2 = Math.max(200, startWidths[paneIndex + 1] - delta);
-            
-            // Only apply if both panes stay above minimum
-            if (newWidth1 >= 200 && newWidth2 >= 200) {
-                panes[paneIndex].style.flex = 'none';
-                panes[paneIndex].style.width = newWidth1 + 'px';
-                panes[paneIndex + 1].style.flex = 'none';
-                panes[paneIndex + 1].style.width = newWidth2 + 'px';
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (activeResizer) {
-                activeResizer.classList.remove('active');
-                activeResizer = null;
-                document.body.classList.remove('no-select');
-                document.querySelectorAll('iframe').forEach(f => f.style.pointerEvents = 'auto');
-            }
-        });
-
-        // Double-click to reset all panes to equal width
-        resizers.forEach(resizer => {
-            resizer.addEventListener('dblclick', () => {
-                panes.forEach(p => {
-                    p.style.flex = '1';
-                    p.style.width = '';
-                });
-            });
-        });
-    </script>
-</body>
-</html>
-"@
-    
-    $multiPartyHtmlPath = Join-Path $PSScriptRoot "multiparty-view-$resource_group.html"
-    $multiPartyHtml | Out-File -FilePath $multiPartyHtmlPath -Encoding UTF8
+    # Open Edge with each company website in a separate tab
+    $urlA = "http://$fqdn_companyA"
+    $urlB = "http://$fqdn_companyB"
+    $urlC = "http://$fqdn_companyC"
     
     $edgeProcess = $null
     if (-not $SkipBrowser) {
-        # Open the multi-party view HTML in Edge and capture the process
-        $edgeProcess = Start-Process "msedge" -ArgumentList "--new-window `"file:///$($multiPartyHtmlPath.Replace('\', '/'))`"" -PassThru
+        Write-Host "Opening Microsoft Edge with each company in a separate tab..."
+        Write-Host "  Tab 1: Contoso      - $urlA"
+        Write-Host "  Tab 2: Fabrikam     - $urlB"
+        Write-Host "  Tab 3: Woodgrove    - $urlC"
+        Write-Host ""
+        # Open Edge with all three URLs as separate tabs in a new window
+        $edgeProcess = Start-Process "msedge" -ArgumentList "--new-window `"$urlA`" `"$urlB`" `"$urlC`"" -PassThru
     } else {
         Write-Host "Browser skipped. Open manually:"
-        Write-Host "  file:///$($multiPartyHtmlPath.Replace('\', '/'))"
+        Write-Host "  $urlA"
+        Write-Host "  $urlB"
+        Write-Host "  $urlC"
     }
     
     # Cleanup prompt
@@ -1374,7 +1207,6 @@ function Invoke-Deploy {
     Remove-Item -Path "deployment-template-contoso.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "deployment-template-fabrikam.json" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "deployment-template-woodgrove.json" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "multiparty-view-$resource_group.html" -Force -ErrorAction SilentlyContinue
     
     Write-Success "All containers deleted. ACR and Key Vault preserved."
     Write-Host "Run -Cleanup to delete all resources including ACR and Key Vault."

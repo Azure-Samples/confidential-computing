@@ -2,10 +2,101 @@ from flask import Flask, jsonify, request, render_template
 import requests
 import json
 import os
+import re
+import secrets
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from functools import wraps
+import time
+import logging
 
 app = Flask(__name__)
+
+# Generate a cryptographically random secret key on each container start
+app.config['SECRET_KEY'] = secrets.token_hex(32)
+
+# Limit maximum request payload size (16 KB)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024
+
+# Configure logging to avoid leaking sensitive info
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.WARNING)
+
+# ---------------------------------------------------------------------------
+# Security Headers Middleware
+# ---------------------------------------------------------------------------
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to every response."""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+    # Prevent caching of sensitive API responses
+    if request.path.startswith('/skr/') or request.path.startswith('/encrypt') or request.path.startswith('/decrypt'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+    return response
+
+# ---------------------------------------------------------------------------
+# Simple Rate Limiter (per-IP, in-memory)
+# ---------------------------------------------------------------------------
+_rate_limit_store = {}  # {ip: [timestamps]}
+_rate_limit_lock = threading.Lock()
+
+def rate_limit(max_calls=30, period=60):
+    """Decorator: limit requests per IP address."""
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            ip = request.remote_addr or '0.0.0.0'
+            now = time.time()
+            with _rate_limit_lock:
+                calls = _rate_limit_store.get(ip, [])
+                # Remove expired entries
+                calls = [t for t in calls if now - t < period]
+                if len(calls) >= max_calls:
+                    return jsonify({'status': 'error', 'message': 'Rate limit exceeded. Please try again later.'}), 429
+                calls.append(now)
+                _rate_limit_store[ip] = calls
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# ---------------------------------------------------------------------------
+# Input Validation Helpers
+# ---------------------------------------------------------------------------
+_ENDPOINT_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9.\-]{2,253}$')
+
+def _validate_endpoint(value, name='endpoint'):
+    """Validate that a value looks like a hostname (no scheme, no path traversal)."""
+    if not value:
+        return value
+    # Strip any scheme that slipped through
+    for prefix in ('https://', 'http://'):
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+    # Remove trailing slashes / paths
+    value = value.split('/')[0]
+    if not _ENDPOINT_RE.match(value):
+        raise ValueError(f'Invalid {name}: contains disallowed characters')
+    return value
+
+def _safe_error_detail(text, max_len=500):
+    """Truncate and sanitise error detail for safe inclusion in responses."""
+    if not text:
+        return 'No details available'
+    return text[:max_len]
 
 # Log file paths (configured in supervisord.conf)
 LOG_FILES = {
@@ -91,6 +182,7 @@ def index():
     return render_template('index.html')
 
 @app.route('/attest/maa', methods=['POST'])
+@rate_limit(max_calls=20, period=60)
 def attest_maa():
     """
     Request attestation from Microsoft Azure Attestation (MAA) via sidecar
@@ -98,15 +190,21 @@ def attest_maa():
     """
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Request body required'}), 400
         # Use the shared MAA endpoint for East US
         maa_endpoint = data.get('maa_endpoint', 'sharedeus.eus.attest.azure.net')
         runtime_data = data.get('runtime_data', '')
         
-        # Ensure the endpoint doesn't have https:// prefix - sidecar adds it
-        if maa_endpoint.startswith('https://'):
-            maa_endpoint = maa_endpoint.replace('https://', '')
-        if maa_endpoint.startswith('http://'):
-            maa_endpoint = maa_endpoint.replace('http://', '')
+        # Validate and sanitise endpoint
+        try:
+            maa_endpoint = _validate_endpoint(maa_endpoint, 'maa_endpoint')
+        except ValueError as ve:
+            return jsonify({'status': 'error', 'message': str(ve)}), 400
+        
+        # Restrict to known Azure Attestation domains to prevent SSRF
+        if not maa_endpoint.endswith('.attest.azure.net'):
+            return jsonify({'status': 'error', 'message': 'maa_endpoint must be an Azure Attestation endpoint (*.attest.azure.net)'}), 400
 
         # Forward request to attestation sidecar (running on localhost:8080)
         response = requests.post(
@@ -118,7 +216,7 @@ def attest_maa():
         # Check if sidecar returned an error
         if response.status_code != 200:
             # Parse common error scenarios
-            error_detail = response.text[:1000] if response.text else "No response body"
+            error_detail = _safe_error_detail(response.text)
             
             # Detect specific failure modes
             failure_reason = "Unknown attestation failure"
@@ -179,6 +277,7 @@ def attest_maa():
         }), 500
 
 @app.route('/attest/raw', methods=['POST'])
+@rate_limit(max_calls=20, period=60)
 def attest_raw():
     """
     Get raw attestation report from the sidecar
@@ -196,7 +295,7 @@ def attest_raw():
 
         # Check if sidecar returned an error
         if response.status_code != 200:
-            error_detail = response.text[:1000] if response.text else "No response body"
+            error_detail = _safe_error_detail(response.text)
             
             # Detect specific failure modes
             failure_reason = "Unable to generate raw attestation report"
@@ -270,6 +369,7 @@ def sidecar_status():
         }), 500
 
 @app.route('/skr/release', methods=['POST'])
+@rate_limit(max_calls=10, period=60)
 def skr_release():
     """
     Attempt to release a key from Azure Key Vault using Secure Key Release (SKR).
@@ -290,6 +390,18 @@ def skr_release():
         akv_endpoint = data.get('akv_endpoint', env_akv_endpoint)
         kid = data.get('kid', env_key_name)
         
+        # Validate endpoints to prevent SSRF
+        try:
+            maa_endpoint = _validate_endpoint(maa_endpoint, 'maa_endpoint')
+            akv_endpoint = _validate_endpoint(akv_endpoint, 'akv_endpoint')
+        except ValueError as ve:
+            return jsonify({'status': 'error', 'message': str(ve)}), 400
+        
+        if maa_endpoint and not maa_endpoint.endswith('.attest.azure.net'):
+            return jsonify({'status': 'error', 'message': 'maa_endpoint must be an Azure Attestation endpoint'}), 400
+        if akv_endpoint and not akv_endpoint.endswith('.vault.azure.net'):
+            return jsonify({'status': 'error', 'message': 'akv_endpoint must be an Azure Key Vault endpoint'}), 400
+        
         if not akv_endpoint or not kid:
             return jsonify({
                 'status': 'error',
@@ -299,16 +411,6 @@ def skr_release():
                 'akv_endpoint': akv_endpoint or '(not configured)',
                 'key_name': kid or '(not configured)'
             }), 400
-        
-        # Ensure endpoints don't have https:// prefix - sidecar adds it
-        if maa_endpoint.startswith('https://'):
-            maa_endpoint = maa_endpoint.replace('https://', '')
-        if maa_endpoint.startswith('http://'):
-            maa_endpoint = maa_endpoint.replace('http://', '')
-        if akv_endpoint.startswith('https://'):
-            akv_endpoint = akv_endpoint.replace('https://', '')
-        if akv_endpoint.startswith('http://'):
-            akv_endpoint = akv_endpoint.replace('http://', '')
 
         # Forward request to SKR sidecar's key/release endpoint
         response = requests.post(
@@ -323,7 +425,7 @@ def skr_release():
 
         # Check if sidecar returned an error
         if response.status_code != 200:
-            error_detail = response.text[:2000] if response.text else "No response body"
+            error_detail = _safe_error_detail(response.text, 1000)
             
             # Try to parse error JSON
             error_json = None
@@ -694,6 +796,7 @@ def debug_attestation_claims():
         }), 500
 
 @app.route('/skr/release-partner', methods=['POST'])
+@rate_limit(max_calls=10, period=60)
 def skr_release_partner_key():
     """
     Release a partner company's key (Woodgrove Bank only).
@@ -785,7 +888,7 @@ def skr_release_partner_key():
                 'note': 'Key stored for cross-company analytics' if has_private_key else 'Public key only - decryption requires HSM access'
             })
         else:
-            error_detail = response.text[:500] if response.text else 'Unknown error'
+            error_detail = _safe_error_detail(response.text)
             return jsonify({
                 'status': 'error',
                 'message': f'Failed to release {partner_display_name}\'s key',
@@ -923,6 +1026,7 @@ def decrypt_records_batch(records, key, source_name, batch_size=10, cached_priva
     return decrypted_records
 
 @app.route('/partner/analyze', methods=['POST'])
+@rate_limit(max_calls=5, period=60)
 def partner_analyze():
     """
     Fetch encrypted data from partner containers (Contoso and Fabrikam),
@@ -1140,11 +1244,10 @@ def partner_analyze():
         })
         
     except Exception as e:
-        import traceback
+        app.logger.exception('Error in partner_analyze')
         return jsonify({
             'status': 'error',
-            'message': str(e),
-            'traceback': traceback.format_exc()
+            'message': 'An internal error occurred during analysis.'
         }), 500
 
 @app.route('/partner/analyze-stream')
@@ -1372,6 +1475,7 @@ def partner_analyze_stream():
     })
 
 @app.route('/analytics/partner-demographics', methods=['POST'])
+@rate_limit(max_calls=5, period=60)
 def partner_demographics_analysis():
     """
     Woodgrove Bank Partner Demographic Analysis.
@@ -1709,14 +1813,14 @@ def partner_demographics_analysis():
         return jsonify(results)
         
     except Exception as e:
-        import traceback
+        app.logger.exception('Error in partner_demographics_analysis')
         return jsonify({
             'status': 'error',
-            'message': str(e),
-            'traceback': traceback.format_exc()
+            'message': 'An internal error occurred during partner demographic analysis.'
         }), 500
 
 @app.route('/skr/release-other', methods=['POST'])
+@rate_limit(max_calls=10, period=60)
 def skr_release_other_company():
     """
     Attempt to release a key from the OTHER company's Key Vault.
@@ -1813,10 +1917,13 @@ def skr_release_other_company():
         }), 500
 
 # Global storage for the released key (in-memory, cleared on restart)
+# Protected by _key_lock for thread safety
+_key_lock = threading.Lock()
 _released_key = None
 _released_key_name = None  # Store the key name to identify company
 
 @app.route('/encrypt', methods=['POST'])
+@rate_limit(max_calls=60, period=60)
 def encrypt_with_released_key():
     """
     Encrypt plaintext using the previously released SKR key.
@@ -1942,6 +2049,7 @@ def encrypt_with_released_key():
         }), 500
 
 @app.route('/decrypt', methods=['POST'])
+@rate_limit(max_calls=60, period=60)
 def decrypt_with_released_key():
     """
     Decrypt ciphertext using the previously released SKR key.
@@ -2168,7 +2276,6 @@ def container_info():
     """
     Get container image metadata including image name, digest, and file checksums.
     """
-    import hashlib
     import subprocess
     
     info = {
@@ -2218,37 +2325,39 @@ def container_info():
                 with open(filepath, 'rb') as f:
                     content = f.read()
                     info['app_checksums'][filepath] = {
-                        'md5': hashlib.md5(content).hexdigest(),
-                        'sha256': hashlib.sha256(content).hexdigest()[:32] + '...',
+                        'sha256': hashlib.sha256(content).hexdigest(),
                         'size_bytes': len(content)
                     }
         except Exception as e:
             info['app_checksums'][filepath] = {'error': str(e)}
     
     # Get SKR binary info
-    skr_binary = '/app/skr'
+    skr_binary = '/usr/local/bin/skr'
     try:
         if os.path.exists(skr_binary):
             with open(skr_binary, 'rb') as f:
                 content = f.read()
                 info['skr_binary_info'] = {
                     'path': skr_binary,
-                    'md5': hashlib.md5(content).hexdigest(),
-                    'sha256': hashlib.sha256(content).hexdigest()[:32] + '...',
+                    'sha256': hashlib.sha256(content).hexdigest(),
                     'size_bytes': len(content),
                     'executable': os.access(skr_binary, os.X_OK)
                 }
             
-            # Try to get version info
+            # Try to get version info (only from the known SKR binary path)
             try:
-                result = subprocess.run([skr_binary, '--version'], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(
+                    ['/usr/local/bin/skr', '--version'],
+                    capture_output=True, text=True, timeout=5,
+                    env={}
+                )
                 info['skr_binary_info']['version'] = result.stdout.strip() or result.stderr.strip() or 'No version output'
             except subprocess.TimeoutExpired:
                 info['skr_binary_info']['version'] = 'Timeout getting version'
             except Exception as e:
                 info['skr_binary_info']['version'] = f'Error: {str(e)}'
         else:
-            info['skr_binary_info'] = {'error': 'SKR binary not found at /app/skr'}
+            info['skr_binary_info'] = {'error': 'SKR binary not found at /usr/local/bin/skr'}
     except Exception as e:
         info['skr_binary_info'] = {'error': str(e)}
     
@@ -2508,6 +2617,8 @@ def decrypt_data_with_key(ciphertext_b64, key_data=None, cached_private_key=None
         return None, f"Decryption failed: {str(e)}"
 
 # Store partner keys for Woodgrove's cross-company analytics
+# Protected by _partner_lock for thread safety
+_partner_lock = threading.Lock()
 _partner_keys = {}  # {'contoso': key_data, 'fabrikam': key_data}
 _partner_private_key_cache = {}  # {'contoso': RSAPrivateKey, 'fabrikam': RSAPrivateKey} - cached key objects
 
@@ -2561,12 +2672,14 @@ def store_partner_key(partner_name, key_data):
     """Store a partner's released key for later use and pre-compute the private key object"""
     global _partner_keys, _partner_private_key_cache
     partner_lower = partner_name.lower()
-    _partner_keys[partner_lower] = key_data
+    with _partner_lock:
+        _partner_keys[partner_lower] = key_data
     # Pre-compute and cache the private key object for faster decryption
     try:
         private_key = _build_private_key(key_data)
         if private_key:
-            _partner_private_key_cache[partner_lower] = private_key
+            with _partner_lock:
+                _partner_private_key_cache[partner_lower] = private_key
             print(f"[PERF] Cached private key object for {partner_name}")
     except Exception as e:
         print(f"[PERF] Could not cache private key for {partner_name}: {e}")
@@ -2574,12 +2687,14 @@ def store_partner_key(partner_name, key_data):
 def get_partner_key(partner_name):
     """Get a stored partner key"""
     global _partner_keys
-    return _partner_keys.get(partner_name.lower())
+    with _partner_lock:
+        return _partner_keys.get(partner_name.lower())
 
 def get_cached_private_key(partner_name):
     """Get a cached private key object for faster decryption"""
     global _partner_private_key_cache
-    return _partner_private_key_cache.get(partner_name.lower())
+    with _partner_lock:
+        return _partner_private_key_cache.get(partner_name.lower())
 
 @app.route('/company/info')
 def company_info():
@@ -2594,6 +2709,7 @@ def company_info():
     })
 
 @app.route('/company/save', methods=['POST'])
+@rate_limit(max_calls=30, period=60)
 def save_company_data():
     """
     Save encrypted data to company-specific local storage file.
@@ -2689,6 +2805,7 @@ def save_company_data():
         }), 500
 
 @app.route('/company/populate', methods=['POST'])
+@rate_limit(max_calls=5, period=60)
 def populate_from_csv():
     """
     Read company CSV file from inside the TEE, encrypt each record,
@@ -3355,27 +3472,33 @@ def auto_initialize_container():
         print(f"           [ERROR] Exception during encryption/upload: {str(e)}")
         print(f"{'='*60}\n")
 
+_auto_init_started = False
+_auto_init_lock = threading.Lock()
+
 def start_auto_initialization():
-    """Start auto-initialization in a background thread"""
-    import threading
+    """Start auto-initialization in a background thread (runs only once across workers)"""
+    global _auto_init_started
+    with _auto_init_lock:
+        if _auto_init_started:
+            return
+        _auto_init_started = True
     
     def delayed_init():
-        import time
-        # Give Flask a moment to start
+        # Give the server a moment to start
         time.sleep(3)
         try:
             auto_initialize_container()
         except Exception as e:
             print(f"\n[AUTO-INIT ERROR] {str(e)}\n")
     
-    # Run in background thread so Flask can start immediately
+    # Run in background thread so the server can start immediately
     init_thread = threading.Thread(target=delayed_init, daemon=True)
     init_thread.start()
     print("\n[INFO] Auto-initialization thread started (will run in background)\n")
 
+# Start auto-initialization when module loads (works with both gunicorn and direct execution)
+start_auto_initialization()
+
 if __name__ == '__main__':
-    # Start auto-initialization for Contoso/Fabrikam containers
-    start_auto_initialization()
-    
     # Run on port 80 to match Azure Container Instances default
     app.run(host='0.0.0.0', port=80, debug=False)
