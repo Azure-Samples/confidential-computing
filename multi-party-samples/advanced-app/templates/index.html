@@ -604,6 +604,23 @@
             </details>
             
             <details class="section">
+                <summary style="cursor: pointer; display: flex; align-items: center; gap: 10px;">
+                    <h2 style="margin: 0;">🖥️ Try to Access Container OS</h2>
+                </summary>
+                <div class="attestation-box">
+                    <p><strong>Can an operator shell into a Confidential Container?</strong> This test attempts several ways an infrastructure operator might try to get command-line access to a running container — SSH, <code>az container exec</code>, and spawning a shell process. All are blocked by the Confidential Computing Enforcement Policy.</p>
+                    
+                    <div style="margin: 20px 0;">
+                        <button id="accessTestBtn" onclick="testContainerAccess()" style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 1em; cursor: pointer; font-weight: bold;">
+                            🔓 Attempt to Connect
+                        </button>
+                    </div>
+                    
+                    <div id="accessTestResult" style="display: none;"></div>
+                </div>
+            </details>
+            
+            <details class="section">
                 <summary style="cursor: pointer;"><h2 style="display: inline;">📦 Container Image Information</h2></summary>
                 <div id="containerInfo" style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #6c757d; margin-top: 15px;">
                     <p><em>Loading container information...</em></p>
@@ -805,12 +822,72 @@
                 });
         };
         
+        // ======== Try to access container OS ========
+        function testContainerAccess() {
+            const btn = document.getElementById('accessTestBtn');
+            const resultDiv = document.getElementById('accessTestResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = '🔓 Attempting access<span class="loading"></span>';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<p style="color: #856404;"><em>Running access tests against the container...</em></p>';
+            
+            fetch('/container/access-test', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '🔓 Attempt to Connect';
+                
+                let html = '';
+                
+                if (data.tests) {
+                    data.tests.forEach(function(test) {
+                        const isBlocked = test.result === 'blocked';
+                        const icon = isBlocked ? '🛡️' : (test.result === 'unavailable' ? '⚫' : '⚠️');
+                        const borderColor = isBlocked ? '#dc3545' : '#6c757d';
+                        const bgColor = isBlocked ? '#f8d7da' : '#f8f9fa';
+                        
+                        html += '<div style="margin: 12px 0; padding: 15px; background: ' + bgColor + '; border-radius: 8px; border-left: 4px solid ' + borderColor + ';">';
+                        html += '<h4 style="margin: 0 0 8px 0; color: #333;">' + icon + ' ' + escapeHtml(test.name) + '</h4>';
+                        html += '<p style="margin: 0 0 8px 0;"><span class="status-badge ' + (isBlocked ? 'status-error' : 'status-warning') + '">' + escapeHtml(test.result.toUpperCase()) + '</span></p>';
+                        html += '<p style="margin: 0 0 6px 0; color: #555;">' + escapeHtml(test.detail) + '</p>';
+                        
+                        if (test.policy_rule) {
+                            html += '<div style="margin-top: 8px; padding: 10px; background: #1e1e1e; border-radius: 6px;">';
+                            html += '<code style="color: #d4d4d4; font-size: 0.85em; white-space: pre-wrap;">' + escapeHtml(test.policy_rule) + '</code>';
+                            html += '</div>';
+                        }
+                        html += '</div>';
+                    });
+                }
+                
+                // Summary box
+                html += '<div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4;">';
+                html += '<h4 style="color: #004085; margin: 0 0 10px 0;">🛡️ Why is access blocked?</h4>';
+                html += '<p style="color: #004085; margin: 0 0 10px 0;">';
+                html += 'The <strong>Confidential Computing Enforcement Policy</strong> (ccePolicy) is cryptographically bound to this container\'s TEE. ';
+                html += 'It enforces three key protections that prevent <em>anyone</em> — including the cloud operator — from accessing the container OS:';
+                html += '</p>';
+                html += '<ul style="color: #004085; margin: 0 0 15px 20px;">';
+                html += '<li><code>"exec_processes": []</code> — No additional processes can be spawned (blocks <code>az container exec</code>, <code>docker exec</code>)</li>';
+                html += '<li><code>"allow_stdio_access": false</code> — No stdin/stdout from host (blocks interactive shells)</li>';
+                html += '<li><strong>No SSH server</strong> — The container image has no SSH daemon, and the policy prevents adding one at runtime</li>';
+                html += '</ul>';
+                html += '<p style="color: #004085; margin: 0;">These rules are enforced by the AMD SEV-SNP hardware — the hypervisor itself cannot bypass them. ';
+                html += 'See <a href="SECURITY-POLICY.md" target="_blank" style="color: #0056b3; font-weight: bold;">SECURITY-POLICY.md</a> for the full annotated policy.</p>';
+                html += '</div>';
+                
+                resultDiv.innerHTML = html;
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = '🔓 Attempt to Connect';
+                resultDiv.innerHTML = '<p style="color: #dc3545;">Error: ' + escapeHtml(error.message) + '</p>';
+            });
+        }
+        
         // Helper function to escape HTML
         function escapeHtml(text) {
-            if (!text) return '';
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
         }
         
         // World map rendering function for salary by country

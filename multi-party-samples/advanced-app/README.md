@@ -312,6 +312,7 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `/encrypt` | POST | Encrypt data with released key |
 | `/decrypt` | POST | Decrypt data with released key |
 | `/company/info` | GET | Get company identity |
+| `/container/access-test` | POST | Attempt SSH/exec/shell access (all blocked by ccePolicy) |
 
 ## Troubleshooting
 
