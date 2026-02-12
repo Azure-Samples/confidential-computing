@@ -68,6 +68,8 @@ This project deploys **three containers** running identical code to demonstrate 
 - **Cross-Company Protection** - Contoso cannot access Fabrikam's key, and vice versa
 - **Attacker Visualization** - Snooper container shows what an attacker sees (encrypted data only)
 - **Interactive Web UI** - Real-time demonstration of attestation and encryption
+- **Attestation Claim Explanations** - Detailed breakdown of every MAA token claim, grouped by category with human-readable descriptions
+- **Container Access Testing** - Live proof that SSH, exec, and shell access are blocked by the ccePolicy
 - **Unique Per-Deployment Storage** - Each deployment uses `consolidated-records-{resource_group}.json`
 
 ## Architecture
@@ -130,7 +132,7 @@ az confcom --version
 > **Prefix**: Use a short, unique identifier (3-8 chars) like your initials (`jd01`), team code (`team42`), or project name (`demo`). This helps identify resource ownership in shared subscriptions.
 
 This creates:
-- **Azure Resource Group** - Named `<prefix><registryname>-rg` in East US
+- **Azure Resource Group** - Named `<prefix><registryname>-rg` (default: East US)
 - **Azure Container Registry (ACR)** - Basic SKU with admin enabled
 - **Contoso Key Vault** - Premium HSM with `contoso-secret-key`
 - **Fabrikam Key Vault** - Premium HSM with `fabrikam-secret-key`
@@ -172,6 +174,7 @@ Deploys three containers:
 | `-Cleanup` | Delete all Azure resources in the resource group |
 | `-SkipBrowser` | Don't open Microsoft Edge browser after deployment |
 | `-RegistryName <name>` | Custom ACR name (default: random 8-character string) |
+| `-Location <region>` | Azure region to deploy into (default: `eastus`). MAA endpoint is auto-resolved for the region. |
 
 **Note:** Run the script without parameters to see usage help and current configuration.
 
@@ -224,22 +227,30 @@ After deployment, a browser opens with a 3-pane comparison view:
 
 ### Basic Attestation Demo
 
-1. **Show Contoso**: Expand "Remote Attestation" → Click "Get Raw Report" → Success
-2. **Show Fabrikam**: Same actions → Also succeeds
-3. **Show Snooper**: Same actions → Fails with detailed error
+1. **Show Contoso**: Expand "Remote Attestation" → Click "Request Attestation Token" → Success
+2. **Explain Claims**: Click "📖 Detailed Explanation of Each Claim" → Walk through categories (JWT Standard, Platform Identity, Hardware Identity, Security State, etc.) showing what each claim proves
+3. **Highlight Key Claims**: Point out `x-ms-sevsnpvm-hostdata` (security policy hash), `x-ms-sevsnpvm-is-debuggable: false`, and `x-ms-attestation-type: sevsnpvm`
+4. **Show Fabrikam**: Same actions → Also succeeds
+5. **Show Snooper**: Same actions → Fails with detailed error (no TEE hardware)
+
+### Container Access Test Demo
+
+6. **Test Container Access**: On Contoso, expand "Try to Access Container OS" → Click "Attempt to Connect"
+7. **Review Results**: All four tests show 🛡️ BLOCKED — SSH refused, exec blocked, stdio denied, privilege escalation prevented
+8. **Compare with Snooper**: Run the same test on Snooper — tests report differently since there is no ccePolicy enforcement
 
 ### Secure Key Release Demo
 
-4. **Release Key on Contoso**: Expand "Secure Key Release" → Click release → Key obtained
-5. **Try on Snooper**: Same actions → Key release denied
-6. **Cross-Company Test**: Expand "Cross-Company Key Access" → Shows both companies cannot access each other's keys
+9. **Release Key on Contoso**: Expand "Secure Key Release" → Click release → Key obtained
+10. **Try on Snooper**: Same actions → Key release denied
+11. **Cross-Company Test**: Expand "Cross-Company Key Access" → Shows both companies cannot access each other's keys
 
 ### Data Protection Demo
 
-7. **Expand "Protect Data"**: CSV automatically imported and encrypted
-8. **List Records**: Shows encrypted data in table
-9. **Press Decrypt**: Own company data decrypts successfully
-10. **View Snooper**: Shows attacker view with all data encrypted
+12. **Expand "Protect Data"**: CSV automatically imported and encrypted
+13. **List Records**: Shows encrypted data in table
+14. **Press Decrypt**: Own company data decrypts successfully
+15. **View Snooper**: Shows attacker view with all data encrypted
 
 ## Security Model
 

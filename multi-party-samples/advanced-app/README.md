@@ -38,6 +38,8 @@ This project deploys **three containers** running identical code to demonstrate 
 - **Real-time Progress** - SSE streaming with progress bars and time estimates
 - **Demographics Analysis** - Top 10 countries with top 3 cities, generational breakdowns, salary averages, salary by country world map
 - **Interactive Web UI** - Real-time demonstration of attestation and encryption
+- **Attestation Claim Explanations** - Detailed breakdown of every MAA token claim, grouped by category with human-readable descriptions
+- **Container Access Testing** - Live proof that SSH, exec, and shell access are blocked by the ccePolicy
 - **Unique Per-Deployment Storage** - Each deployment uses `consolidated-records-{resource_group}.json`
 
 ## Architecture
@@ -109,7 +111,7 @@ az confcom --version
 > **Prefix**: Use a short, unique identifier (3-8 chars) like your initials (`jd01`), team code (`team42`), or project name (`demo`). This helps identify resource ownership in shared subscriptions.
 
 This creates:
-- **Azure Resource Group** - Named `<prefix><registryname>-rg` in East US
+- **Azure Resource Group** - Named `<prefix><registryname>-rg` (default: East US)
 - **Azure Container Registry (ACR)** - Basic SKU with admin enabled
 - **Contoso Key Vault** - Premium HSM with `contoso-secret-key`
 - **Fabrikam Key Vault** - Premium HSM with `fabrikam-secret-key`
@@ -153,6 +155,7 @@ Deploys three containers:
 | `-Cleanup` | Delete all Azure resources in the resource group |
 | `-SkipBrowser` | Don't open Microsoft Edge browser after deployment |
 | `-RegistryName <name>` | Custom ACR name (default: random 8-character string) |
+| `-Location <region>` | Azure region to deploy into (default: `eastus`). MAA endpoint is auto-resolved for the region. |
 | `-Description <text>` | Optional description tag for the resource group |
 
 **Note:** Run the script without parameters to see usage help and current configuration.
@@ -206,22 +209,30 @@ After deployment, a browser opens with a 3-pane side-by-side comparison view:
 
 ### Basic Attestation Demo
 
-1. **Show Contoso**: Expand "Remote Attestation" → Click "Get Raw Report" → Success
-2. **Show Fabrikam Fashion**: Same actions → Also succeeds (pink fashion theme)
-3. **Show Woodgrove Bank**: Same actions → Also succeeds (green bank theme)
+1. **Show Contoso**: Expand "Remote Attestation" → Click "Request Attestation Token" → Success
+2. **Explain Claims**: Click "📖 Detailed Explanation of Each Claim" → Walk through categories (JWT Standard, Platform Identity, Hardware Identity, Security State, etc.) showing what each claim proves
+3. **Highlight Key Claims**: Point out `x-ms-sevsnpvm-hostdata` (security policy hash), `x-ms-sevsnpvm-is-debuggable: false`, and `x-ms-attestation-type: sevsnpvm`
+4. **Show Fabrikam Fashion**: Same actions → Also succeeds (pink fashion theme)
+5. **Show Woodgrove Bank**: Same actions → Also succeeds (green bank theme)
+
+### Container Access Test Demo
+
+6. **Test Container Access**: On any container, expand "Try to Access Container OS" → Click "Attempt to Connect"
+7. **Review Results**: All four tests show 🛡️ BLOCKED — SSH refused, exec blocked, stdio denied, privilege escalation prevented
+8. **Explain Policy Binding**: Show how `exec_processes: []` and `allow_stdio_access: false` in the ccePolicy prevent even the cloud operator from accessing the container OS
 
 ### Secure Key Release Demo
 
-4. **Release Key on Contoso**: Expand "Secure Key Release" → Click release → Key obtained
-5. **Cross-Company Test**: On Contoso, expand "Cross-Company Key Access" → Shows cannot access Fabrikam Fashion's key
+9. **Release Key on Contoso**: Expand "Secure Key Release" → Click release → Key obtained
+10. **Cross-Company Test**: On Contoso, expand "Cross-Company Key Access" → Shows cannot access Fabrikam Fashion's key
 
 ### Partner Analysis Demo (Woodgrove Bank)
 
-6. **Open Woodgrove Bank**: Notice custom green bank branding with 🏦 logo
-7. **Expand "Partner Demographic Analysis"**: Click "Start Partner Demographic Analysis"
-8. **Watch Progress**: Contoso key release ✅, then Fabrikam Fashion key release ✅
-9. **Review Results**: Demographics by country, generation breakdown by company, salary world map
-10. **Review Log**: Shows attestation passed for each partner
+11. **Open Woodgrove Bank**: Notice custom green bank branding with 🏦 logo
+12. **Expand "Partner Demographic Analysis"**: Click "Start Partner Demographic Analysis"
+13. **Watch Progress**: Contoso key release ✅, then Fabrikam Fashion key release ✅
+14. **Review Results**: Demographics by country, generation breakdown by company, salary world map
+15. **Review Log**: Shows attestation passed for each partner
 
 ## Security Model
 
@@ -312,6 +323,7 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `/encrypt` | POST | Encrypt data with released key |
 | `/decrypt` | POST | Decrypt data with released key |
 | `/company/info` | GET | Get company identity |
+| `/container/access-test` | POST | Attempt SSH/exec/shell access (all blocked by ccePolicy) |
 
 ## Troubleshooting
 

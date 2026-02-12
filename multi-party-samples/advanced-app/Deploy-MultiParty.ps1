@@ -36,6 +36,11 @@
     Custom name for the Azure Container Registry.
     If not provided, a random name will be generated.
 
+.PARAMETER Location
+    Azure region to deploy resources into.
+    Defaults to "eastus" if not specified.
+    Example regions: eastus, westus2, northeurope, westeurope, uksouth
+
 .PARAMETER Description
     Optional description tag to add to the resource group.
 
@@ -65,11 +70,11 @@ param(
     [switch]$Cleanup,
     [switch]$SkipBrowser,
     [string]$RegistryName,
+    [string]$Location = "eastus",
     [string]$Description
 )
 
 $ErrorActionPreference = "Stop"
-$Location = "eastus"
 $ImageName = "aci-attestation-demo"
 $ImageTag = "latest"
 
@@ -101,6 +106,107 @@ function Write-Warning {
 function Write-Error {
     param([string]$Message)
     Write-Host $Message -ForegroundColor Red
+}
+
+function Get-SharedMaaEndpoint {
+    <#
+    .SYNOPSIS
+        Resolve the shared Microsoft Azure Attestation (MAA) endpoint for a given Azure region.
+    
+    .DESCRIPTION
+        Returns the shared MAA endpoint URL for the specified Azure region.
+        Shared MAA endpoints follow the pattern: shared<code>.<code>.attest.azure.net
+        
+        These endpoints are required for Secure Key Release (SKR) policies in 
+        confidential container deployments, where the attestation authority in the
+        release policy must match the region where the container is deployed.
+        
+        Source: https://github.com/microsoft/confidential-sidecar-containers
+        Verify: Get-AzAttestationDefaultProvider -Location "<region>"
+        List:   (Get-AzAttestationDefaultProvider).Value | Sort-Object Location | Format-Table Location, AttestUri
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Location
+    )
+    
+    # Shared MAA endpoint mappings: region name → "shared<code>.<code>"
+    # Verified via: (Get-AzAttestationDefaultProvider).Value | Sort-Object Location | Format-Table Location, AttestUri
+    $maaEndpoints = @{
+        # US regions
+        "eastus"             = "sharedeus.eus"
+        "eastus2"            = "sharedeus2.eus2"
+        "westus"             = "sharedwus.wus"
+        "westus2"            = "sharedwus2.wus2"
+        "westus3"            = "sharedwus3.wus3"
+        "centralus"          = "sharedcus.cus"
+        "northcentralus"     = "sharedncus.ncus"
+        "southcentralus"     = "sharedscus.scus"
+        "westcentralus"      = "sharedwcus.wcus"
+        # Canada
+        "canadacentral"      = "sharedcac.cac"
+        "canadaeast"         = "sharedcae.cae"
+        # Europe
+        "northeurope"        = "sharedneu.neu"
+        "westeurope"         = "sharedweu.weu"
+        "uksouth"            = "shareduks.uks"
+        "ukwest"             = "sharedukw.ukw"
+        "francecentral"      = "sharedfrc.frc"
+        "francesouth"        = "sharedfrs.frs"
+        "germanywestcentral" = "shareddewc.dewc"
+        "germanynorth"       = "sharedden.den"
+        "switzerlandnorth"   = "sharedswn.swn"
+        "switzerlandwest"    = "sharedsww.sww"
+        "swedencentral"      = "sharedsec.sec"
+        "swedensouth"        = "sharedses.ses"
+        "norwayeast"         = "sharednoe.noe"
+        "norwaywest"         = "sharednow.now"
+        "polandcentral"      = "sharedplc.plc"
+        "italynorth"         = "shareditn.itn"
+        "spaincentral"       = "sharedesc.esc"
+        # Asia Pacific
+        "eastasia"           = "sharedeasia.easia"
+        "southeastasia"      = "sharedsasia.sasia"
+        "japaneast"          = "sharedjpe.jpe"
+        "japanwest"          = "sharedjpw.jpw"
+        "koreacentral"       = "sharedkrc.krc"
+        "koreasouth"         = "sharedkrs.krs"
+        "australiaeast"      = "sharedeau.eau"
+        "australiasoutheast" = "sharedsau.sau"
+        "australiacentral"   = "sharedcau.cau"
+        "centralindia"       = "sharedcin.cin"
+        "southindia"         = "sharedsin.sin"
+        "westindia"          = "sharedwin.win"
+        # Middle East & Africa
+        "uaenorth"           = "shareduaen.uaen"
+        "uaecentral"         = "shareduaec.uaec"
+        "israelcentral"      = "sharedilc.ilc"
+        "southafricanorth"   = "sharedsan.san"
+        "southafricawest"    = "sharedsaw.saw"
+        # South America
+        "brazilsouth"        = "sharedsbr.sbr"
+        "brazilsoutheast"    = "sharedsebr.sebr"
+    }
+    
+    $regionKey = $Location.ToLower()
+    $prefix = $maaEndpoints[$regionKey]
+    
+    if (-not $prefix) {
+        Write-Host ""
+        Write-Host "ERROR: No known shared MAA endpoint for region '$Location'" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Regions with known shared MAA endpoints:" -ForegroundColor Yellow
+        $maaEndpoints.Keys | Sort-Object | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+        Write-Host ""
+        Write-Host "To look up the MAA endpoint for your region, run:" -ForegroundColor Cyan
+        Write-Host "  Get-AzAttestationDefaultProvider -Location '$Location' | Format-Table AttestUri" -ForegroundColor White
+        Write-Host ""
+        throw "No shared MAA endpoint available for region '$Location'. Use -Location with a supported region."
+    }
+    
+    $endpoint = "$prefix.attest.azure.net"
+    Write-Host "MAA Endpoint for $($Location): $endpoint" -ForegroundColor Cyan
+    return $endpoint
 }
 
 function Get-PolicyHashFromConfcom {
@@ -229,11 +335,11 @@ function Update-KeyReleasePolicy {
         
         # Delete existing key
         az keyvault key delete --vault-name $KeyVaultName --name $KeyName 2>&1 | Out-Null
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 1
         
         # Purge deleted key
         az keyvault key purge --vault-name $KeyVaultName --name $KeyName 2>&1 | Out-Null
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 2
     }
     
     # Create key with policy binding
@@ -254,8 +360,8 @@ function Update-KeyReleasePolicy {
         
         # If key still exists in deleted state, wait and retry
         if ($createError -match "conflict" -or $createError -match "already exists") {
-            Write-Warning "  Key in deleted state. Waiting 15 seconds..."
-            Start-Sleep -Seconds 15
+            Write-Warning "  Key in deleted state. Waiting 5 seconds..."
+            Start-Sleep -Seconds 5
             
             $retryResult = az keyvault key create `
                 --vault-name $KeyVaultName `
@@ -428,6 +534,121 @@ function Test-DockerRunning {
     exit 1
 }
 
+function Test-Prerequisites {
+    <#
+    .SYNOPSIS
+        Validate that all required tools and dependencies are installed before running.
+    #>
+    Write-Header "Checking Prerequisites"
+    
+    $missing = @()
+    $warnings = @()
+    
+    # --- Azure CLI ---
+    $azCmd = Get-Command az -ErrorAction SilentlyContinue
+    if ($azCmd) {
+        $azVersion = (az version 2>$null | ConvertFrom-Json).'azure-cli'
+        Write-Success "  Azure CLI $azVersion"
+    } else {
+        $missing += @{
+            Name = "Azure CLI (az)"
+            Reason = "Required for all Azure resource operations"
+            Install = "winget install Microsoft.AzureCLI"
+            Link = "https://learn.microsoft.com/cli/azure/install-azure-cli"
+        }
+    }
+    
+    # --- Azure CLI confcom extension ---
+    if ($azCmd) {
+        $confcomInstalled = az extension list --query "[?name=='confcom'].name" -o tsv 2>$null
+        if ($confcomInstalled) {
+            $confcomVersion = az extension list --query "[?name=='confcom'].version" -o tsv 2>$null
+            Write-Success "  az confcom extension $confcomVersion"
+        } else {
+            $missing += @{
+                Name = "Azure CLI confcom extension"
+                Reason = "Required for generating confidential computing security policies (ccePolicy)"
+                Install = "az extension add --name confcom"
+                Link = "https://learn.microsoft.com/cli/azure/extension"
+            }
+        }
+    }
+    
+    # --- Azure CLI login ---
+    if ($azCmd) {
+        $account = az account show 2>$null | ConvertFrom-Json
+        if ($account) {
+            Write-Success "  Azure CLI logged in ($($account.user.name))"
+        } else {
+            $missing += @{
+                Name = "Azure CLI login"
+                Reason = "You must be logged in to your Azure subscription"
+                Install = "az login"
+                Link = "https://learn.microsoft.com/cli/azure/authenticate-azure-cli"
+            }
+        }
+    }
+    
+    # --- Docker ---
+    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+    if ($dockerCmd) {
+        $dockerVersion = docker --version 2>$null
+        if ($dockerVersion) {
+            Write-Success "  Docker ($dockerVersion)"
+        } else {
+            Write-Success "  Docker (installed)"
+        }
+    } else {
+        $missing += @{
+            Name = "Docker Desktop"
+            Reason = "Required by 'az confcom' for security policy generation"
+            Install = "winget install Docker.DockerDesktop"
+            Link = "https://docs.docker.com/desktop/install/windows-install/"
+        }
+    }
+    
+    # --- Microsoft Edge (optional) ---
+    $edgePath = "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+    $edgePathX86 = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+    if ((Test-Path $edgePath) -or (Test-Path $edgePathX86) -or (Get-Command msedge -ErrorAction SilentlyContinue)) {
+        Write-Success "  Microsoft Edge (found)"
+    } else {
+        $warnings += @{
+            Name = "Microsoft Edge"
+            Reason = "Used to open demo tabs after deployment (use -SkipBrowser to skip)"
+            Link = "https://www.microsoft.com/edge"
+        }
+    }
+    
+    # --- Report warnings ---
+    foreach ($warn in $warnings) {
+        Write-Host "  [WARN] $($warn.Name) - not found" -ForegroundColor Yellow
+        Write-Host "         $($warn.Reason)" -ForegroundColor Gray
+        Write-Host "         Download: $($warn.Link)" -ForegroundColor Gray
+    }
+    
+    # --- Report missing critical dependencies ---
+    if ($missing.Count -gt 0) {
+        Write-Host ""
+        Write-Host "ERROR: $($missing.Count) required dependency/dependencies not found." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "The following must be installed before running this script:" -ForegroundColor Yellow
+        Write-Host ""
+        foreach ($dep in $missing) {
+            Write-Host "  $($dep.Name)" -ForegroundColor Red
+            Write-Host "    Why:     $($dep.Reason)" -ForegroundColor Gray
+            Write-Host "    Install: $($dep.Install)" -ForegroundColor Cyan
+            Write-Host "    Docs:    $($dep.Link)" -ForegroundColor Gray
+            Write-Host ""
+        }
+        exit 1
+    }
+    
+    Write-Host ""
+    Write-Success "All prerequisites satisfied."
+    Write-Host ""
+}
+
 # ============================================================================
 # Build Phase
 # ============================================================================
@@ -487,7 +708,7 @@ function Invoke-Build {
         throw "Failed to create ACR"
     }
     
-    $MaaEndpoint = "sharedeus.eus.attest.azure.net"
+    $MaaEndpoint = Get-SharedMaaEndpoint -Location $Location
     
     # Create release policy JSON for confidential containers
     $releasePolicy = @{
@@ -517,116 +738,82 @@ function Invoke-Build {
     Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor DarkCyan
     Write-Host ""
     
-    # ========== Create Key Vault and Identity for Contoso ==========
-    Write-Header "Creating Resources for Contoso"
+    # ========== Create All Key Vaults and Identities in Parallel ==========
+    Write-Header "Creating Resources for All Companies (Parallel)"
     
     $KeyVaultNameA = "kv${RegistryName}a"
     $IdentityNameA = "id-${RegistryName}-contoso"
     $SkrKeyNameA = "contoso-secret-key"
     
-    Write-Host "Creating Key Vault for Contoso: $KeyVaultNameA..." -ForegroundColor Green
-    az keyvault create `
-        --resource-group $ResourceGroup `
-        --name $KeyVaultNameA `
-        --location $Location `
-        --sku premium `
-        --enable-rbac-authorization false | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Failed to create Key Vault for Contoso"
-    }
-    
-    Write-Host "Creating managed identity for Contoso: $IdentityNameA..." -ForegroundColor Green
-    az identity create --resource-group $ResourceGroup --name $IdentityNameA | Out-Null
-    
-    $IdentityClientIdA = az identity show --resource-group $ResourceGroup --name $IdentityNameA --query clientId -o tsv
-    $IdentityResourceIdA = az identity show --resource-group $ResourceGroup --name $IdentityNameA --query id -o tsv
-    $IdentityPrincipalIdA = az identity show --resource-group $ResourceGroup --name $IdentityNameA --query principalId -o tsv
-    
-    Write-Host "Granting Contoso identity access to Key Vault..." -ForegroundColor Green
-    az keyvault set-policy --name $KeyVaultNameA --object-id $IdentityPrincipalIdA --key-permissions get release | Out-Null
-    
-    # NOTE: Key will be created during Deploy phase with proper policy hash binding
-    Write-Host "Key '$SkrKeyNameA' will be created during Deploy with security policy binding" -ForegroundColor Cyan
-    Write-Success "Contoso: Key Vault '$KeyVaultNameA' created (key created during Deploy)"
-    
-    # ========== Create Key Vault and Identity for Fabrikam ==========
-    Write-Header "Creating Resources for Fabrikam"
-    
     $KeyVaultNameB = "kv${RegistryName}b"
     $IdentityNameB = "id-${RegistryName}-fabrikam"
     $SkrKeyNameB = "fabrikam-secret-key"
-    
-    Write-Host "Creating Key Vault for Fabrikam: $KeyVaultNameB..." -ForegroundColor Green
-    az keyvault create `
-        --resource-group $ResourceGroup `
-        --name $KeyVaultNameB `
-        --location $Location `
-        --sku premium `
-        --enable-rbac-authorization false | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Failed to create Key Vault for Fabrikam"
-    }
-    
-    Write-Host "Creating managed identity for Fabrikam: $IdentityNameB..." -ForegroundColor Green
-    az identity create --resource-group $ResourceGroup --name $IdentityNameB | Out-Null
-    
-    $IdentityClientIdB = az identity show --resource-group $ResourceGroup --name $IdentityNameB --query clientId -o tsv
-    $IdentityResourceIdB = az identity show --resource-group $ResourceGroup --name $IdentityNameB --query id -o tsv
-    $IdentityPrincipalIdB = az identity show --resource-group $ResourceGroup --name $IdentityNameB --query principalId -o tsv
-    
-    Write-Host "Granting Fabrikam identity access to Key Vault..." -ForegroundColor Green
-    az keyvault set-policy --name $KeyVaultNameB --object-id $IdentityPrincipalIdB --key-permissions get release | Out-Null
-    
-    # NOTE: Key will be created during Deploy phase with proper policy hash binding
-    Write-Host "Key '$SkrKeyNameB' will be created during Deploy with security policy binding" -ForegroundColor Cyan
-    Write-Success "Fabrikam: Key Vault '$KeyVaultNameB' created (key created during Deploy)"
-    
-    # ========== Create Key Vault and Identity for Woodgrove-Bank ==========
-    Write-Header "Creating Resources for Woodgrove-Bank"
     
     $KeyVaultNameC = "kv${RegistryName}c"
     $IdentityNameC = "id-${RegistryName}-woodgrove"
     $SkrKeyNameC = "woodgrove-secret-key"
     
-    Write-Host "Creating Key Vault for Woodgrove-Bank: $KeyVaultNameC..." -ForegroundColor Green
-    az keyvault create `
-        --resource-group $ResourceGroup `
-        --name $KeyVaultNameC `
-        --location $Location `
-        --sku premium `
-        --enable-rbac-authorization false | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Failed to create Key Vault for Woodgrove-Bank"
+    Write-Host "Creating 3 Key Vaults and 3 Managed Identities in parallel..." -ForegroundColor Green
+    Write-Host "  Key Vaults: $KeyVaultNameA, $KeyVaultNameB, $KeyVaultNameC" -ForegroundColor Gray
+    Write-Host "  Identities: $IdentityNameA, $IdentityNameB, $IdentityNameC" -ForegroundColor Gray
+    Write-Host ""
+    
+    # Launch all 6 resource creations in parallel (3 KVs + 3 identities)
+    $kvJobA = Start-Job -ScriptBlock { az keyvault create --resource-group $using:ResourceGroup --name $using:KeyVaultNameA --location $using:Location --sku premium --enable-rbac-authorization false 2>&1 }
+    $kvJobB = Start-Job -ScriptBlock { az keyvault create --resource-group $using:ResourceGroup --name $using:KeyVaultNameB --location $using:Location --sku premium --enable-rbac-authorization false 2>&1 }
+    $kvJobC = Start-Job -ScriptBlock { az keyvault create --resource-group $using:ResourceGroup --name $using:KeyVaultNameC --location $using:Location --sku premium --enable-rbac-authorization false 2>&1 }
+    $idJobA = Start-Job -ScriptBlock { az identity create --resource-group $using:ResourceGroup --name $using:IdentityNameA 2>&1 }
+    $idJobB = Start-Job -ScriptBlock { az identity create --resource-group $using:ResourceGroup --name $using:IdentityNameB 2>&1 }
+    $idJobC = Start-Job -ScriptBlock { az identity create --resource-group $using:ResourceGroup --name $using:IdentityNameC 2>&1 }
+    
+    # Wait for all to complete
+    $allJobs = @($kvJobA, $kvJobB, $kvJobC, $idJobA, $idJobB, $idJobC)
+    $null = Wait-Job -Job $allJobs
+    
+    # Check results
+    foreach ($j in @($kvJobA, $kvJobB, $kvJobC)) {
+        $result = Receive-Job -Job $j
+        if ($j.State -eq 'Failed') { Write-Warning "Key Vault creation had issues: $result" }
     }
+    Remove-Job -Job $allJobs -Force
+    Write-Success "All Key Vaults and Identities created"
     
-    Write-Host "Creating managed identity for Woodgrove-Bank: $IdentityNameC..." -ForegroundColor Green
-    az identity create --resource-group $ResourceGroup --name $IdentityNameC | Out-Null
+    # Retrieve identity details (single call per identity using JSON output)
+    Write-Host "Retrieving identity details..." -ForegroundColor Green
+    $idInfoA = az identity show --resource-group $ResourceGroup --name $IdentityNameA -o json 2>$null | ConvertFrom-Json
+    $idInfoB = az identity show --resource-group $ResourceGroup --name $IdentityNameB -o json 2>$null | ConvertFrom-Json
+    $idInfoC = az identity show --resource-group $ResourceGroup --name $IdentityNameC -o json 2>$null | ConvertFrom-Json
     
-    $IdentityClientIdC = az identity show --resource-group $ResourceGroup --name $IdentityNameC --query clientId -o tsv
-    $IdentityResourceIdC = az identity show --resource-group $ResourceGroup --name $IdentityNameC --query id -o tsv
-    $IdentityPrincipalIdC = az identity show --resource-group $ResourceGroup --name $IdentityNameC --query principalId -o tsv
+    $IdentityClientIdA = $idInfoA.clientId
+    $IdentityResourceIdA = $idInfoA.id
+    $IdentityPrincipalIdA = $idInfoA.principalId
     
-    Write-Host "Granting Woodgrove-Bank identity access to its own Key Vault..." -ForegroundColor Green
-    az keyvault set-policy --name $KeyVaultNameC --object-id $IdentityPrincipalIdC --key-permissions get release | Out-Null
+    $IdentityClientIdB = $idInfoB.clientId
+    $IdentityResourceIdB = $idInfoB.id
+    $IdentityPrincipalIdB = $idInfoB.principalId
     
-    # NOTE: Key will be created during Deploy phase with proper policy hash binding
-    Write-Host "Key '$SkrKeyNameC' will be created during Deploy with security policy binding" -ForegroundColor Cyan
+    $IdentityClientIdC = $idInfoC.clientId
+    $IdentityResourceIdC = $idInfoC.id
+    $IdentityPrincipalIdC = $idInfoC.principalId
+    
+    # Grant Key Vault access policies in parallel
+    Write-Host "Granting Key Vault access policies in parallel..." -ForegroundColor Green
+    $policyJobs = @(
+        # Each company's identity gets access to its own KV
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameA --object-id $using:IdentityPrincipalIdA --key-permissions get release 2>&1 }),
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameB --object-id $using:IdentityPrincipalIdB --key-permissions get release 2>&1 }),
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameC --object-id $using:IdentityPrincipalIdC --key-permissions get release 2>&1 }),
+        # Woodgrove-Bank cross-company access
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameA --object-id $using:IdentityPrincipalIdC --key-permissions get release 2>&1 }),
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameB --object-id $using:IdentityPrincipalIdC --key-permissions get release 2>&1 })
+    )
+    $null = Wait-Job -Job $policyJobs
+    Remove-Job -Job $policyJobs -Force
+    
+    Write-Success "Contoso: Key Vault '$KeyVaultNameA' created (key created during Deploy)"
+    Write-Success "Fabrikam: Key Vault '$KeyVaultNameB' created (key created during Deploy)"
     Write-Success "Woodgrove-Bank: Key Vault '$KeyVaultNameC' created (key created during Deploy)"
-    
-    # ========== Grant Woodgrove-Bank Access to Partner Key Vaults ==========
-    Write-Header "Granting Woodgrove-Bank Cross-Company Access"
-    
-    Write-Host "Granting Woodgrove-Bank identity access to Contoso's Key Vault..." -ForegroundColor Cyan
-    az keyvault set-policy --name $KeyVaultNameA --object-id $IdentityPrincipalIdC --key-permissions get release | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Woodgrove-Bank can now release keys from Contoso's Key Vault"
-    }
-    
-    Write-Host "Granting Woodgrove-Bank identity access to Fabrikam's Key Vault..." -ForegroundColor Cyan
-    az keyvault set-policy --name $KeyVaultNameB --object-id $IdentityPrincipalIdC --key-permissions get release | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Woodgrove-Bank can now release keys from Fabrikam's Key Vault"
-    }
+    Write-Success "Woodgrove-Bank cross-company access to Contoso + Fabrikam Key Vaults granted"
     
     Write-Host ""
     Write-Host "Woodgrove-Bank Multi-Party Access Configured:" -ForegroundColor Green
@@ -663,10 +850,11 @@ function Invoke-Build {
     
     Write-Success "Container image built and pushed successfully"
     
-    # Get ACR credentials
+    # Get ACR credentials (single calls instead of multiple queries)
     Write-Host "Retrieving ACR credentials..." -ForegroundColor Green
-    $acrUsername = az acr credential show --name $RegistryName --query username -o tsv
-    $acrPassword = az acr credential show --name $RegistryName --query "passwords[0].value" -o tsv
+    $acrCreds = az acr credential show --name $RegistryName -o json 2>$null | ConvertFrom-Json
+    $acrUsername = $acrCreds.username
+    $acrPassword = $acrCreds.passwords[0].value
     $loginServer = az acr show --name $RegistryName --query loginServer -o tsv
     
     # Store credentials in Key Vault
@@ -997,10 +1185,10 @@ function Invoke-Deploy {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "    Deleting existing Contoso key..." -ForegroundColor Gray
         az keyvault key delete --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 1
         Write-Host "    Purging Contoso key..." -ForegroundColor Gray
         az keyvault key purge --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 2
     }
     
     az keyvault key create --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName `
@@ -1054,10 +1242,10 @@ function Invoke-Deploy {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "    Deleting existing Fabrikam key..." -ForegroundColor Gray
         az keyvault key delete --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 1
         Write-Host "    Purging Fabrikam key..." -ForegroundColor Gray
         az keyvault key purge --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 2
     }
     
     az keyvault key create --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName `
@@ -1107,32 +1295,56 @@ function Invoke-Deploy {
     $params_companyC.parameters['securityPolicyHash'] = @{ 'value' = $woodgrovePolicyInfo.PolicyHash }
     $params_companyC | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-woodgrove.json'
     
-    # Deploy Contoso
-    Write-Host "Deploying Contoso container..." -ForegroundColor Cyan
-    az deployment group create `
-        --resource-group $resource_group `
-        --template-file deployment-template-contoso.json `
-        --parameters '@deployment-params-contoso.json' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Contoso container" }
-    Write-Success "Contoso container deployed!"
+    # Deploy all 3 containers in parallel for maximum speed
+    Write-Host "Deploying all 3 containers in parallel..." -ForegroundColor Cyan
+    Write-Host "  This saves several minutes compared to sequential deployment" -ForegroundColor Gray
+    Write-Host ""
     
-    # Deploy Fabrikam
-    Write-Host "Deploying Fabrikam container..." -ForegroundColor Magenta
-    az deployment group create `
-        --resource-group $resource_group `
-        --template-file deployment-template-fabrikam.json `
-        --parameters '@deployment-params-fabrikam.json' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Fabrikam container" }
-    Write-Success "Fabrikam container deployed!"
+    $scriptRoot = $PSScriptRoot
+    $deployJobA = Start-Job -ScriptBlock {
+        Set-Location $using:scriptRoot
+        az deployment group create --resource-group $using:resource_group --template-file deployment-template-contoso.json --parameters '@deployment-params-contoso.json' 2>&1
+    }
+    $deployJobB = Start-Job -ScriptBlock {
+        Set-Location $using:scriptRoot
+        az deployment group create --resource-group $using:resource_group --template-file deployment-template-fabrikam.json --parameters '@deployment-params-fabrikam.json' 2>&1
+    }
+    $deployJobC = Start-Job -ScriptBlock {
+        Set-Location $using:scriptRoot
+        az deployment group create --resource-group $using:resource_group --template-file deployment-template-woodgrove.json --parameters '@deployment-params-woodgrove.json' 2>&1
+    }
     
-    # Deploy Woodgrove
-    Write-Host "Deploying Woodgrove-Bank container..." -ForegroundColor Yellow
-    az deployment group create `
-        --resource-group $resource_group `
-        --template-file deployment-template-woodgrove.json `
-        --parameters '@deployment-params-woodgrove.json' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Woodgrove-Bank container" }
-    Write-Success "Woodgrove-Bank container deployed!"
+    # Wait for all deployments with progress updates
+    $deployJobs = @(
+        @{ Job = $deployJobA; Name = "Contoso"; Color = "Cyan" },
+        @{ Job = $deployJobB; Name = "Fabrikam"; Color = "Magenta" },
+        @{ Job = $deployJobC; Name = "Woodgrove-Bank"; Color = "Yellow" }
+    )
+    
+    $allDone = $false
+    while (-not $allDone) {
+        $allDone = $true
+        foreach ($d in $deployJobs) {
+            if ($d.Job.State -eq 'Running') {
+                $allDone = $false
+            } elseif ($d.Job.State -eq 'Completed' -and -not $d.ContainsKey('Reported')) {
+                Write-Success "$($d.Name) container deployed!"
+                $d['Reported'] = $true
+            }
+        }
+        if (-not $allDone) { Start-Sleep -Seconds 3 }
+    }
+    
+    # Verify all succeeded
+    foreach ($d in $deployJobs) {
+        $result = Receive-Job -Job $d.Job
+        if ($d.Job.State -eq 'Failed') {
+            Write-Host $result -ForegroundColor Red
+            throw "Failed to deploy $($d.Name) container"
+        }
+    }
+    Remove-Job -Job @($deployJobA, $deployJobB, $deployJobC) -Force
+    Write-Success "All 3 containers deployed!"
     
     # ========== Wait for All Containers ==========
     Write-Header "Waiting for All Containers to Start"
@@ -1204,12 +1416,6 @@ function Invoke-Deploy {
     
     # ========== Open Edge with Multi-Party View ==========
     Write-Header "Opening Multi-Party Comparison View"
-    
-    Write-Host "Creating multi-party comparison view..."
-    Write-Host "  Left:    Contoso (Confidential) - http://$fqdn_companyA"
-    Write-Host "  Center:  Fabrikam (Confidential) - http://$fqdn_companyB"
-    Write-Host "  Right:   Woodgrove-Bank (Confidential + Cross-company) - http://$fqdn_companyC"
-    Write-Host ""
     
     # Open Edge with each company website in a separate tab
     $urlA = "http://$fqdn_companyA"
@@ -1389,6 +1595,7 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
     Write-Host "Options:"
     Write-Host "  -SkipBrowser    Don't open browser after deployment"
     Write-Host "  -RegistryName   Custom ACR name (default: random)"
+    Write-Host "  -Location       Azure region (default: eastus)"
     Write-Host "  -Description    Optional description tag for the resource group"
     Write-Host ""
     
@@ -1426,6 +1633,9 @@ if (($Build -or $Deploy) -and -not $Prefix) {
     Write-Host ""
     exit 1
 }
+
+# Check all prerequisites before doing anything
+Test-Prerequisites
 
 # Execute requested actions
 try {
