@@ -217,6 +217,121 @@ function Save-Config {
     $Config | ConvertTo-Json | Out-File -FilePath "acr-config.json" -Encoding UTF8
 }
 
+function Test-Prerequisites {
+    <#
+    .SYNOPSIS
+        Validate that all required tools and dependencies are installed before running.
+    #>
+    Write-Header "Checking Prerequisites"
+    
+    $missing = @()
+    $warnings = @()
+    
+    # --- Azure CLI ---
+    $azCmd = Get-Command az -ErrorAction SilentlyContinue
+    if ($azCmd) {
+        $azVersion = (az version 2>$null | ConvertFrom-Json).'azure-cli'
+        Write-Success "  Azure CLI $azVersion"
+    } else {
+        $missing += @{
+            Name = "Azure CLI (az)"
+            Reason = "Required for all Azure resource operations"
+            Install = "winget install Microsoft.AzureCLI"
+            Link = "https://learn.microsoft.com/cli/azure/install-azure-cli"
+        }
+    }
+    
+    # --- Azure CLI confcom extension ---
+    if ($azCmd) {
+        $confcomInstalled = az extension list --query "[?name=='confcom'].name" -o tsv 2>$null
+        if ($confcomInstalled) {
+            $confcomVersion = az extension list --query "[?name=='confcom'].version" -o tsv 2>$null
+            Write-Success "  az confcom extension $confcomVersion"
+        } else {
+            $missing += @{
+                Name = "Azure CLI confcom extension"
+                Reason = "Required for generating confidential computing security policies (ccePolicy)"
+                Install = "az extension add --name confcom"
+                Link = "https://learn.microsoft.com/cli/azure/extension"
+            }
+        }
+    }
+    
+    # --- Azure CLI login ---
+    if ($azCmd) {
+        $account = az account show 2>$null | ConvertFrom-Json
+        if ($account) {
+            Write-Success "  Azure CLI logged in ($($account.user.name))"
+        } else {
+            $missing += @{
+                Name = "Azure CLI login"
+                Reason = "You must be logged in to your Azure subscription"
+                Install = "az login"
+                Link = "https://learn.microsoft.com/cli/azure/authenticate-azure-cli"
+            }
+        }
+    }
+    
+    # --- Docker ---
+    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+    if ($dockerCmd) {
+        $dockerVersion = docker --version 2>$null
+        if ($dockerVersion) {
+            Write-Success "  Docker ($dockerVersion)"
+        } else {
+            Write-Success "  Docker (installed)"
+        }
+    } else {
+        $missing += @{
+            Name = "Docker Desktop"
+            Reason = "Required by 'az confcom' for security policy generation"
+            Install = "winget install Docker.DockerDesktop"
+            Link = "https://docs.docker.com/desktop/install/windows-install/"
+        }
+    }
+    
+    # --- Microsoft Edge (optional) ---
+    $edgePath = "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+    $edgePathX86 = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+    if ((Test-Path $edgePath) -or (Test-Path $edgePathX86) -or (Get-Command msedge -ErrorAction SilentlyContinue)) {
+        Write-Success "  Microsoft Edge (found)"
+    } else {
+        $warnings += @{
+            Name = "Microsoft Edge"
+            Reason = "Used to open demo tabs after deployment (use -SkipBrowser to skip)"
+            Link = "https://www.microsoft.com/edge"
+        }
+    }
+    
+    # --- Report warnings ---
+    foreach ($warn in $warnings) {
+        Write-Host "  [WARN] $($warn.Name) - not found" -ForegroundColor Yellow
+        Write-Host "         $($warn.Reason)" -ForegroundColor Gray
+        Write-Host "         Download: $($warn.Link)" -ForegroundColor Gray
+    }
+    
+    # --- Report missing critical dependencies ---
+    if ($missing.Count -gt 0) {
+        Write-Host ""
+        Write-Host "ERROR: $($missing.Count) required dependency/dependencies not found." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "The following must be installed before running this script:" -ForegroundColor Yellow
+        Write-Host ""
+        foreach ($dep in $missing) {
+            Write-Host "  $($dep.Name)" -ForegroundColor Red
+            Write-Host "    Why:     $($dep.Reason)" -ForegroundColor Gray
+            Write-Host "    Install: $($dep.Install)" -ForegroundColor Cyan
+            Write-Host "    Docs:    $($dep.Link)" -ForegroundColor Gray
+            Write-Host ""
+        }
+        exit 1
+    }
+    
+    Write-Host ""
+    Write-Success "All prerequisites satisfied."
+    Write-Host ""
+}
+
 # ============================================================================
 # Build Phase
 # ============================================================================
@@ -1028,6 +1143,9 @@ if (-not $Prefix) {
     Write-Host ""
     exit 1
 }
+
+# Check all prerequisites before doing anything
+Test-Prerequisites
 
 # ============================================================================
 # Validate Storage Connection String (.env)
