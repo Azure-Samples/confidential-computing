@@ -910,6 +910,7 @@ function Invoke-Build {
     $config = @{
         registryName = $RegistryName
         resourceGroup = $ResourceGroup
+        location = $Location
         loginServer = $loginServer
         imageName = $ImageName
         imageTag = $ImageTag
@@ -1529,6 +1530,16 @@ function Invoke-Deploy {
     $FULL_IMAGE = $config.fullImage
     $KeyVaultName = $config.keyVaultName
     
+    # Resolve deploy location from config (with fallback for older configs)
+    $deployLocation = if ($config.location) { $config.location } else { $Location }
+    if ($config.location -and $Location -ne "eastus" -and $Location -ne $config.location) {
+        Write-Warning "Location mismatch: -Location '$Location' differs from build config '$($config.location)'"
+        Write-Warning "Using build location '$($config.location)' to match existing resources."
+    }
+    if (-not $config.location) {
+        Write-Warning "Config missing 'location' (older config). Using -Location '$Location'. Re-run -Build to fix."
+    }
+    
     # Get ACR credentials from Key Vault
     Write-Host "Retrieving ACR credentials from Key Vault..."
     $ACR_USERNAME = az keyvault secret show --vault-name $KeyVaultName --name "acr-username" --query "value" -o tsv
@@ -1619,7 +1630,7 @@ function Invoke-Deploy {
         'contentVersion' = '1.0.0.0'
         'parameters' = @{
             'containerGroupName' = @{ 'value' = $container_companyA }
-            'location' = @{ 'value' = $Location }
+            'location' = @{ 'value' = $deployLocation }
             'appImage' = @{ 'value' = $FULL_IMAGE }
             'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
@@ -1648,7 +1659,7 @@ function Invoke-Deploy {
         'contentVersion' = '1.0.0.0'
         'parameters' = @{
             'containerGroupName' = @{ 'value' = $container_companyB }
-            'location' = @{ 'value' = $Location }
+            'location' = @{ 'value' = $deployLocation }
             'appImage' = @{ 'value' = $FULL_IMAGE }
             'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
@@ -1672,16 +1683,16 @@ function Invoke-Deploy {
     $woodgroveConfig = $config.woodgrove
     Write-Host "[3/3] Generating Woodgrove-Bank security policy..." -ForegroundColor Yellow
     
-    # Build partner container URLs based on DNS names
-    $contosoContainerUrl = "https://${dns_companyA}.${Location}.azurecontainer.io"
-    $fabrikamContainerUrl = "https://${dns_companyB}.${Location}.azurecontainer.io"
+    # Build partner container URLs based on DNS names (use config location for correct region)
+    $contosoContainerUrl = "https://${dns_companyA}.${deployLocation}.azurecontainer.io"
+    $fabrikamContainerUrl = "https://${dns_companyB}.${deployLocation}.azurecontainer.io"
     
     $params_companyC = @{
         '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
         'contentVersion' = '1.0.0.0'
         'parameters' = @{
             'containerGroupName' = @{ 'value' = $container_companyC }
-            'location' = @{ 'value' = $Location }
+            'location' = @{ 'value' = $deployLocation }
             'appImage' = @{ 'value' = $FULL_IMAGE }
             'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
@@ -2238,6 +2249,16 @@ function Invoke-DeployAKS {
     $KeyVaultName = $config.keyVaultName
     $aciSubnetName = $config.aciSubnetName
     $clusterName = $config.aksClusterName
+    
+    # Resolve deploy location from config (with fallback for older configs)
+    $deployLocation = if ($config.location) { $config.location } else { $Location }
+    if ($config.location -and $Location -ne "eastus" -and $Location -ne $config.location) {
+        Write-Warning "Location mismatch: -Location '$Location' differs from build config '$($config.location)'"
+        Write-Warning "Using build location '$($config.location)' to match existing resources."
+    }
+    if (-not $config.location) {
+        Write-Warning "Config missing 'location' (older config). Using -Location '$Location'. Re-run -Build -AKS to fix."
+    }
     
     # Ensure kubectl is pointed at the right cluster
     Write-Host "Connecting to AKS cluster: $clusterName..."
