@@ -12,6 +12,10 @@ deployment-template-fabrikam.json
 deployment-template-woodgrove.json
 create-params.ps1
 
+# Generated AKS Virtual Node pod manifests (contain subscription IDs, identity paths, KV endpoints, private IPs, ccepolicy)
+pod-*.yaml
+nginx-proxy.yaml
+
 # Generated release policies (contain policy hashes)
 release-policy-*.json
 skr-release-policy.json
