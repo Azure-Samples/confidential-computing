@@ -87,7 +87,11 @@ param(
     [string]$Description
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
+# Prevent $ErrorActionPreference from affecting native commands (az, docker, kubectl)
+# In PowerShell 7.4+, stderr from native commands redirected with 2>&1 creates ErrorRecords.
+# With ErrorActionPreference=Stop, these would terminate the script even on successful commands.
+$PSNativeCommandUseErrorActionPreference = $false
 $ImageName = "aci-attestation-demo"
 $ImageTag = "latest"
 
