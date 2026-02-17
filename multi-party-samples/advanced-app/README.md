@@ -214,6 +214,9 @@ The `-AKS` build phase (`-Build -AKS`) creates a 9-step infrastructure on top of
 │  ├─ VN2 StatefulSet (vn2 namespace)   ← Virtual kubelet              │
 │  ├─ virtualnode2-0 (registered node)  ← Schedules pods as ACI CGs   │
 │  └─ nginx-proxy (LoadBalancer)        ← External access              │
+│     ├─ :80   → Woodgrove (172.16.x.x)                               │
+│     ├─ :8081 → Contoso  (172.16.x.x)                                │
+│     └─ :8082 → Fabrikam (172.16.x.x)                                │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -232,7 +235,15 @@ The `-AKS` build phase (`-Build -AKS`) creates a 9-step infrastructure on top of
    - **Phase 4:** Create all 3 HSM keys with multi-party release policies
    - **Phase 5:** Deploy Woodgrove pod + nginx reverse proxy with LoadBalancer
 
-5. **Nginx reverse proxy** — Virtual node pods are on a private subnet with no public FQDNs. An nginx deployment on a real AKS node with a LoadBalancer service exposes ports 8081/8082/8083 for Contoso/Fabrikam/Woodgrove respectively.
+5. **Nginx reverse proxy** — Virtual node pods are on a private subnet with no public FQDNs. An nginx deployment on a real AKS node with a LoadBalancer service exposes all three containers:
+
+   | Port | Container | Description |
+   |------|-----------|-------------|
+   | `:80` | **Woodgrove Bank** 🏦 | Analytics partner (default) |
+   | `:8081` | **Contoso** 🏢 | Corporate data provider |
+   | `:8082` | **Fabrikam Fashion** 👗 | Online retailer |
+
+   After deployment, access `http://<EXTERNAL-IP>` for Woodgrove, `http://<EXTERNAL-IP>:8081` for Contoso, and `http://<EXTERNAL-IP>:8082` for Fabrikam.
 
 #### Pod YAML and confcom
 
@@ -310,6 +321,24 @@ After deployment, a browser opens with a 3-pane side-by-side comparison view:
 | ✅ Own data      | ✅ Own data      | ✅ Partner data  |
 +------------------+------------------+------------------+
 ```
+
+### AKS Browser Access
+
+In AKS mode, get the nginx proxy external IP and open each container:
+
+```powershell
+kubectl get svc nginx-proxy
+# NAME          TYPE           EXTERNAL-IP   PORT(S)
+# nginx-proxy   LoadBalancer   <IP>          80,8081,8082
+```
+
+| Container | URL |
+|-----------|-----|
+| **Woodgrove Bank** 🏦 | `http://<EXTERNAL-IP>` |
+| **Contoso** 🏢 | `http://<EXTERNAL-IP>:8081` |
+| **Fabrikam Fashion** 👗 | `http://<EXTERNAL-IP>:8082` |
+
+> In direct ACI mode, each container has its own public FQDN shown at deploy time.
 
 ### Woodgrove Bank Special Features
 

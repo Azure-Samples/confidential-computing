@@ -38,7 +38,7 @@
   
   <!-- Title -->
   <text x="700" y="35" text-anchor="middle" font-family="Segoe UI, Arial" font-size="24" font-weight="bold" fill="#333">Multi-Party Confidential Computing - Architecture Overview</text>
-  <text x="700" y="55" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#666">3 Confidential Containers: Contoso, Fabrikam Fashion, Woodgrove Bank (Partner Analytics)</text>
+  <text x="700" y="55" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#666">3 Confidential Containers · AKS Virtual Nodes · Nginx Reverse Proxy (ports 80/8081/8082)</text>
   
   <!-- Azure Cloud boundary -->
   <rect x="30" y="70" width="1340" height="710" rx="15" fill="url(#azureGrad)" stroke="#0078d4" stroke-width="2" stroke-dasharray="8,4"/>
@@ -90,6 +90,32 @@
     <text x="960" y="145" text-anchor="middle" font-family="Segoe UI, Arial" font-size="24">👤</text>
     <text x="960" y="170" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">User Browser</text>
   </g>
+  
+  <!-- Nginx Proxy (AKS mode) -->
+  <g filter="url(#shadow)">
+    <rect x="1060" y="115" width="180" height="100" rx="10" fill="#fff" stroke="#6c757d" stroke-width="2"/>
+    <rect x="1060" y="115" width="180" height="28" rx="10" fill="#6c757d"/>
+    <text x="1150" y="134" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#fff" font-weight="bold">🌐 Nginx Reverse Proxy</text>
+    <text x="1150" y="158" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#333">LoadBalancer Service</text>
+    <text x="1150" y="174" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#28a745">:80 → Woodgrove 🏦</text>
+    <text x="1150" y="188" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#28a745">:8081 → Contoso 🏢</text>
+    <text x="1150" y="202" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#28a745">:8082 → Fabrikam 👗</text>
+  </g>
+  
+  <!-- User to Nginx Proxy -->
+  <line x1="1020" y1="150" x2="1055" y2="150" stroke="#6c757d" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  
+  <!-- Nginx to Contoso -->
+  <path d="M 1060 200 Q 700 260 340 280" stroke="#6c757d" stroke-width="1.5" stroke-dasharray="4,2" fill="none" marker-end="url(#arrowBlue)"/>
+  <text x="700" y="230" font-family="Segoe UI, Arial" font-size="8" fill="#6c757d">:8081</text>
+  
+  <!-- Nginx to Fabrikam -->
+  <path d="M 1090 215 Q 800 260 650 280" stroke="#6c757d" stroke-width="1.5" stroke-dasharray="4,2" fill="none" marker-end="url(#arrowBlue)"/>
+  <text x="880" y="252" font-family="Segoe UI, Arial" font-size="8" fill="#6c757d">:8082</text>
+  
+  <!-- Nginx to Woodgrove -->
+  <path d="M 1150 215 Q 1050 260 960 280" stroke="#6c757d" stroke-width="1.5" stroke-dasharray="4,2" fill="none" marker-end="url(#arrowBlue)"/>
+  <text x="1070" y="252" font-family="Segoe UI, Arial" font-size="8" fill="#6c757d">:80</text>
   
   <!-- ========== CONTAINERS ========== -->
   
@@ -162,8 +188,7 @@
   <!-- Woodgrove to Fabrikam Key Vault (Partner) -->
   <path d="M 780 280 Q 550 250 400 215" stroke="#1a472a" stroke-width="1.5" stroke-dasharray="4,2" fill="none" marker-end="url(#arrowBank)"/>
   
-  <!-- User to containers -->
-  <line x1="960" y1="185" x2="960" y2="275" stroke="#6c757d" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <!-- User to containers (via nginx proxy - see proxy arrows above) -->
   
   <!-- ========== LEGEND ========== -->
   <rect x="60" y="520" width="600" height="240" rx="10" fill="#fff" stroke="#dee2e6" stroke-width="1"/>
@@ -217,6 +242,9 @@
   
   <line x1="700" y1="590" x2="750" y2="590" stroke="#1a472a" stroke-width="2" stroke-dasharray="4,2"/>
   <text x="765" y="595" font-family="Segoe UI, Arial" font-size="10" fill="#333">Woodgrove → Partner Key Vaults (explicit access)</text>
+  
+  <line x1="700" y1="615" x2="750" y2="615" stroke="#6c757d" stroke-width="2" stroke-dasharray="4,2"/>
+  <text x="765" y="620" font-family="Segoe UI, Arial" font-size="10" fill="#333">Nginx Proxy → Containers (:80 Woodgrove, :8081 Contoso, :8082 Fabrikam)</text>
   
   <text x="700" y="640" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Woodgrove Bank Partner Analysis:</text>
   <text x="700" y="660" font-family="Segoe UI, Arial" font-size="10" fill="#333">1. Woodgrove passes TEE attestation (AMD SEV-SNP)</text>

@@ -5,6 +5,7 @@
 
 *Features*
 * **AKS Virtual Node deployment** - Full end-to-end AKS deployment with confidential virtual nodes (VN2), private VNet networking, and nginx reverse proxy for external access
+* **Multi-port nginx proxy** - LoadBalancer exposes all three containers: `:80` Woodgrove, `:8081` Contoso, `:8082` Fabrikam
 * **Partner auto-initialization** - `_ensure_partner_data_ready()` automatically triggers key release and CSV encryption on partner containers when data is missing
 * **Debug endpoints** - `/debug/partner-keys` to inspect stored partner key structure and `/debug/test-partner-decrypt` for step-by-step decryption diagnostics
 * **Streaming partner analysis** - SSE endpoint `/partner/analyze-stream` with real-time progress, time estimates, and full demographic analytics
@@ -16,6 +17,12 @@
 * **Parallel decryption** - Thread pool-based RSA decryption with cached private key objects for 3-5x speedup
 * **Partner data fetching** - Uses `_ensure_partner_data_ready()` helper in both streaming and non-streaming analysis endpoints
 * **runtime_data encoding** - Fixed MAA attestation payload to use base64-encoded JSON as required by the sidecar
+
+*Documentation*
+* **AKS architecture diagram** - Updated ASCII diagram with multi-port nginx proxy routing
+* **Architecture SVG** - Added nginx reverse proxy box with port-to-container mapping
+* **AKS browser access section** - New section documenting `kubectl get svc` and per-container URLs
+* **Nginx proxy key concept** - Expanded with port/container table and access instructions
 
 *Bug Fixes*
 * **Partner key nesting** - Fixed double-nesting issue where `_build_private_key()` failed to unwrap JWK keys stored as `{key: {key: {...}}}`
