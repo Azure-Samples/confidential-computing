@@ -856,7 +856,23 @@ function Invoke-Build {
         (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameB --object-id $using:IdentityPrincipalIdC --key-permissions get release 2>&1 })
     )
     $null = Wait-Job -Job $policyJobs
+    $kvPolicyFailures = @()
+    foreach ($job in $policyJobs) {
+        if ($job.State -eq 'Failed') {
+            $kvPolicyFailures += "Job $($job.Id) failed: $($job.ChildJobs[0].JobStateInfo.Reason)"
+        } else {
+            $jobOutput = Receive-Job -Job $job 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                $kvPolicyFailures += "KV policy job $($job.Id) returned exit code $LASTEXITCODE"
+            }
+        }
+    }
     Remove-Job -Job $policyJobs -Force
+    if ($kvPolicyFailures.Count -gt 0) {
+        Write-Warning "Some Key Vault policy assignments may have failed:"
+        $kvPolicyFailures | ForEach-Object { Write-Warning "  - $_" }
+        Write-Warning "Verify each identity has 'get' and 'release' key permissions on its Key Vault."
+    }
     
     Write-Success "Contoso: Key Vault '$KeyVaultNameA' created (key created during Deploy)"
     Write-Success "Fabrikam: Key Vault '$KeyVaultNameB' created (key created during Deploy)"
@@ -1208,7 +1224,23 @@ function Invoke-BuildAKS {
         (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameB --object-id $using:mcPidC --key-permissions get release 2>&1 })
     )
     $null = Wait-Job -Job $kvPolicyJobs
+    $kvPolicyFailures = @()
+    foreach ($job in $kvPolicyJobs) {
+        if ($job.State -eq 'Failed') {
+            $kvPolicyFailures += "Job $($job.Id) failed: $($job.ChildJobs[0].JobStateInfo.Reason)"
+        } else {
+            $jobOutput = Receive-Job -Job $job 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                $kvPolicyFailures += "KV policy job $($job.Id) returned exit code $LASTEXITCODE"
+            }
+        }
+    }
     Remove-Job -Job $kvPolicyJobs -Force
+    if ($kvPolicyFailures.Count -gt 0) {
+        Write-Warning "Some Key Vault policy assignments may have failed:"
+        $kvPolicyFailures | ForEach-Object { Write-Warning "  - $_" }
+        Write-Warning "Verify each identity has 'get' and 'release' key permissions on its Key Vault."
+    }
     
     Write-Success "Key Vault access granted (same cross-company pattern as Build)"
     
