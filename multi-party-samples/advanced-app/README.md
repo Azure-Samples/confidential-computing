@@ -422,6 +422,7 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `pod-fabrikam.yaml` | Generated pod YAML for Fabrikam (AKS mode, created at deploy time) |
 | `pod-woodgrove.yaml` | Generated pod YAML for Woodgrove (AKS mode, created at deploy time) |
 | `nginx-proxy.yaml` | Nginx reverse proxy deployment for AKS LoadBalancer access |
+| `svc-contoso.yaml` | ClusterIP Service for Contoso pod (AKS mode) |
 | `MultiPartyTopology.svg` | High-level topology diagram |
 | `MultiPartyArchitecture.svg` | Detailed architecture diagram |
 | `DataFlowDiagram.svg` | Encrypted data flow diagram showing TEE decryption |
@@ -440,7 +441,13 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `/encrypt` | POST | Encrypt data with released key |
 | `/decrypt` | POST | Decrypt data with released key |
 | `/company/info` | GET | Get company identity |
+| `/company/list` | GET | List encrypted records stored on this container |
+| `/company/populate` | POST | Encrypt CSV data and store locally |
+| `/partner/analyze` | POST | Run partner demographic analysis (non-streaming) |
+| `/partner/analyze-stream` | GET | SSE streaming partner analysis with progress |
 | `/container/access-test` | POST | Attempt SSH/exec/shell access (all blocked by ccePolicy) |
+| `/debug/partner-keys` | GET | Inspect stored partner key structure (diagnostics) |
+| `/debug/test-partner-decrypt` | POST | Test single-record partner decryption with detailed errors |
 
 ## Troubleshooting
 

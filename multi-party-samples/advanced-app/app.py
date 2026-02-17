@@ -812,6 +812,229 @@ def debug_attestation_claims():
             'type': type(e).__name__
         }), 500
 
+@app.route('/debug/partner-keys', methods=['GET'])
+def debug_partner_keys():
+    """
+    Debug endpoint: Inspect the structure of stored partner keys to diagnose
+    decryption issues caused by key nesting mismatches.
+    """
+    import base64
+    
+    results = {}
+    for partner_name in ['contoso', 'fabrikam']:
+        key_data = get_partner_key(partner_name)
+        cached_key = get_cached_private_key(partner_name)
+        
+        if key_data is None:
+            results[partner_name] = {'stored': False, 'cached_private_key': False}
+            continue
+        
+        # Analyze nesting structure
+        def analyze_structure(obj, depth=0, max_depth=5):
+            if depth >= max_depth:
+                return f"<max depth {max_depth}>"
+            if isinstance(obj, dict):
+                info = {
+                    'type': 'dict',
+                    'keys': list(obj.keys()),
+                    'has_key_key': 'key' in obj,
+                    'has_kty': 'kty' in obj,
+                    'has_n': 'n' in obj,
+                    'has_d': 'd' in obj,
+                    'has_p': 'p' in obj,
+                    'has_q': 'q' in obj,
+                    'has_e': 'e' in obj,
+                }
+                if 'key' in obj and isinstance(obj['key'], dict):
+                    info['nested_key'] = analyze_structure(obj['key'], depth + 1)
+                if 'kty' in obj:
+                    info['kty_value'] = obj['kty']
+                # Show first 20 chars of n, d to confirm they're real values
+                for comp in ['n', 'd', 'e']:
+                    if comp in obj and obj[comp]:
+                        val = str(obj[comp])
+                        info[f'{comp}_preview'] = val[:20] + ('...' if len(val) > 20 else '')
+                        info[f'{comp}_length'] = len(val)
+                return info
+            elif isinstance(obj, str):
+                return {'type': 'string', 'length': len(obj), 'preview': obj[:50]}
+            else:
+                return {'type': type(obj).__name__}
+        
+        structure = analyze_structure(key_data)
+        
+        # Also test what _build_private_key would see after one level of unwrapping
+        unwrapped = key_data
+        if isinstance(key_data, dict) and 'key' in key_data:
+            unwrapped = key_data['key']
+        
+        unwrapped_analysis = analyze_structure(unwrapped)
+        
+        # Test two levels of unwrapping
+        double_unwrapped = unwrapped
+        if isinstance(unwrapped, dict) and 'key' in unwrapped:
+            double_unwrapped = unwrapped['key']
+        
+        double_unwrapped_analysis = analyze_structure(double_unwrapped)
+        
+        # Check if the cached key built successfully
+        results[partner_name] = {
+            'stored': True,
+            'cached_private_key': cached_key is not None,
+            'raw_structure': structure,
+            'after_one_unwrap': unwrapped_analysis,
+            'after_two_unwraps': double_unwrapped_analysis,
+            'needs_double_unwrap': (
+                isinstance(key_data, dict) and 'key' in key_data and
+                isinstance(key_data.get('key'), dict) and 'key' in key_data.get('key', {})
+            ),
+        }
+        
+        # Try to decrypt a test value using partner key to verify it works
+        # Find the own key's public component to encrypt a test string
+        if cached_key:
+            results[partner_name]['cached_key_type'] = type(cached_key).__name__
+            results[partner_name]['cached_key_size'] = cached_key.key_size
+    
+    return jsonify({
+        'status': 'success',
+        'partner_keys': results,
+        'own_key_released': bool(_released_key),
+        'diagnosis': (
+            'Check raw_structure and after_one_unwrap to see if JWK components (n, d, p, q, e) '
+            'are visible after one level of unwrapping. If they only appear after two unwraps, '
+            'the key has double-nesting and _build_private_key/decrypt_data_with_key need fixing.'
+        )
+    })
+
+@app.route('/debug/test-partner-decrypt', methods=['POST'])
+def debug_test_partner_decrypt():
+    """
+    Debug endpoint: Fetch one record from a partner and attempt to decrypt one field,
+    returning detailed error information instead of silently failing.
+    
+    POST body: {"partner": "contoso"} or {"partner": "fabrikam"}
+    """
+    try:
+        data = request.get_json() or {}
+        partner_name = data.get('partner', 'contoso').lower()
+        
+        # Get stored partner key and cached key
+        key_data = get_partner_key(partner_name)
+        cached_key = get_cached_private_key(partner_name)
+        
+        if key_data is None:
+            return jsonify({
+                'status': 'error',
+                'message': f'No key stored for {partner_name}. Release it first via POST /skr/release-partner'
+            }), 400
+        
+        # Get partner URL
+        partner_url = ''
+        if partner_name == 'contoso':
+            partner_url = os.environ.get('PARTNER_CONTOSO_URL', '')
+        elif partner_name == 'fabrikam':
+            partner_url = os.environ.get('PARTNER_FABRIKAM_URL', '')
+        
+        if not partner_url:
+            return jsonify({
+                'status': 'error',
+                'message': f'No URL configured for {partner_name}'
+            }), 400
+        
+        # Fetch one record
+        try:
+            response = requests.get(f'{partner_url}/company/list', timeout=15)
+            if response.status_code != 200:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Failed to fetch records: HTTP {response.status_code}'
+                }), 500
+            records = response.json()
+            if isinstance(records, dict) and 'records' in records:
+                records = records['records']
+            if not records:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No records found on partner'
+                }), 404
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to fetch records: {str(e)}'
+            }), 500
+        
+        first_record = records[0]
+        
+        # Try to decrypt name_encrypted using both paths
+        name_encrypted = first_record.get('name_encrypted', '')
+        if not name_encrypted:
+            return jsonify({
+                'status': 'error',
+                'message': 'First record has no name_encrypted field',
+                'record_keys': list(first_record.keys())
+            }), 400
+        
+        results = {
+            'partner': partner_name,
+            'ciphertext_preview': name_encrypted[:40] + '...',
+            'ciphertext_length': len(name_encrypted),
+            'key_stored': True,
+            'cached_private_key_exists': cached_key is not None,
+        }
+        
+        # Test 1: Decrypt using cached private key (fast path)
+        if cached_key:
+            plaintext, err = decrypt_with_cached_key(name_encrypted, cached_key)
+            results['cached_key_decrypt'] = {
+                'success': plaintext is not None,
+                'plaintext': plaintext,
+                'error': err
+            }
+        else:
+            results['cached_key_decrypt'] = {
+                'success': False,
+                'error': 'No cached private key available'
+            }
+        
+        # Test 2: Decrypt using JWK key data (slow path)
+        plaintext2, err2 = decrypt_data_with_key(name_encrypted, key_data, cached_private_key=None)
+        results['jwk_decrypt'] = {
+            'success': plaintext2 is not None,
+            'plaintext': plaintext2,
+            'error': err2
+        }
+        
+        # Test 3: Decrypt using full decrypt_data_with_key with cached key
+        plaintext3, err3 = decrypt_data_with_key(name_encrypted, key_data, cached_private_key=cached_key)
+        results['combined_decrypt'] = {
+            'success': plaintext3 is not None,
+            'plaintext': plaintext3,
+            'error': err3
+        }
+        
+        # Diagnosis
+        if results.get('cached_key_decrypt', {}).get('success') or results.get('jwk_decrypt', {}).get('success'):
+            results['diagnosis'] = 'Decryption works! The issue may be in how decrypt_all_fields processes records.'
+        else:
+            results['diagnosis'] = (
+                'Decryption FAILS. Check: 1) Key nesting structure in /debug/partner-keys, '
+                '2) Whether the key used for encryption on the partner matches the key released here, '
+                '3) Whether the ciphertext format matches (RSA-OAEP SHA-256).'
+            )
+        
+        return jsonify({
+            'status': 'success',
+            'test_results': results
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'type': type(e).__name__
+        }), 500
+
 @app.route('/skr/release-partner', methods=['POST'])
 @rate_limit(max_calls=10, period=60)
 def skr_release_partner_key():
@@ -1087,23 +1310,17 @@ def partner_analyze():
         # Process Contoso data
         if contoso_key:
             if contoso_url:
-                try:
-                    response = _inter_container_session.get(f'{contoso_url}/company/list', timeout=30)
-                    if response.status_code == 200:
-                        contoso_data = response.json()
-                        encrypted_records = contoso_data.get('records', [])
-                        
-                        for record in encrypted_records:
-                            decrypted = decrypt_all_fields(record, contoso_key)
-                            decrypted['source'] = 'Contoso'
-                            if decrypted.get('age'):
-                                decrypted['generation'] = get_generation(decrypted['age'])
-                            contoso_records.append(decrypted)
-                            all_records.append(decrypted)
-                    else:
-                        errors.append(f'Contoso: HTTP {response.status_code}')
-                except requests.exceptions.RequestException as e:
-                    errors.append(f'Contoso: Connection error - {str(e)}')
+                encrypted_records, contoso_err = _ensure_partner_data_ready('Contoso', contoso_url)
+                if contoso_err:
+                    errors.append(contoso_err)
+                else:
+                    for record in encrypted_records:
+                        decrypted = decrypt_all_fields(record, contoso_key)
+                        decrypted['source'] = 'Contoso'
+                        if decrypted.get('age'):
+                            decrypted['generation'] = get_generation(decrypted['age'])
+                        contoso_records.append(decrypted)
+                        all_records.append(decrypted)
             else:
                 errors.append('Contoso: Container URL not configured')
         else:
@@ -1112,23 +1329,17 @@ def partner_analyze():
         # Process Fabrikam data
         if fabrikam_key:
             if fabrikam_url:
-                try:
-                    response = _inter_container_session.get(f'{fabrikam_url}/company/list', timeout=30)
-                    if response.status_code == 200:
-                        fabrikam_data = response.json()
-                        encrypted_records = fabrikam_data.get('records', [])
-                        
-                        for record in encrypted_records:
-                            decrypted = decrypt_all_fields(record, fabrikam_key)
-                            decrypted['source'] = 'Fabrikam'
-                            if decrypted.get('age'):
-                                decrypted['generation'] = get_generation(decrypted['age'])
-                            fabrikam_records.append(decrypted)
-                            all_records.append(decrypted)
-                    else:
-                        errors.append(f'Fabrikam: HTTP {response.status_code}')
-                except requests.exceptions.RequestException as e:
-                    errors.append(f'Fabrikam: Connection error - {str(e)}')
+                encrypted_records, fabrikam_err = _ensure_partner_data_ready('Fabrikam', fabrikam_url)
+                if fabrikam_err:
+                    errors.append(fabrikam_err)
+                else:
+                    for record in encrypted_records:
+                        decrypted = decrypt_all_fields(record, fabrikam_key)
+                        decrypted['source'] = 'Fabrikam'
+                        if decrypted.get('age'):
+                            decrypted['generation'] = get_generation(decrypted['age'])
+                        fabrikam_records.append(decrypted)
+                        all_records.append(decrypted)
             else:
                 errors.append('Fabrikam: Container URL not configured')
         else:
@@ -1267,6 +1478,57 @@ def partner_analyze():
             'message': 'An internal error occurred during analysis.'
         }), 500
 
+def _ensure_partner_data_ready(partner_name, partner_url, max_retries=2):
+    """
+    Ensure a partner container has encrypted data available.
+    If /company/list returns 0 records, automatically trigger:
+      1. POST /skr/release - release the partner's own key
+      2. POST /company/populate - encrypt the CSV data
+      3. GET /company/list - verify data is now available
+    Returns (records_list, error_message_or_None)
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            response = _inter_container_session.get(f'{partner_url}/company/list', timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                records = data.get('records', [])
+                if len(records) > 0:
+                    return records, None
+                # Records empty - try to initialize the partner
+                if attempt < max_retries:
+                    app.logger.info(f"[AUTO-INIT] {partner_name}: 0 records found, triggering remote initialization (attempt {attempt + 1}/{max_retries})")
+                    # Step 1: Release the partner's own key
+                    try:
+                        skr_resp = _inter_container_session.post(f'{partner_url}/skr/release', timeout=60)
+                        if skr_resp.status_code == 200:
+                            app.logger.info(f"[AUTO-INIT] {partner_name}: Key released successfully")
+                        else:
+                            app.logger.warning(f"[AUTO-INIT] {partner_name}: Key release returned HTTP {skr_resp.status_code}")
+                    except Exception as skr_err:
+                        app.logger.warning(f"[AUTO-INIT] {partner_name}: Key release failed: {skr_err}")
+                        continue
+                    # Step 2: Populate (encrypt CSV data)
+                    try:
+                        pop_resp = _inter_container_session.post(f'{partner_url}/company/populate', timeout=60)
+                        if pop_resp.status_code == 200:
+                            app.logger.info(f"[AUTO-INIT] {partner_name}: Data populated successfully")
+                        else:
+                            app.logger.warning(f"[AUTO-INIT] {partner_name}: Populate returned HTTP {pop_resp.status_code}")
+                    except Exception as pop_err:
+                        app.logger.warning(f"[AUTO-INIT] {partner_name}: Populate failed: {pop_err}")
+                        continue
+                    # Step 3: Retry fetch on next loop iteration
+                    continue
+                else:
+                    return [], f"{partner_name}: No records after {max_retries} initialization attempts"
+            else:
+                return [], f"{partner_name}: HTTP {response.status_code}"
+        except requests.exceptions.RequestException as e:
+            return [], f"{partner_name}: Connection error - {str(e)}"
+    return [], f"{partner_name}: Failed to retrieve data"
+
+
 @app.route('/partner/analyze-stream')
 def partner_analyze_stream():
     """
@@ -1311,32 +1573,22 @@ def partner_analyze_stream():
         fabrikam_encrypted = []
         
         if contoso_key and contoso_url:
-            try:
-                response = _inter_container_session.get(f'{contoso_url}/company/list', timeout=30)
-                if response.status_code == 200:
-                    contoso_data = response.json()
-                    contoso_encrypted = contoso_data.get('records', [])
-                    yield f"data: {json.dumps({'type': 'fetch', 'partner': 'Contoso', 'count': len(contoso_encrypted)})}\n\n"
-                else:
-                    errors.append(f'Contoso: HTTP {response.status_code}')
-            except Exception as e:
-                errors.append(f'Contoso: {str(e)}')
+            contoso_encrypted, contoso_err = _ensure_partner_data_ready('Contoso', contoso_url)
+            if contoso_err:
+                errors.append(contoso_err)
+            else:
+                yield f"data: {json.dumps({'type': 'fetch', 'partner': 'Contoso', 'count': len(contoso_encrypted)})}\n\n"
         elif not contoso_key:
             errors.append('Contoso: Key not released')
         else:
             errors.append('Contoso: URL not configured')
         
         if fabrikam_key and fabrikam_url:
-            try:
-                response = _inter_container_session.get(f'{fabrikam_url}/company/list', timeout=30)
-                if response.status_code == 200:
-                    fabrikam_data = response.json()
-                    fabrikam_encrypted = fabrikam_data.get('records', [])
-                    yield f"data: {json.dumps({'type': 'fetch', 'partner': 'Fabrikam', 'count': len(fabrikam_encrypted)})}\n\n"
-                else:
-                    errors.append(f'Fabrikam: HTTP {response.status_code}')
-            except Exception as e:
-                errors.append(f'Fabrikam: {str(e)}')
+            fabrikam_encrypted, fabrikam_err = _ensure_partner_data_ready('Fabrikam', fabrikam_url)
+            if fabrikam_err:
+                errors.append(fabrikam_err)
+            else:
+                yield f"data: {json.dumps({'type': 'fetch', 'partner': 'Fabrikam', 'count': len(fabrikam_encrypted)})}\n\n"
         elif not fabrikam_key:
             errors.append('Fabrikam: Key not released')
         else:
@@ -3422,7 +3674,7 @@ def auto_initialize_container():
         print(f"{'='*60}\n")
         return
     
-    # Step 2: Perform MAA Attestation
+    # Step 2: Perform MAA Attestation (informational only - key release does its own attestation)
     print(f"\n[STEP 2/4] Performing MAA attestation...")
     attestation_success = False
     
@@ -3430,9 +3682,13 @@ def auto_initialize_container():
         # Clean up endpoint
         maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
         
+        # Encode runtime_data as base64 JSON to satisfy the sidecar's expected format
+        import base64
+        runtime_payload = base64.b64encode(json.dumps({"source": "auto-init"}).encode()).decode()
+        
         response = requests.post(
             "http://localhost:8080/attest/maa",
-            json={"maa_endpoint": maa_clean, "runtime_data": "auto-init"},
+            json={"maa_endpoint": maa_clean, "runtime_data": runtime_payload},
             timeout=30
         )
         
@@ -3441,54 +3697,63 @@ def auto_initialize_container():
             print(f"           [SUCCESS] MAA attestation successful")
             print(f"           MAA Endpoint: {maa_clean}")
         else:
-            print(f"           [FAILED] MAA attestation failed: HTTP {response.status_code}")
+            print(f"           [WARNING] MAA attestation failed: HTTP {response.status_code}")
             print(f"           Response: {response.text[:200]}")
+            print(f"           Continuing to key release (it performs its own attestation)...")
     except Exception as e:
-        print(f"           [FAILED] MAA attestation error: {str(e)}")
+        print(f"           [WARNING] MAA attestation error: {str(e)}")
+        print(f"           Continuing to key release (it performs its own attestation)...")
     
-    # Step 3: Perform Secure Key Release
+    # Step 3: Perform Secure Key Release (with retry for sidecar timing)
     print(f"\n[STEP 3/4] Performing Secure Key Release...")
     global _released_key
     global _released_key_name
     skr_success = False
+    skr_max_retries = 3
     
-    try:
-        # Clean up endpoints
-        akv_clean = akv_endpoint.replace('https://', '').replace('http://', '')
-        maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
-        
-        response = requests.post(
-            "http://localhost:8080/key/release",
-            json={
-                "maa_endpoint": maa_clean,
-                "akv_endpoint": akv_clean,
-                "kid": key_name
-            },
-            timeout=60
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            key_data = result.get('key', response.text)
+    for skr_attempt in range(skr_max_retries):
+        try:
+            # Clean up endpoints
+            akv_clean = akv_endpoint.replace('https://', '').replace('http://', '')
+            maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
             
-            # Parse the key if it's JSON string
-            if isinstance(key_data, str):
-                try:
-                    key_data = json.loads(key_data)
-                except:
-                    pass
+            response = requests.post(
+                "http://localhost:8080/key/release",
+                json={
+                    "maa_endpoint": maa_clean,
+                    "akv_endpoint": akv_clean,
+                    "kid": key_name
+                },
+                timeout=60
+            )
             
-            _released_key = key_data
-            _released_key_name = key_name
-            skr_success = True
-            print(f"           [SUCCESS] Secure Key Release successful")
-            print(f"           Key Name: {key_name}")
-            print(f"           AKV Endpoint: {akv_clean}")
-        else:
-            print(f"           [FAILED] SKR failed: HTTP {response.status_code}")
-            print(f"           Response: {response.text[:200]}")
-    except Exception as e:
-        print(f"           [FAILED] SKR error: {str(e)}")
+            if response.status_code == 200:
+                result = response.json()
+                key_data = result.get('key', response.text)
+                
+                # Parse the key if it's JSON string
+                if isinstance(key_data, str):
+                    try:
+                        key_data = json.loads(key_data)
+                    except:
+                        pass
+                
+                _released_key = key_data
+                _released_key_name = key_name
+                skr_success = True
+                print(f"           [SUCCESS] Secure Key Release successful (attempt {skr_attempt + 1}/{skr_max_retries})")
+                print(f"           Key Name: {key_name}")
+                print(f"           AKV Endpoint: {akv_clean}")
+                break
+            else:
+                print(f"           [RETRY] SKR failed: HTTP {response.status_code} (attempt {skr_attempt + 1}/{skr_max_retries})")
+                print(f"           Response: {response.text[:200]}")
+                if skr_attempt < skr_max_retries - 1:
+                    time.sleep(5)
+        except Exception as e:
+            print(f"           [RETRY] SKR error: {str(e)} (attempt {skr_attempt + 1}/{skr_max_retries})")
+            if skr_attempt < skr_max_retries - 1:
+                time.sleep(5)
     
     if not skr_success:
         print(f"\n[ERROR] Auto-initialization FAILED: Could not release key")
