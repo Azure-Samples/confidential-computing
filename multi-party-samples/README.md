@@ -72,6 +72,7 @@ A comprehensive 3-container demonstration with **partner analytics** capabilitie
 - 📊 **Real-time Progress** - Server-Sent Events (SSE) streaming with progress bars
 - 🌍 **Demographics Analysis** - Top 10 countries with top 3 cities, generations by company, salary world map
 - 🔓 **TEE-Only Decryption** - Data decrypted only inside hardware-protected memory
+- ☸️ **AKS Virtual Nodes** - Optional `-AKS` deployment on Kubernetes with [virtual nodes](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes), running pods as confidential ACI container groups with full attestation support
 
 #### Architecture
 
@@ -87,10 +88,15 @@ A comprehensive 3-container demonstration with **partner analytics** capabilitie
 
 ```powershell
 cd advanced-app
+
+# Direct ACI deployment (simpler, recommended for first-time users)
 .\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
+
+# AKS Virtual Node deployment (more complex, adds Kubernetes orchestration)
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy -AKS
 ```
 
-> **Note:** Replace `<yourcode>` with a short unique identifier (3-8 chars) like your initials or team code.
+> **Note:** Replace `<yourcode>` with a short unique identifier (3-8 chars) like your initials or team code. The `-AKS` flag creates an AKS cluster with virtual nodes and deploys pods as confidential ACI container groups. See the [full documentation](advanced-app/README.md#aks-virtual-node-deployment--aks) for AKS architecture details.
 
 See the [full documentation](advanced-app/README.md) for detailed instructions.
 
@@ -147,3 +153,5 @@ This code is provided for **educational and demonstration purposes only**.
 - [AMD SEV-SNP Technology](https://www.amd.com/en/developer/sev.html)
 - [Azure Container Instances - Confidential Containers](https://docs.microsoft.com/azure/container-instances/container-instances-confidential-overview)
 - [Microsoft Azure Attestation](https://learn.microsoft.com/azure/attestation/overview)
+- [AKS Virtual Nodes](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes) — Virtual node architecture for AKS
+- [Virtual Nodes v2 (GitHub)](https://github.com/microsoft/virtualnodesOnAzureContainerInstances) — VN2 Helm chart

@@ -83,6 +83,10 @@ Comprehensive 3-container demonstration with partner analytics:
 - **Fabrikam Fashion** - Online retailer with encrypted customer records (👗)
 - **Woodgrove Bank** - Trusted analytics partner with cross-company key access (🏦)
 
+**Deployment Modes:**
+- **Direct ACI** (default) — Simple single-command deployment to Azure Container Instances
+- **AKS Virtual Nodes** (`-AKS` flag) — Kubernetes-managed deployment using [virtual nodes](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes), where pods run as confidential ACI container groups with full AMD SEV-SNP attestation. This is a more complex setup involving VNet creation, NAT gateway, AKS cluster with Azure CNI, VN2 Helm chart, managed identity plumbing in the MC_ resource group, and an nginx reverse proxy for external access. See the [AKS documentation](multi-party-samples/advanced-app/README.md#aks-virtual-node-deployment--aks) for architecture details.
+
 **Key Features:**
 - 🔐 **Hardware-based isolation** - AMD SEV-SNP TEE protects data in memory
 - 🛡️ **Remote attestation** - Cryptographic proof of TEE environment via MAA

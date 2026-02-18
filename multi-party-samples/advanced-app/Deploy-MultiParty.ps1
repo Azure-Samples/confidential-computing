@@ -32,6 +32,14 @@
 .PARAMETER SkipBrowser
     Skip opening the browser after deployment.
 
+.PARAMETER AKS
+    Deploy to AKS with confidential virtual nodes instead of direct ACI.
+    When specified, creates an AKS cluster with Azure CNI networking, installs
+    the virtual nodes Helm chart, and deploys pods that run as confidential
+    ACI container groups via the virtual node. This gives you Kubernetes
+    orchestration while keeping the same ACI-backed confidential computing
+    (AMD SEV-SNP TEE) with full attestation support.
+
 .PARAMETER RegistryName
     Custom name for the Azure Container Registry.
     If not provided, a random name will be generated.
@@ -57,6 +65,10 @@
     Build and deploy in one command with prefix "team42"
 
 .EXAMPLE
+    .\Deploy-MultiParty.ps1 -Prefix "jd01" -Build -Deploy -AKS
+    Build and deploy to AKS with confidential virtual nodes
+
+.EXAMPLE
     .\Deploy-MultiParty.ps1 -Cleanup
     Delete all Azure resources (reads configuration from acr-config.json)
 #>
@@ -69,12 +81,17 @@ param(
     [switch]$Deploy,
     [switch]$Cleanup,
     [switch]$SkipBrowser,
+    [switch]$AKS,
     [string]$RegistryName,
     [string]$Location = "eastus",
     [string]$Description
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
+# Prevent $ErrorActionPreference from affecting native commands (az, docker, kubectl)
+# In PowerShell 7.4+, stderr from native commands redirected with 2>&1 creates ErrorRecords.
+# With ErrorActionPreference=Stop, these would terminate the script even on successful commands.
+$PSNativeCommandUseErrorActionPreference = $false
 $ImageName = "aci-attestation-demo"
 $ImageTag = "latest"
 
@@ -607,6 +624,37 @@ function Test-Prerequisites {
         }
     }
     
+    # --- kubectl (required for AKS mode) ---
+    if ($script:AKS) {
+        $kubectlCmd = Get-Command kubectl -ErrorAction SilentlyContinue
+        if ($kubectlCmd) {
+            $kubectlVersion = kubectl version --client --short 2>$null
+            if (-not $kubectlVersion) { $kubectlVersion = "installed" }
+            Write-Success "  kubectl ($kubectlVersion)"
+        } else {
+            $missing += @{
+                Name = "kubectl"
+                Reason = "Required for AKS deployment (Kubernetes CLI)"
+                Install = "az aks install-cli"
+                Link = "https://learn.microsoft.com/cli/azure/aks#az-aks-install-cli"
+            }
+        }
+        
+        $helmCmd = Get-Command helm -ErrorAction SilentlyContinue
+        if ($helmCmd) {
+            $helmVersion = helm version --short 2>$null
+            if (-not $helmVersion) { $helmVersion = "installed" }
+            Write-Success "  Helm ($helmVersion)"
+        } else {
+            $missing += @{
+                Name = "Helm"
+                Reason = "Required for installing virtual nodes on AKS"
+                Install = "winget install Helm.Helm"
+                Link = "https://helm.sh/docs/intro/install/"
+            }
+        }
+    }
+    
     # --- Microsoft Edge (optional) ---
     $edgePath = "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
     $edgePathX86 = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
@@ -808,7 +856,23 @@ function Invoke-Build {
         (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameB --object-id $using:IdentityPrincipalIdC --key-permissions get release 2>&1 })
     )
     $null = Wait-Job -Job $policyJobs
+    $kvPolicyFailures = @()
+    foreach ($job in $policyJobs) {
+        if ($job.State -eq 'Failed') {
+            $kvPolicyFailures += "Job $($job.Id) failed: $($job.ChildJobs[0].JobStateInfo.Reason)"
+        } else {
+            $jobOutput = Receive-Job -Job $job 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                $kvPolicyFailures += "KV policy job $($job.Id) returned exit code $LASTEXITCODE"
+            }
+        }
+    }
     Remove-Job -Job $policyJobs -Force
+    if ($kvPolicyFailures.Count -gt 0) {
+        Write-Warning "Some Key Vault policy assignments may have failed:"
+        $kvPolicyFailures | ForEach-Object { Write-Warning "  - $_" }
+        Write-Warning "Verify each identity has 'get' and 'release' key permissions on its Key Vault."
+    }
     
     Write-Success "Contoso: Key Vault '$KeyVaultNameA' created (key created during Deploy)"
     Write-Success "Fabrikam: Key Vault '$KeyVaultNameB' created (key created during Deploy)"
@@ -866,6 +930,7 @@ function Invoke-Build {
     $config = @{
         registryName = $RegistryName
         resourceGroup = $ResourceGroup
+        location = $Location
         loginServer = $loginServer
         imageName = $ImageName
         imageTag = $ImageTag
@@ -931,6 +996,553 @@ function Invoke-Build {
 }
 
 # ============================================================================
+# AKS Build Phase - Add Virtual Nodes Infrastructure
+# ============================================================================
+
+function Invoke-BuildAKS {
+    <#
+    .SYNOPSIS
+        Creates AKS cluster with confidential virtual nodes on top of the base Build.
+    
+    .DESCRIPTION
+        After Invoke-Build creates the RG, ACR, Key Vaults, identities, and container image,
+        this function adds:
+        - A VNet with AKS subnet (for nodes) and a placeholder ACI subnet
+        - An AKS cluster with Azure CNI networking and the legacy virtual-node addon
+          (the addon triggers the AKS RP to create an aciconnectorlinux identity with
+           Contributor on the node resource group - works without Owner permissions)
+        - A SECOND VNet in the node resource group (MC_ RG) with a delegated ACI subnet,
+          VNet peering to the main VNet, and a NAT gateway for outbound connectivity
+        - A custom azure.json ConfigMap that points to the aciconnectorlinux identity
+        - Virtual nodes v2 via a modified Helm chart that reads from the ConfigMap
+        
+        This approach works with Contributor-only permissions by leveraging the
+        aciconnectorlinux identity that the AKS RP auto-assigns Contributor on the
+        MC_ resource group. All ACI container groups are created in the MC_ RG
+        where that identity has permissions.
+    #>
+    
+    Write-Header "Building AKS with Confidential Virtual Nodes"
+    
+    $config = Get-Config
+    if (-not $config) {
+        throw "acr-config.json not found. Run with -Build first."
+    }
+    
+    $resourceGroup = $config.resourceGroup
+    $clusterName = "${Prefix}-aks-vnodes"
+    $vnetName = "${Prefix}-vnet"
+    $aksSubnetName = "aks-subnet"
+    $aciSubnetName = "aci-subnet"
+    $natGatewayName = "${Prefix}-natgw"
+    $natPublicIpName = "${Prefix}-natgw-pip"
+    
+    Write-Host "AKS Cluster:  $clusterName" -ForegroundColor Cyan
+    Write-Host "VNet:         $vnetName" -ForegroundColor Cyan
+    Write-Host "AKS Subnet:   $aksSubnetName (10.1.0.0/16)" -ForegroundColor Cyan
+    Write-Host "ACI Subnet:   $aciSubnetName (10.2.0.0/16, placeholder for addon)" -ForegroundColor Cyan
+    Write-Host ""
+    
+    # ========== Step 1: Create VNet with AKS and ACI Subnets ==========
+    Write-Host "[1/9] Creating VNet with AKS and ACI subnets..." -ForegroundColor Green
+    
+    az network vnet create `
+        --resource-group $resourceGroup `
+        --name $vnetName `
+        --address-prefix "10.0.0.0/8" `
+        --location $Location `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create VNet" }
+    
+    az network vnet subnet create `
+        --resource-group $resourceGroup `
+        --vnet-name $vnetName `
+        --name $aksSubnetName `
+        --address-prefix "10.1.0.0/16" `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create AKS subnet" }
+    
+    # ACI subnet in main RG (required by --enable-addons virtual-node during cluster creation)
+    az network vnet subnet create `
+        --resource-group $resourceGroup `
+        --vnet-name $vnetName `
+        --name $aciSubnetName `
+        --address-prefix "10.2.0.0/16" `
+        --delegations "Microsoft.ContainerInstance/containerGroups" `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create ACI subnet with delegation" }
+    
+    Write-Success "VNet created with AKS and ACI subnets"
+    
+    # ========== Step 2: Create NAT Gateway (main RG) ==========
+    Write-Host "[2/9] Creating NAT gateway for ACI subnet..." -ForegroundColor Green
+    
+    az network public-ip create `
+        --resource-group $resourceGroup `
+        --name $natPublicIpName `
+        --sku Standard `
+        --allocation-method Static `
+        --location $Location `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create NAT gateway public IP" }
+    
+    az network nat gateway create `
+        --resource-group $resourceGroup `
+        --name $natGatewayName `
+        --public-ip-addresses $natPublicIpName `
+        --idle-timeout 10 `
+        --location $Location `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create NAT gateway" }
+    
+    az network vnet subnet update `
+        --resource-group $resourceGroup `
+        --vnet-name $vnetName `
+        --name $aciSubnetName `
+        --nat-gateway $natGatewayName `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to associate NAT gateway with ACI subnet" }
+    
+    Write-Success "NAT gateway created and associated with ACI subnet"
+    
+    # ========== Step 3: Create AKS Cluster ==========
+    Write-Host "[3/9] Creating AKS cluster with Azure CNI..." -ForegroundColor Green
+    Write-Host "  This may take 5-10 minutes..." -ForegroundColor Gray
+    Write-Host "  Using --enable-addons virtual-node to create addon identity with MC_ RG permissions." -ForegroundColor Gray
+    
+    $aksSubnetId = az network vnet subnet show `
+        --resource-group $resourceGroup `
+        --vnet-name $vnetName `
+        --name $aksSubnetName `
+        --query id -o tsv
+    
+    # The --enable-addons virtual-node triggers the AKS RP (first-party service principal)
+    # to create an 'aciconnectorlinux' managed identity with Contributor role on the
+    # node resource group (MC_ RG). This identity is also assigned to the VMSS, making
+    # it available to pods via IMDS. We use this identity for virtual nodes v2.
+    # Node count 2 is required: VN2 pod needs 3 CPUs, system pods take ~2 CPUs.
+    $aksCreateOutput = az aks create `
+        --resource-group $resourceGroup `
+        --name $clusterName `
+        --network-plugin azure `
+        --vnet-subnet-id $aksSubnetId `
+        --node-count 2 `
+        --node-vm-size Standard_D4s_v4 `
+        --generate-ssh-keys `
+        --enable-addons virtual-node `
+        --aci-subnet-name $aciSubnetName `
+        --location $Location `
+        --only-show-errors 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ($aksCreateOutput | Out-String) -ForegroundColor Red
+        throw "Failed to create AKS cluster. See error above."
+    }
+    
+    Write-Success "AKS cluster created: $clusterName"
+    
+    # Capture the aciconnectorlinux identity BEFORE disabling the addon
+    # (addon identity info is cleared from az aks show after disable)
+    $aciConnectorClientId = az aks show `
+        --resource-group $resourceGroup `
+        --name $clusterName `
+        --query "addonProfiles.aciConnectorLinux.identity.clientId" -o tsv 2>$null
+    
+    if (-not $aciConnectorClientId) {
+        Write-Warning "Could not get aciconnectorlinux identity from addon profile."
+        Write-Host "  Falling back to VMSS identity list..." -ForegroundColor Gray
+        $nodeResourceGroup = az aks show --resource-group $resourceGroup --name $clusterName --query nodeResourceGroup -o tsv
+        $vmssName = az vmss list -g $nodeResourceGroup --query "[0].name" -o tsv 2>$null
+        $vmssIdentities = az vmss identity show -g $nodeResourceGroup -n $vmssName -o json 2>$null | ConvertFrom-Json
+        $aciConnectorEntry = $vmssIdentities.userAssignedIdentities.PSObject.Properties | Where-Object { $_.Name -match "aciconnectorlinux" } | Select-Object -First 1
+        if ($aciConnectorEntry) {
+            $aciConnectorClientId = $aciConnectorEntry.Value.clientId
+        }
+    }
+    
+    if (-not $aciConnectorClientId) {
+        throw "Could not find aciconnectorlinux identity. The --enable-addons virtual-node may have failed."
+    }
+    Write-Host "  aciconnectorlinux identity: $aciConnectorClientId" -ForegroundColor Gray
+    
+    # Disable the legacy addon (it's stuck in Init because its identity lacks
+    # permissions on the main RG). The identity and its MC_ RG roles persist.
+    Write-Host "  Disabling legacy virtual-node addon (identity/roles persist)..." -ForegroundColor Gray
+    az aks disable-addons `
+        --resource-group $resourceGroup `
+        --name $clusterName `
+        --addons virtual-node `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to disable legacy virtual-node addon. Continuing..."
+    }
+    
+    # ========== Step 3+: Create Managed Identities in MC_ RG ==========
+    # VN2 (aciconnectorlinux) only has Contributor on the MC_ RG. When it creates
+    # ACI container groups with user-assigned identities, it needs assign/action on
+    # those identities. Identities created during Build are in the main RG where VN2
+    # has no permissions. Solution: create them in MC_ RG and grant KV access.
+    Write-Host ""
+    Write-Host "  Creating managed identities in MC_ RG (required for VN2 identity assignment)..." -ForegroundColor Green
+    
+    $nodeResourceGroup = az aks show --resource-group $resourceGroup --name $clusterName --query nodeResourceGroup -o tsv
+    
+    $mcIdNameA = $config.contoso.identityName
+    $mcIdNameB = $config.fabrikam.identityName
+    $mcIdNameC = $config.woodgrove.identityName
+    $kvNameA = $config.contoso.keyVaultName
+    $kvNameB = $config.fabrikam.keyVaultName
+    $kvNameC = $config.woodgrove.keyVaultName
+    
+    $mcIdJobA = Start-Job -ScriptBlock { az identity create --resource-group $using:nodeResourceGroup --name $using:mcIdNameA 2>&1 }
+    $mcIdJobB = Start-Job -ScriptBlock { az identity create --resource-group $using:nodeResourceGroup --name $using:mcIdNameB 2>&1 }
+    $mcIdJobC = Start-Job -ScriptBlock { az identity create --resource-group $using:nodeResourceGroup --name $using:mcIdNameC 2>&1 }
+    $null = Wait-Job -Job @($mcIdJobA, $mcIdJobB, $mcIdJobC)
+    Remove-Job -Job @($mcIdJobA, $mcIdJobB, $mcIdJobC) -Force
+    
+    # Retrieve MC_ RG identity details
+    $mcIdInfoA = az identity show --resource-group $nodeResourceGroup --name $mcIdNameA -o json 2>$null | ConvertFrom-Json
+    $mcIdInfoB = az identity show --resource-group $nodeResourceGroup --name $mcIdNameB -o json 2>$null | ConvertFrom-Json
+    $mcIdInfoC = az identity show --resource-group $nodeResourceGroup --name $mcIdNameC -o json 2>$null | ConvertFrom-Json
+    
+    if (-not $mcIdInfoA -or -not $mcIdInfoB -or -not $mcIdInfoC) {
+        throw "Failed to create identities in MC_ RG ($nodeResourceGroup)"
+    }
+    
+    Write-Success "MC_ RG identities created: $mcIdNameA, $mcIdNameB, $mcIdNameC"
+    
+    # Grant Key Vault access policies (same cross-company pattern as Build)
+    Write-Host "  Granting Key Vault access to MC_ RG identities..." -ForegroundColor Gray
+    $mcPidA = $mcIdInfoA.principalId
+    $mcPidB = $mcIdInfoB.principalId
+    $mcPidC = $mcIdInfoC.principalId
+    
+    $kvPolicyJobs = @(
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameA --object-id $using:mcPidA --key-permissions get release 2>&1 }),
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameB --object-id $using:mcPidB --key-permissions get release 2>&1 }),
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameC --object-id $using:mcPidC --key-permissions get release 2>&1 }),
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameA --object-id $using:mcPidC --key-permissions get release 2>&1 }),
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameB --object-id $using:mcPidC --key-permissions get release 2>&1 })
+    )
+    $null = Wait-Job -Job $kvPolicyJobs
+    $kvPolicyFailures = @()
+    foreach ($job in $kvPolicyJobs) {
+        if ($job.State -eq 'Failed') {
+            $kvPolicyFailures += "Job $($job.Id) failed: $($job.ChildJobs[0].JobStateInfo.Reason)"
+        } else {
+            $jobOutput = Receive-Job -Job $job 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                $kvPolicyFailures += "KV policy job $($job.Id) returned exit code $LASTEXITCODE"
+            }
+        }
+    }
+    Remove-Job -Job $kvPolicyJobs -Force
+    if ($kvPolicyFailures.Count -gt 0) {
+        Write-Warning "Some Key Vault policy assignments may have failed:"
+        $kvPolicyFailures | ForEach-Object { Write-Warning "  - $_" }
+        Write-Warning "Verify each identity has 'get' and 'release' key permissions on its Key Vault."
+    }
+    
+    Write-Success "Key Vault access granted (same cross-company pattern as Build)"
+    
+    # Update config with MC_ RG identity resource IDs
+    $config.contoso.identityResourceId = $mcIdInfoA.id
+    $config.contoso.identityClientId = $mcIdInfoA.clientId
+    $config.fabrikam.identityResourceId = $mcIdInfoB.id
+    $config.fabrikam.identityClientId = $mcIdInfoB.clientId
+    $config.woodgrove.identityResourceId = $mcIdInfoC.id
+    $config.woodgrove.identityClientId = $mcIdInfoC.clientId
+    Save-Config $config
+    
+    Write-Host "  Identity resource IDs updated to MC_ RG in config" -ForegroundColor Gray
+    
+    # ========== Step 4: Get Kubectl Credentials ==========
+    Write-Host "[4/9] Getting kubectl credentials..." -ForegroundColor Green
+    
+    az aks get-credentials `
+        --resource-group $resourceGroup `
+        --name $clusterName `
+        --overwrite-existing `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to get AKS credentials" }
+    
+    Write-Success "kubectl configured for cluster: $clusterName"
+    
+    # ========== Step 5: Create MC_ RG VNet for ACI ==========
+    Write-Host "[5/9] Creating VNet in node resource group for ACI workloads..." -ForegroundColor Green
+    Write-Host "  The aciconnectorlinux identity has Contributor on the MC_ RG," -ForegroundColor Gray
+    Write-Host "  so all ACI container groups will be created there." -ForegroundColor Gray
+    
+    $subscriptionId = az account show --query id -o tsv
+    $nodeResourceGroup = az aks show --resource-group $resourceGroup --name $clusterName --query nodeResourceGroup -o tsv
+    $mcVnetName = "${Prefix}-mc-vnet"
+    $mcAciSubnetName = "aci-subnet-mc"
+    $mcNatIpName = "${Prefix}-mc-nat-ip"
+    $mcNatGwName = "${Prefix}-mc-natgw"
+    
+    # VNet in MC_ RG (172.16.0.0/16 - non-overlapping with main VNet 10.0.0.0/8)
+    az network vnet create `
+        --resource-group $nodeResourceGroup `
+        --name $mcVnetName `
+        --address-prefix "172.16.0.0/16" `
+        --subnet-name $mcAciSubnetName `
+        --subnet-prefix "172.16.0.0/16" `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create VNet in MC_ RG" }
+    
+    # Delegate the ACI subnet to Container Instances
+    az network vnet subnet update `
+        --resource-group $nodeResourceGroup `
+        --vnet-name $mcVnetName `
+        --name $mcAciSubnetName `
+        --delegations "Microsoft.ContainerInstance/containerGroups" `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to delegate MC_ ACI subnet" }
+    
+    Write-Success "MC_ RG VNet created with delegated ACI subnet"
+    
+    # ========== Step 6: NAT Gateway & VNet Peering ==========
+    Write-Host "[6/9] Creating NAT gateway and VNet peering..." -ForegroundColor Green
+    
+    # NAT gateway for MC_ RG ACI subnet outbound
+    az network public-ip create `
+        --resource-group $nodeResourceGroup `
+        --name $mcNatIpName `
+        --sku Standard `
+        --allocation-method Static `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create MC_ NAT public IP" }
+    
+    az network nat gateway create `
+        --resource-group $nodeResourceGroup `
+        --name $mcNatGwName `
+        --public-ip-addresses $mcNatIpName `
+        --idle-timeout 10 `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create MC_ NAT gateway" }
+    
+    az network vnet subnet update `
+        --resource-group $nodeResourceGroup `
+        --vnet-name $mcVnetName `
+        --name $mcAciSubnetName `
+        --nat-gateway $mcNatGwName `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to associate MC_ NAT gateway" }
+    
+    # VNet peering: main VNet <-> MC_ VNet (allows ACI containers to communicate with AKS pods)
+    $mcVnetId = "/subscriptions/$subscriptionId/resourceGroups/$nodeResourceGroup/providers/Microsoft.Network/virtualNetworks/$mcVnetName"
+    $mainVnetId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.Network/virtualNetworks/$vnetName"
+    
+    az network vnet peering create `
+        --resource-group $resourceGroup `
+        --name "main-to-mc" `
+        --vnet-name $vnetName `
+        --remote-vnet $mcVnetId `
+        --allow-vnet-access `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create VNet peering (main -> MC)" }
+    
+    az network vnet peering create `
+        --resource-group $nodeResourceGroup `
+        --name "mc-to-main" `
+        --vnet-name $mcVnetName `
+        --remote-vnet $mainVnetId `
+        --allow-vnet-access `
+        --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create VNet peering (MC -> main)" }
+    
+    Write-Success "NAT gateway and VNet peering configured"
+    
+    # ========== Step 7: Create ConfigMap & Modify Helm Chart ==========
+    Write-Host "[7/9] Preparing custom identity ConfigMap and Helm chart..." -ForegroundColor Green
+    
+    $tenantId = az account show --query tenantId -o tsv
+    
+    # Create a custom azure.json that uses the aciconnectorlinux identity
+    # instead of the kubelet identity. This identity has Contributor on the MC_ RG
+    # (auto-assigned by the AKS RP), and is already assigned to the VMSS (available via IMDS).
+    $azureJsonContent = @"
+{
+    "cloud": "AzurePublicCloud",
+    "tenantId": "$tenantId",
+    "subscriptionId": "$subscriptionId",
+    "aadClientId": "msi",
+    "aadClientSecret": "msi",
+    "resourceGroup": "$nodeResourceGroup",
+    "location": "$Location",
+    "vmType": "vmss",
+    "subnetName": "$mcAciSubnetName",
+    "vnetName": "$mcVnetName",
+    "vnetResourceGroup": "$nodeResourceGroup",
+    "useManagedIdentityExtension": true,
+    "userAssignedIdentityID": "$aciConnectorClientId",
+    "useInstanceMetadata": true,
+    "loadBalancerSku": "standard"
+}
+"@
+    
+    # Create the vn2 namespace and ConfigMap
+    kubectl create namespace vn2 --dry-run=client -o yaml 2>$null | kubectl apply -f - 2>$null | Out-Null
+    
+    # Label and annotate for Helm ownership
+    kubectl label namespace vn2 "app.kubernetes.io/managed-by=Helm" --overwrite 2>$null | Out-Null
+    kubectl annotate namespace vn2 "meta.helm.sh/release-name=virtualnode2" "meta.helm.sh/release-namespace=vn2" --overwrite 2>$null | Out-Null
+    
+    $tempAzureJson = Join-Path ([System.IO.Path]::GetTempPath()) "azure-vn2-$(Get-Random).json"
+    $azureJsonContent | Set-Content -Path $tempAzureJson -Encoding UTF8 -NoNewline
+    kubectl create configmap vn2-azure-creds -n vn2 `
+        --from-file="azure.json=$tempAzureJson" `
+        --dry-run=client -o yaml 2>$null | kubectl apply -f - 2>$null | Out-Null
+    Remove-Item $tempAzureJson -Force -ErrorAction SilentlyContinue
+    
+    Write-Success "ConfigMap created with aciconnectorlinux identity credentials"
+    
+    # Clone the virtual nodes v2 Helm chart and modify it to use the ConfigMap
+    $vnTempDir = Join-Path ([System.IO.Path]::GetTempPath()) "virtualnodesOnACI-$(Get-Random)"
+    Write-Host "  Cloning virtual nodes Helm chart repo..." -ForegroundColor Gray
+    git clone --depth 1 --quiet `
+        "https://github.com/microsoft/virtualnodesOnAzureContainerInstances.git" `
+        $vnTempDir 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to clone virtualnodesOnAzureContainerInstances repo."
+    }
+    
+    $helmChartPath = Join-Path $vnTempDir "Helm" "virtualnode"
+    $deploymentFile = Join-Path $helmChartPath "templates" "deployment.yaml"
+    
+    if (-not (Test-Path $deploymentFile)) {
+        Remove-Item -Recurse -Force $vnTempDir -ErrorAction SilentlyContinue
+        throw "Helm chart deployment.yaml not found at: $deploymentFile"
+    }
+    
+    # Patch deployment.yaml:
+    # 1. Replace hostPath volume with ConfigMap volume
+    # 2. Add subPath to all volumeMounts referencing aks-credential
+    $content = Get-Content $deploymentFile -Raw
+    
+    # Replace the aks-credential hostPath volume with ConfigMap
+    $content = $content -replace `
+        '- name: aks-credential\s+hostPath:\s+path: /etc/kubernetes/azure\.json\s+type: File', `
+        "- name: aks-credential`n          configMap:`n            name: vn2-azure-creds"
+    
+    # Add subPath to /etc/kubernetes/azure.json mount (kubelet container)
+    $content = $content -replace `
+        '(- mountPath: /etc/kubernetes/azure\.json\s+name: aks-credential)', `
+        "- mountPath: /etc/kubernetes/azure.json`n              name: aks-credential`n              subPath: azure.json"
+    
+    # Add subPath to /etc/aks/azure.json mounts (crisocketotcpadapter, proxycri)
+    $content = $content -replace `
+        '(- name: aks-credential\s+mountPath: /etc/aks/azure\.json)', `
+        "- name: aks-credential`n              mountPath: /etc/aks/azure.json`n              subPath: azure.json"
+    
+    $content | Set-Content $deploymentFile -Encoding UTF8 -NoNewline
+    
+    Write-Success "Helm chart patched to use ConfigMap identity"
+    
+    # ========== Step 8: Install Virtual Nodes Helm Chart ==========
+    Write-Host "[8/9] Installing virtual nodes v2 Helm chart..." -ForegroundColor Green
+    
+    $helmOutput = helm install virtualnode2 $helmChartPath `
+        --namespace vn2 `
+        --set "aciSubnetName=$mcAciSubnetName" `
+        --set "aciResourceGroupName=$nodeResourceGroup" `
+        --set admissionControllerReplicaCount=0 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ($helmOutput | Out-String) -ForegroundColor Red
+        Remove-Item -Recurse -Force $vnTempDir -ErrorAction SilentlyContinue
+        throw "Failed to install virtual nodes Helm chart."
+    }
+    
+    Remove-Item -Recurse -Force $vnTempDir -ErrorAction SilentlyContinue
+    
+    Write-Success "Virtual nodes Helm chart installed"
+    
+    # ========== Step 9: Wait for Virtual Node to be Ready ==========
+    Write-Host "[9/9] Waiting for virtual node to register..." -ForegroundColor Green
+    Write-Host "  VN2 pod deploys in namespace 'vn2', node registers as virtualnode2-0." -ForegroundColor Gray
+    
+    $podReady = $false
+    $maxWait = 180
+    $elapsed = 0
+    while (-not $podReady -and $elapsed -lt $maxWait) {
+        $podPhase = kubectl get pod virtualnode2-0 -n vn2 --no-headers -o custom-columns=":status.phase" 2>$null
+        if ($podPhase -and $podPhase.Trim() -eq "Running") {
+            $readyContainers = kubectl get pod virtualnode2-0 -n vn2 --no-headers -o custom-columns=":status.containerStatuses[*].ready" 2>$null
+            if ($readyContainers -and -not ($readyContainers -match "false")) {
+                $podReady = $true
+                Write-Success "Virtual node pod is Running (all containers ready)"
+            }
+        }
+        if (-not $podReady) {
+            $podStatus = kubectl get pod virtualnode2-0 -n vn2 --no-headers 2>$null
+            if ($podStatus -match "CrashLoopBackOff|Error") {
+                Write-Warning "Virtual node pod is in CrashLoopBackOff or Error state!"
+                Write-Host "  Check: kubectl logs virtualnode2-0 -n vn2 -c proxycri" -ForegroundColor Yellow
+                break
+            }
+            Write-Host "  Waiting for virtualnode2-0 pod... ($elapsed/${maxWait}s)" -ForegroundColor Gray
+            Start-Sleep -Seconds 10
+            $elapsed += 10
+        }
+    }
+    
+    if ($podReady) {
+        $vnodeReady = $false
+        $maxWait2 = 120
+        $elapsed2 = 0
+        while (-not $vnodeReady -and $elapsed2 -lt $maxWait2) {
+            $nodes = kubectl get nodes -o json 2>$null | ConvertFrom-Json
+            if ($nodes) {
+                foreach ($node in $nodes.items) {
+                    if ($node.metadata.labels.'virtualization' -eq 'virtualnode2') {
+                        $vnodeReady = $true
+                        Write-Success "Virtual node registered: $($node.metadata.name)"
+                        break
+                    }
+                }
+            }
+            if (-not $vnodeReady) {
+                Write-Host "  Waiting for virtual node registration... ($elapsed2/${maxWait2}s)" -ForegroundColor Gray
+                Start-Sleep -Seconds 10
+                $elapsed2 += 10
+            }
+        }
+        if (-not $vnodeReady) {
+            Write-Warning "Virtual node not registered after ${maxWait2}s. Check: kubectl get nodes"
+        }
+    } elseif ($elapsed -ge $maxWait) {
+        Write-Warning "Virtual node pod not ready after ${maxWait}s. Check: kubectl get pods -n vn2"
+    }
+    
+    Write-Host ""
+    Write-Host "Cluster Nodes:" -ForegroundColor Cyan
+    kubectl get nodes -o wide
+    Write-Host ""
+    
+    # ========== Update Config ==========
+    $config | Add-Member -NotePropertyName "aksClusterName" -NotePropertyValue $clusterName -Force
+    $config | Add-Member -NotePropertyName "vnetName" -NotePropertyValue $vnetName -Force
+    $config | Add-Member -NotePropertyName "aksSubnetName" -NotePropertyValue $aksSubnetName -Force
+    $config | Add-Member -NotePropertyName "aciSubnetName" -NotePropertyValue $mcAciSubnetName -Force
+    $config | Add-Member -NotePropertyName "aciResourceGroup" -NotePropertyValue $nodeResourceGroup -Force
+    $config | Add-Member -NotePropertyName "mcVnetName" -NotePropertyValue $mcVnetName -Force
+    $config | Add-Member -NotePropertyName "deploymentTarget" -NotePropertyValue "AKS" -Force
+    Save-Config $config
+    
+    Write-Header "AKS Build Complete"
+    Write-Host "Cluster:          $clusterName (2 nodes)" -ForegroundColor Green
+    Write-Host "Main VNet:        $vnetName (10.0.0.0/8)" -ForegroundColor Green
+    Write-Host "MC_ VNet:         $mcVnetName (172.16.0.0/16, peered)" -ForegroundColor Green
+    Write-Host "ACI Subnet:       $mcAciSubnetName (in $nodeResourceGroup)" -ForegroundColor Green
+    Write-Host "ACI Identity:     aciconnectorlinux ($aciConnectorClientId)" -ForegroundColor Green
+    Write-Host "Virtual Node:     Ready" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Pods with nodeSelector 'virtualization: virtualnode2'" -ForegroundColor Gray
+    Write-Host "run as confidential ACI container groups with SEV-SNP attestation." -ForegroundColor Gray
+    Write-Host ""
+    Write-Success "Configuration saved to acr-config.json (deploymentTarget: AKS)"
+}
+
+# ============================================================================
 # Deploy Phase - Multi-Party (Contoso, Fabrikam Fashion, Woodgrove Bank)
 # ============================================================================
 
@@ -953,6 +1565,16 @@ function Invoke-Deploy {
     $ACR_LOGIN_SERVER = $config.loginServer
     $FULL_IMAGE = $config.fullImage
     $KeyVaultName = $config.keyVaultName
+    
+    # Resolve deploy location from config (with fallback for older configs)
+    $deployLocation = if ($config.location) { $config.location } else { $Location }
+    if ($config.location -and $Location -ne "eastus" -and $Location -ne $config.location) {
+        Write-Warning "Location mismatch: -Location '$Location' differs from build config '$($config.location)'"
+        Write-Warning "Using build location '$($config.location)' to match existing resources."
+    }
+    if (-not $config.location) {
+        Write-Warning "Config missing 'location' (older config). Using -Location '$Location'. Re-run -Build to fix."
+    }
     
     # Get ACR credentials from Key Vault
     Write-Host "Retrieving ACR credentials from Key Vault..."
@@ -1044,7 +1666,7 @@ function Invoke-Deploy {
         'contentVersion' = '1.0.0.0'
         'parameters' = @{
             'containerGroupName' = @{ 'value' = $container_companyA }
-            'location' = @{ 'value' = $Location }
+            'location' = @{ 'value' = $deployLocation }
             'appImage' = @{ 'value' = $FULL_IMAGE }
             'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
@@ -1073,7 +1695,7 @@ function Invoke-Deploy {
         'contentVersion' = '1.0.0.0'
         'parameters' = @{
             'containerGroupName' = @{ 'value' = $container_companyB }
-            'location' = @{ 'value' = $Location }
+            'location' = @{ 'value' = $deployLocation }
             'appImage' = @{ 'value' = $FULL_IMAGE }
             'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
@@ -1097,16 +1719,16 @@ function Invoke-Deploy {
     $woodgroveConfig = $config.woodgrove
     Write-Host "[3/3] Generating Woodgrove-Bank security policy..." -ForegroundColor Yellow
     
-    # Build partner container URLs based on DNS names
-    $contosoContainerUrl = "https://${dns_companyA}.${Location}.azurecontainer.io"
-    $fabrikamContainerUrl = "https://${dns_companyB}.${Location}.azurecontainer.io"
+    # Build partner container URLs based on DNS names (use config location for correct region)
+    $contosoContainerUrl = "https://${dns_companyA}.${deployLocation}.azurecontainer.io"
+    $fabrikamContainerUrl = "https://${dns_companyB}.${deployLocation}.azurecontainer.io"
     
     $params_companyC = @{
         '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
         'contentVersion' = '1.0.0.0'
         'parameters' = @{
             'containerGroupName' = @{ 'value' = $container_companyC }
-            'location' = @{ 'value' = $Location }
+            'location' = @{ 'value' = $deployLocation }
             'appImage' = @{ 'value' = $FULL_IMAGE }
             'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
             'registryUsername' = @{ 'value' = $ACR_USERNAME }
@@ -1476,6 +2098,920 @@ function Invoke-Deploy {
 }
 
 # ============================================================================
+# AKS Deploy Phase - Virtual Nodes (Confidential Pods on ACI)
+# ============================================================================
+
+function New-VirtualNodePodYaml {
+    <#
+    .SYNOPSIS
+        Generate a Kubernetes pod YAML for deployment on AKS confidential virtual nodes.
+    
+    .DESCRIPTION
+        Creates a pod spec with:
+        - nodeSelector: virtualization=virtualnode2 (targets virtual nodes)
+        - tolerations for virtual-kubelet provider
+        - annotations for managed identity, DNS label, and confidential policy
+        - environment variables matching the ACI ARM template pattern
+        - imagePullSecrets for ACR authentication
+        
+        The ccepolicy annotation is left empty and will be injected by confcom.
+    #>
+    param(
+        [string]$PodName,
+        [string]$CompanyLabel,
+        [string]$Image,
+        [string]$IdentityResourceId,
+        [string]$DnsLabel,
+        [string]$SkrKeyName,
+        [string]$SkrMaaEndpoint,
+        [string]$SkrAkvEndpoint,
+        [string]$StorageConnectionString,
+        [string]$ResourceGroupName,
+        [string]$AciSubnetName,
+        [int]$MemoryGi = 2,
+        [int]$Cpu = 1,
+        [hashtable]$ExtraEnvVars = @{}
+    )
+    
+    # Build env vars section
+    $envLines = @(
+        "    - name: SKR_KEY_NAME",
+        "      value: `"$SkrKeyName`"",
+        "    - name: SKR_MAA_ENDPOINT",
+        "      value: `"$SkrMaaEndpoint`"",
+        "    - name: SKR_AKV_ENDPOINT",
+        "      value: `"$SkrAkvEndpoint`"",
+        "    - name: AZURE_STORAGE_CONNECTION_STRING",
+        "      value: `"$StorageConnectionString`"",
+        "    - name: RESOURCE_GROUP_NAME",
+        "      value: `"$ResourceGroupName`"",
+        "    - name: SECURITY_POLICY_HASH",
+        "      value: `"`""
+    )
+    
+    foreach ($key in $ExtraEnvVars.Keys) {
+        $envLines += "    - name: $key"
+        $envLines += "      value: `"$($ExtraEnvVars[$key])`""
+    }
+    
+    $envSection = $envLines -join "`n"
+    
+    $yaml = @"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $PodName
+  labels:
+    app: $CompanyLabel
+    demo: multi-party-confidential
+  annotations:
+    microsoft.containerinstance.virtualnode.ccepolicy: ""
+    microsoft.containerinstance.virtualnode.identity: "$IdentityResourceId"
+    microsoft.containerinstance.virtualnode.dnsnamelabel: "$DnsLabel"
+    microsoft.containerinstance.virtualnode.subnet: "$AciSubnetName"
+spec:
+  dnsPolicy: None
+  dnsConfig:
+    nameservers:
+    - "168.63.129.16"
+  nodeSelector:
+    virtualization: virtualnode2
+  tolerations:
+  - key: virtual-kubelet.io/provider
+    operator: Exists
+    effect: NoSchedule
+  containers:
+  - name: attestation-demo
+    image: $Image
+    ports:
+    - containerPort: 80
+    - containerPort: 443
+    env:
+$envSection
+    resources:
+      limits:
+        memory: "${MemoryGi}Gi"
+        cpu: "$Cpu"
+      requests:
+        memory: "${MemoryGi}Gi"
+        cpu: "$Cpu"
+  imagePullSecrets:
+  - name: acr-secret
+"@
+    
+    return $yaml
+}
+
+function Get-PolicyHashFromVirtualNodeYaml {
+    <#
+    .SYNOPSIS
+        Generate security policy for a virtual-node pod YAML using confcom.
+    
+    .DESCRIPTION
+        Runs az confcom acipolicygen --virtual-node-yaml to:
+        1. Generate the security policy for the pod
+        2. Inject the ccepolicy annotation into the YAML file
+        3. Output the SHA256 policy hash
+        
+        This hash is used for key release policy binding, identical to the ACI flow.
+    #>
+    param(
+        [string]$YamlPath
+    )
+    
+    $output = az confcom acipolicygen --virtual-node-yaml $YamlPath --approve-wildcards --disable-stdio 2>&1
+    $exitCode = $LASTEXITCODE
+    
+    if ($exitCode -ne 0) {
+        Write-Error "Confcom failed for virtual-node YAML: $output"
+        throw "Failed to generate security policy for $YamlPath"
+    }
+    
+    # The hash is output as the last 64-character hex line
+    $hashLine = $output | Where-Object { $_ -match '^[a-f0-9]{64}$' } | Select-Object -Last 1
+    
+    if (-not $hashLine) {
+        Write-Warning "Could not find policy hash in confcom output. Output was:"
+        $output | ForEach-Object { Write-Host "  $_" }
+        throw "No policy hash found in confcom output for $YamlPath"
+    }
+    
+    # Read back the modified YAML to verify ccepolicy was injected
+    $modifiedYaml = Get-Content $YamlPath -Raw
+    if ($modifiedYaml -match 'microsoft\.containerinstance\.virtualnode\.ccepolicy:\s*"([^"]+)"') {
+        Write-Host "  ccepolicy annotation injected (" -NoNewline
+        Write-Host "$($matches[1].Length) chars" -ForegroundColor Gray -NoNewline
+        Write-Host ")"
+    }
+    
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor DarkCyan
+    Write-Host "║  VIRTUAL NODE CONFCOM POLICY                                                 ║" -ForegroundColor DarkCyan
+    Write-Host "║  YAML: $($YamlPath.PadRight(67))║" -ForegroundColor DarkCyan
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor DarkCyan
+    Write-Host "║  Policy Hash: $($hashLine.Trim().PadRight(60))║" -ForegroundColor White
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor DarkCyan
+    Write-Host ""
+    
+    return @{
+        PolicyHash = $hashLine.Trim()
+        YamlPath = $YamlPath
+    }
+}
+
+function Invoke-DeployAKS {
+    param([switch]$SkipBrowser)
+    
+    Write-Header "Deploying Multi-Party Demo on AKS Virtual Nodes"
+    Write-Host "Pods will run as confidential ACI container groups via virtual nodes." -ForegroundColor Yellow
+    Write-Host "This preserves the full ACI attestation stack (SEV-SNP + SKR + MAA)." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  - Contoso:        Confidential Virtual Node Pod (AMD SEV-SNP TEE)" -ForegroundColor Green
+    Write-Host "  - Fabrikam:       Confidential Virtual Node Pod (AMD SEV-SNP TEE)" -ForegroundColor Magenta
+    Write-Host "  - Woodgrove-Bank: Confidential Virtual Node Pod (AMD SEV-SNP TEE)" -ForegroundColor Green
+    Write-Host ""
+    
+    $config = Get-Config
+    if (-not $config) {
+        throw "acr-config.json not found. Run with -Build first."
+    }
+    if ($config.deploymentTarget -ne "AKS") {
+        throw "Configuration shows deploymentTarget='$($config.deploymentTarget)'. Run with -Build -AKS first."
+    }
+    
+    $resource_group = $config.resourceGroup
+    $ACR_LOGIN_SERVER = $config.loginServer
+    $FULL_IMAGE = $config.fullImage
+    $KeyVaultName = $config.keyVaultName
+    $aciSubnetName = $config.aciSubnetName
+    $clusterName = $config.aksClusterName
+    
+    # Resolve deploy location from config (with fallback for older configs)
+    $deployLocation = if ($config.location) { $config.location } else { $Location }
+    if ($config.location -and $Location -ne "eastus" -and $Location -ne $config.location) {
+        Write-Warning "Location mismatch: -Location '$Location' differs from build config '$($config.location)'"
+        Write-Warning "Using build location '$($config.location)' to match existing resources."
+    }
+    if (-not $config.location) {
+        Write-Warning "Config missing 'location' (older config). Using -Location '$Location'. Re-run -Build -AKS to fix."
+    }
+    
+    # Ensure kubectl is pointed at the right cluster
+    Write-Host "Connecting to AKS cluster: $clusterName..."
+    az aks get-credentials `
+        --resource-group $resource_group `
+        --name $clusterName `
+        --overwrite-existing `
+        --only-show-errors 2>&1 | Out-Null
+    Write-Success "Connected to AKS cluster"
+    Write-Host ""
+    
+    # Verify identities are in the MC_ RG (VN2 needs assign/action permissions)
+    $mcRG = $config.aciResourceGroup
+    if ($config.contoso.identityResourceId -notmatch [regex]::Escape($mcRG)) {
+        Write-Warning "Identities are not in the MC_ RG. VN2 will fail with LinkedAuthorizationFailed."
+        Write-Host "  Run with -Build -AKS to recreate identities in the MC_ RG," -ForegroundColor Yellow
+        Write-Host "  or create them manually with: az identity create --resource-group '$mcRG'" -ForegroundColor Yellow
+        throw "Identity resource IDs must reference MC_ resource group ($mcRG). Current: $($config.contoso.identityResourceId)"
+    }
+    
+    # Get ACR credentials from Key Vault
+    Write-Host "Retrieving ACR credentials from Key Vault..."
+    $ACR_USERNAME = az keyvault secret show --vault-name $KeyVaultName --name "acr-username" --query "value" -o tsv
+    $ACR_PASSWORD = az keyvault secret show --vault-name $KeyVaultName --name "acr-password" --query "value" -o tsv
+    
+    if (-not $ACR_USERNAME -or -not $ACR_PASSWORD) {
+        throw "Failed to retrieve ACR credentials from Key Vault"
+    }
+    Write-Success "Credentials retrieved"
+    
+    # Create Kubernetes image pull secret for ACR
+    Write-Host "Creating Kubernetes image pull secret..."
+    kubectl delete secret acr-secret --ignore-not-found 2>&1 | Out-Null
+    kubectl create secret docker-registry acr-secret `
+        --docker-server=$ACR_LOGIN_SERVER `
+        --docker-username=$ACR_USERNAME `
+        --docker-password=$ACR_PASSWORD 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create ACR pull secret" }
+    Write-Success "ACR pull secret created"
+    Write-Host ""
+    
+    # Load storage connection string
+    $StorageConnectionString = ""
+    $envFilePath = Join-Path $PSScriptRoot ".env"
+    if (Test-Path $envFilePath) {
+        $envContent = Get-Content $envFilePath
+        foreach ($line in $envContent) {
+            if ($line -match "^AZURE_STORAGE_CONNECTION_STRING=(.+)$") {
+                $StorageConnectionString = $matches[1]
+                Write-Success "Storage connection string loaded from .env"
+                break
+            }
+        }
+    }
+    
+    # Check Docker for confcom
+    Write-Host "Checking Docker (required for policy generation)..."
+    $dockerInfo = docker info 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Docker is not running. Required for security policy generation. Start Docker Desktop."
+    }
+    Write-Success "Docker is running"
+    Write-Host ""
+    
+    # Login to ACR (for confcom to pull image layers)
+    Write-Host "Logging into ACR ($($config.registryName))..."
+    $acrLoginOutput = docker login $ACR_LOGIN_SERVER --username $ACR_USERNAME --password $ACR_PASSWORD 2>&1 | Out-String
+    if ($acrLoginOutput -match "Login Succeeded") {
+        Write-Host "  ACR login: done" -ForegroundColor Gray
+    } else {
+        Write-Host "  ACR login output: $acrLoginOutput" -ForegroundColor Yellow
+        Write-Host "  ACR login: done (via docker login)" -ForegroundColor Gray
+    }
+    
+    # Pull image for confcom
+    Write-Host "Pulling latest image for policy generation..."
+    $pullOutput = docker pull $FULL_IMAGE 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Failed to pull image: $FULL_IMAGE. Output: $pullOutput" }
+    Write-Success "Image ready"
+    Write-Host ""
+    
+    # Generate unique names
+    $timestamp = Get-Date -Format "MMddHHmm"
+    $pod_companyA = "contoso-$timestamp"
+    $pod_companyB = "fabrikam-$timestamp"
+    $pod_companyC = "woodgrove-$timestamp"
+    $dns_companyA = "contoso-$timestamp"
+    $dns_companyB = "fabrikam-$timestamp"
+    $dns_companyC = "woodgrove-$timestamp"
+    
+    Write-Host "Pod Names:"
+    Write-Host "  Contoso:        $pod_companyA"
+    Write-Host "  Fabrikam:       $pod_companyB"
+    Write-Host "  Woodgrove-Bank: $pod_companyC"
+    Write-Host ""
+    
+    # ========== PHASE 1: Generate Pod YAMLs and Security Policies ==========
+    Write-Header "Phase 1: Generating Pod YAMLs and Security Policies"
+    
+    $contosoConfig = $config.contoso
+    $fabrikamConfig = $config.fabrikam
+    $woodgroveConfig = $config.woodgrove
+    
+    # --- Contoso Pod YAML ---
+    Write-Host "[1/3] Generating Contoso pod YAML..." -ForegroundColor Cyan
+    $contosoYaml = New-VirtualNodePodYaml `
+        -PodName $pod_companyA `
+        -CompanyLabel "contoso" `
+        -Image $FULL_IMAGE `
+        -IdentityResourceId $contosoConfig.identityResourceId `
+        -DnsLabel $dns_companyA `
+        -SkrKeyName $contosoConfig.skrKeyName `
+        -SkrMaaEndpoint $config.skrMaaEndpoint `
+        -SkrAkvEndpoint $contosoConfig.skrAkvEndpoint `
+        -StorageConnectionString $StorageConnectionString `
+        -ResourceGroupName $resource_group `
+        -AciSubnetName $aciSubnetName
+    $contosoYamlPath = Join-Path $PSScriptRoot "pod-contoso.yaml"
+    $contosoYaml | Set-Content $contosoYamlPath -Encoding UTF8
+    
+    $contosoPolicyInfo = Get-PolicyHashFromVirtualNodeYaml -YamlPath $contosoYamlPath
+    Write-Success "Contoso policy hash: $($contosoPolicyInfo.PolicyHash)"
+    
+    # --- Fabrikam Pod YAML ---
+    Write-Host "[2/3] Generating Fabrikam pod YAML..." -ForegroundColor Magenta
+    $fabrikamYaml = New-VirtualNodePodYaml `
+        -PodName $pod_companyB `
+        -CompanyLabel "fabrikam" `
+        -Image $FULL_IMAGE `
+        -IdentityResourceId $fabrikamConfig.identityResourceId `
+        -DnsLabel $dns_companyB `
+        -SkrKeyName $fabrikamConfig.skrKeyName `
+        -SkrMaaEndpoint $config.skrMaaEndpoint `
+        -SkrAkvEndpoint $fabrikamConfig.skrAkvEndpoint `
+        -StorageConnectionString $StorageConnectionString `
+        -ResourceGroupName $resource_group `
+        -AciSubnetName $aciSubnetName
+    $fabrikamYamlPath = Join-Path $PSScriptRoot "pod-fabrikam.yaml"
+    $fabrikamYaml | Set-Content $fabrikamYamlPath -Encoding UTF8
+    
+    $fabrikamPolicyInfo = Get-PolicyHashFromVirtualNodeYaml -YamlPath $fabrikamYamlPath
+    Write-Success "Fabrikam policy hash: $($fabrikamPolicyInfo.PolicyHash)"
+    
+    # NOTE: Woodgrove pod YAML is generated AFTER Contoso and Fabrikam pods are deployed
+    # and have IPs assigned. This is because Woodgrove's partner URLs must point to the actual
+    # pod IPs (http://<ip>) since virtual node pods don't have public DNS names.
+    # The Woodgrove policy hash depends on these URLs, so it's computed later.
+    $woodgroveYamlPath = Join-Path $PSScriptRoot "pod-woodgrove.yaml"
+    
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║  SECURITY POLICY HASHES - CONTOSO & FABRIKAM (AKS Virtual Nodes)             ║" -ForegroundColor Cyan
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Contoso:   $($contosoPolicyInfo.PolicyHash)  ║" -ForegroundColor Green
+    Write-Host "║  Fabrikam:  $($fabrikamPolicyInfo.PolicyHash)  ║" -ForegroundColor Magenta
+    Write-Host "║  Woodgrove: (pending - needs partner pod IPs first)                          ║" -ForegroundColor Yellow
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
+    
+    # ========== PHASE 2: Deploy Contoso & Fabrikam First ==========
+    # Keys require ALL policy hashes (including Woodgrove), but Woodgrove's hash depends on
+    # partner pod IPs. So we deploy Contoso & Fabrikam first, get their IPs, then generate
+    # Woodgrove YAML, compute all keys, and deploy Woodgrove.
+    Write-Header "Phase 2: Deploying Contoso & Fabrikam Pods"
+    Write-Host "Deploying Contoso and Fabrikam first to get pod IPs for Woodgrove partner URLs." -ForegroundColor Yellow
+    Write-Host ""
+    
+    Write-Host "  Deploying Contoso pod..." -ForegroundColor Cyan
+    kubectl apply -f $contosoYamlPath 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Contoso pod apply returned non-zero" }
+    
+    Write-Host "  Deploying Fabrikam pod..." -ForegroundColor Magenta
+    kubectl apply -f $fabrikamYamlPath 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Fabrikam pod apply returned non-zero" }
+    
+    Write-Host ""
+    Write-Host "Waiting for Contoso and Fabrikam pods to start (may take 2-5 minutes)..." -ForegroundColor Gray
+    
+    $timeout_seconds = 300
+    $elapsed_seconds = 0
+    $companyA_ready = $false
+    $companyB_ready = $false
+    
+    while ($elapsed_seconds -lt $timeout_seconds -and (-not $companyA_ready -or -not $companyB_ready)) {
+        try {
+            $podJson = kubectl get pods -l demo=multi-party-confidential -o json 2>&1 | Out-String
+            $pods = $podJson | ConvertFrom-Json -ErrorAction SilentlyContinue
+            
+            if ($pods -and $pods.items) {
+                foreach ($pod in $pods.items) {
+                    $podName = $pod.metadata.name
+                    $phase = $pod.status.phase
+                    
+                    if ($podName -eq $pod_companyA -and $phase -eq "Running" -and -not $companyA_ready) {
+                        $companyA_ready = $true
+                        Write-Success "Contoso pod is Running!"
+                    }
+                    if ($podName -eq $pod_companyB -and $phase -eq "Running" -and -not $companyB_ready) {
+                        $companyB_ready = $true
+                        Write-Success "Fabrikam pod is Running!"
+                    }
+                }
+            }
+        } catch {
+            # Ignore transient errors during polling
+        }
+        
+        if (-not $companyA_ready -or -not $companyB_ready) {
+            $status = "Waiting... ($elapsed_seconds/$timeout_seconds sec) - "
+            $status += "Contoso: $(if ($companyA_ready) { 'Running' } else { '...' }), "
+            $status += "Fabrikam: $(if ($companyB_ready) { 'Running' } else { '...' })"
+            Write-Host $status
+            [System.Threading.Thread]::Sleep(10000)
+            $elapsed_seconds += 10
+        }
+    }
+    
+    if (-not $companyA_ready -or -not $companyB_ready) {
+        Write-Warning "Contoso/Fabrikam pods did not start in time."
+        kubectl get pods -l demo=multi-party-confidential -o wide
+        throw "Cannot proceed - partner pods not ready"
+    }
+    
+    # Get pod IPs
+    $podIpA = (kubectl get pod $pod_companyA -o jsonpath='{.status.podIP}' 2>$null)
+    $podIpB = (kubectl get pod $pod_companyB -o jsonpath='{.status.podIP}' 2>$null)
+    
+    Write-Host ""
+    Write-Host "Partner Pod IPs:" -ForegroundColor Cyan
+    Write-Host "  Contoso:   $podIpA" -ForegroundColor Gray
+    Write-Host "  Fabrikam:  $podIpB" -ForegroundColor Gray
+    Write-Host ""
+    
+    # ========== PHASE 3: Generate Woodgrove YAML with Partner IPs ==========
+    Write-Header "Phase 3: Generating Woodgrove Pod YAML"
+    Write-Host "Using partner pod IPs for inter-container communication (HTTP)." -ForegroundColor Yellow
+    Write-Host ""
+    
+    $woodgroveExtraEnv = @{
+        'PARTNER_CONTOSO_AKV_ENDPOINT' = $config.contoso.skrAkvEndpoint
+        'PARTNER_FABRIKAM_AKV_ENDPOINT' = $config.fabrikam.skrAkvEndpoint
+        'PARTNER_CONTOSO_URL' = "http://$podIpA"
+        'PARTNER_FABRIKAM_URL' = "http://$podIpB"
+    }
+    
+    $woodgroveYaml = New-VirtualNodePodYaml `
+        -PodName $pod_companyC `
+        -CompanyLabel "woodgrove" `
+        -Image $FULL_IMAGE `
+        -IdentityResourceId $woodgroveConfig.identityResourceId `
+        -DnsLabel $dns_companyC `
+        -SkrKeyName $woodgroveConfig.skrKeyName `
+        -SkrMaaEndpoint $config.skrMaaEndpoint `
+        -SkrAkvEndpoint $woodgroveConfig.skrAkvEndpoint `
+        -StorageConnectionString $StorageConnectionString `
+        -ResourceGroupName $resource_group `
+        -AciSubnetName $aciSubnetName `
+        -MemoryGi 4 `
+        -Cpu 2 `
+        -ExtraEnvVars $woodgroveExtraEnv
+    $woodgroveYaml | Set-Content $woodgroveYamlPath -Encoding UTF8
+    
+    $woodgrovePolicyInfo = Get-PolicyHashFromVirtualNodeYaml -YamlPath $woodgroveYamlPath
+    Write-Success "Woodgrove policy hash: $($woodgrovePolicyInfo.PolicyHash)"
+    
+    # Display all policy hashes
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║  SECURITY POLICY HASHES - ALL COMPANIES (AKS Virtual Nodes)                  ║" -ForegroundColor Cyan
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Contoso:   $($contosoPolicyInfo.PolicyHash)  ║" -ForegroundColor Green
+    Write-Host "║  Fabrikam:  $($fabrikamPolicyInfo.PolicyHash)  ║" -ForegroundColor Magenta
+    Write-Host "║  Woodgrove: $($woodgrovePolicyInfo.PolicyHash)  ║" -ForegroundColor Yellow
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
+    
+    # ========== PHASE 4: Create ALL Keys with Multi-Party Policies ==========
+    Write-Header "Phase 4: Creating Keys with Multi-Party Access Policies"
+    Write-Host "Now that all policy hashes are known, creating keys with proper release policies." -ForegroundColor Yellow
+    Write-Host ""
+    
+    # --- Create Contoso Key (allows Contoso + Woodgrove) ---
+    Write-Host "Creating Contoso key (multi-party: Contoso + Woodgrove)..." -ForegroundColor Cyan
+    $contosoMultiPartyPolicy = @{
+        version = "1.0.0"
+        anyOf = @(
+            @{
+                authority = "https://$($config.skrMaaEndpoint)"
+                allOf = @(
+                    @{ claim = "x-ms-attestation-type"; equals = "sevsnpvm" },
+                    @{ claim = "x-ms-sevsnpvm-hostdata"; equals = $contosoPolicyInfo.PolicyHash }
+                )
+            },
+            @{
+                authority = "https://$($config.skrMaaEndpoint)"
+                allOf = @(
+                    @{ claim = "x-ms-attestation-type"; equals = "sevsnpvm" },
+                    @{ claim = "x-ms-sevsnpvm-hostdata"; equals = $woodgrovePolicyInfo.PolicyHash }
+                )
+            }
+        )
+    }
+    $contosoMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-contoso-multiparty.json"
+    $contosoMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $contosoMultiPolicyPath -Encoding UTF8
+    
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
+    Write-Host "║  CONTOSO KEY RELEASE POLICY (Multi-Party: Contoso + Woodgrove)               ║" -ForegroundColor Green
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Green
+    ($contosoMultiPartyPolicy | ConvertTo-Json -Depth 10) -split "`n" | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host ""
+    
+    # Delete/purge existing key if present
+    $existingKey = az keyvault key show --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "    Deleting existing Contoso key..." -ForegroundColor Gray
+        az keyvault key delete --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
+        [System.Threading.Thread]::Sleep(1000)
+        Write-Host "    Purging Contoso key..." -ForegroundColor Gray
+        az keyvault key purge --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName 2>&1 | Out-Null
+        [System.Threading.Thread]::Sleep(2000)
+    }
+    
+    az keyvault key create --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName `
+        --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
+        --policy $contosoMultiPolicyPath 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "  Contoso key created: allows Contoso + Woodgrove containers"
+    } else {
+        Write-Warning "  Contoso key creation failed - attempting without policy binding"
+        az keyvault key create --vault-name $contosoConfig.keyVaultName --name $contosoConfig.skrKeyName `
+            --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true 2>&1 | Out-Null
+    }
+    Remove-Item $contosoMultiPolicyPath -Force -ErrorAction SilentlyContinue
+    
+    # --- Create Fabrikam Key (allows Fabrikam + Woodgrove) ---
+    Write-Host "Creating Fabrikam key (multi-party: Fabrikam + Woodgrove)..." -ForegroundColor Magenta
+    $fabrikamMultiPartyPolicy = @{
+        version = "1.0.0"
+        anyOf = @(
+            @{
+                authority = "https://$($config.skrMaaEndpoint)"
+                allOf = @(
+                    @{ claim = "x-ms-attestation-type"; equals = "sevsnpvm" },
+                    @{ claim = "x-ms-sevsnpvm-hostdata"; equals = $fabrikamPolicyInfo.PolicyHash }
+                )
+            },
+            @{
+                authority = "https://$($config.skrMaaEndpoint)"
+                allOf = @(
+                    @{ claim = "x-ms-attestation-type"; equals = "sevsnpvm" },
+                    @{ claim = "x-ms-sevsnpvm-hostdata"; equals = $woodgrovePolicyInfo.PolicyHash }
+                )
+            }
+        )
+    }
+    $fabrikamMultiPolicyPath = Join-Path $PSScriptRoot "release-policy-fabrikam-multiparty.json"
+    $fabrikamMultiPartyPolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $fabrikamMultiPolicyPath -Encoding UTF8
+    
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
+    Write-Host "║  FABRIKAM KEY RELEASE POLICY (Multi-Party: Fabrikam + Woodgrove)              ║" -ForegroundColor Magenta
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Magenta
+    ($fabrikamMultiPartyPolicy | ConvertTo-Json -Depth 10) -split "`n" | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
+    Write-Host ""
+    
+    $existingKey = az keyvault key show --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "    Deleting existing Fabrikam key..." -ForegroundColor Gray
+        az keyvault key delete --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
+        [System.Threading.Thread]::Sleep(1000)
+        Write-Host "    Purging Fabrikam key..." -ForegroundColor Gray
+        az keyvault key purge --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName 2>&1 | Out-Null
+        [System.Threading.Thread]::Sleep(2000)
+    }
+    
+    az keyvault key create --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName `
+        --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true `
+        --policy $fabrikamMultiPolicyPath 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "  Fabrikam key created: allows Fabrikam + Woodgrove containers"
+    } else {
+        Write-Warning "  Fabrikam key creation failed - attempting without policy binding"
+        az keyvault key create --vault-name $fabrikamConfig.keyVaultName --name $fabrikamConfig.skrKeyName `
+            --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true 2>&1 | Out-Null
+    }
+    Remove-Item $fabrikamMultiPolicyPath -Force -ErrorAction SilentlyContinue
+    
+    # --- Create Woodgrove Key ---
+    Write-Host "Creating Woodgrove key (single-party: Woodgrove only)..." -ForegroundColor Yellow
+    $woodgroveReleasePolicy = Update-KeyReleasePolicy `
+        -KeyVaultName $woodgroveConfig.keyVaultName `
+        -KeyName $woodgroveConfig.skrKeyName `
+        -MaaEndpoint $config.skrMaaEndpoint `
+        -PolicyHash $woodgrovePolicyInfo.PolicyHash `
+        -CompanyName "Woodgrove"
+    
+    # ========== Display Security Summary ==========
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║  SECURITY POLICY BINDING SUMMARY (AKS Virtual Nodes)                         ║" -ForegroundColor Cyan
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Contoso Key:   Releases to Contoso OR Woodgrove pods                        ║" -ForegroundColor White
+    Write-Host "║  Fabrikam Key:  Releases to Fabrikam OR Woodgrove pods                       ║" -ForegroundColor White
+    Write-Host "║  Woodgrove Key: Releases to Woodgrove pod ONLY                               ║" -ForegroundColor White
+    Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host "║  Pods run as ACI container groups via virtual nodes (same attestation)        ║" -ForegroundColor Gray
+    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
+    
+    # ========== PHASE 5: Deploy Woodgrove Pod ==========
+    Write-Header "Phase 5: Deploying Woodgrove Pod"
+    
+    kubectl apply -f $woodgroveYamlPath 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Woodgrove pod apply returned non-zero" }
+    Write-Success "Woodgrove pod deployed"
+    
+    # ========== Wait for Woodgrove Pod ==========
+    Write-Host ""
+    Write-Host "Waiting for Woodgrove pod to start..." -ForegroundColor Gray
+    Write-Host ""
+    
+    $timeout_seconds = 300
+    $elapsed_seconds = 0
+    $companyC_ready = $false
+    
+    while ($elapsed_seconds -lt $timeout_seconds -and -not $companyC_ready) {
+        try {
+            $podJson = kubectl get pods -l demo=multi-party-confidential -o json 2>&1 | Out-String
+            $pods = $podJson | ConvertFrom-Json -ErrorAction SilentlyContinue
+            
+            if ($pods -and $pods.items) {
+                foreach ($pod in $pods.items) {
+                    $podName = $pod.metadata.name
+                    $phase = $pod.status.phase
+                    
+                    if ($podName -eq $pod_companyC -and $phase -eq "Running" -and -not $companyC_ready) {
+                        $companyC_ready = $true
+                        Write-Success "Woodgrove-Bank pod is Running!"
+                    }
+                }
+            }
+        } catch {
+            # Ignore transient errors during polling
+        }
+        
+        if (-not $companyC_ready) {
+            Write-Host "Waiting... ($elapsed_seconds/$timeout_seconds sec) - Woodgrove: ..."
+            [System.Threading.Thread]::Sleep(10000)
+            $elapsed_seconds += 10
+        }
+    }
+    
+    if (-not $companyC_ready) {
+        Write-Warning "Woodgrove pod did not start in time. Checking pod status:"
+        kubectl get pods -l demo=multi-party-confidential -o wide
+        kubectl describe pods -l demo=multi-party-confidential | Select-String -Pattern "Warning|Error|Failed|Reason"
+    }
+    
+    # ========== Deploy Nginx Reverse Proxy for External Access ==========
+    # Virtual node pods are on a private subnet - no public FQDNs.
+    # Deploy an nginx reverse proxy on a real node with a LoadBalancer service.
+    Write-Header "Setting Up External Access (Nginx Reverse Proxy)"
+
+    # Get pod IPs
+    $podIpA = (kubectl get pod $pod_companyA -o jsonpath='{.status.podIP}' 2>$null)
+    $podIpB = (kubectl get pod $pod_companyB -o jsonpath='{.status.podIP}' 2>$null)
+    $podIpC = (kubectl get pod $pod_companyC -o jsonpath='{.status.podIP}' 2>$null)
+
+    Write-Host "Pod IPs:"
+    Write-Host "  Contoso:   $podIpA" -ForegroundColor Gray
+    Write-Host "  Fabrikam:  $podIpB" -ForegroundColor Gray
+    Write-Host "  Woodgrove: $podIpC" -ForegroundColor Gray
+    Write-Host ""
+
+    # Generate nginx proxy YAML with dynamic IPs
+    $nginxProxyYaml = @"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-proxy-config
+  namespace: default
+data:
+  nginx.conf: |
+    worker_processes 1;
+    events { worker_connections 128; }
+    http {
+      server {
+        listen 8081;
+        location / {
+          proxy_pass http://${podIpA}:80/;
+          proxy_set_header Host `$host;
+          proxy_set_header X-Real-IP `$remote_addr;
+          proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
+        }
+      }
+      server {
+        listen 8082;
+        location / {
+          proxy_pass http://${podIpB}:80/;
+          proxy_set_header Host `$host;
+          proxy_set_header X-Real-IP `$remote_addr;
+          proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
+        }
+      }
+      server {
+        listen 8083;
+        location / {
+          proxy_pass http://${podIpC}:80/;
+          proxy_set_header Host `$host;
+          proxy_set_header X-Real-IP `$remote_addr;
+          proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-proxy
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-proxy
+  template:
+    metadata:
+      labels:
+        app: nginx-proxy
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: type
+                    operator: NotIn
+                    values:
+                      - virtual-kubelet
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 8081
+            - containerPort: 8082
+            - containerPort: 8083
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: config
+          configMap:
+            name: nginx-proxy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-proxy
+  namespace: default
+spec:
+  type: LoadBalancer
+  selector:
+    app: nginx-proxy
+  ports:
+    - name: contoso
+      port: 8081
+      targetPort: 8081
+    - name: fabrikam
+      port: 8082
+      targetPort: 8082
+    - name: woodgrove
+      port: 8083
+      targetPort: 8083
+"@
+
+    $nginxYamlPath = Join-Path $PSScriptRoot "nginx-proxy.yaml"
+    $nginxProxyYaml | Set-Content -Path $nginxYamlPath -Encoding UTF8
+
+    # Clean up any previous proxy deployment
+    kubectl delete deployment nginx-proxy --ignore-not-found 2>&1 | Out-Null
+    kubectl delete service nginx-proxy --ignore-not-found 2>&1 | Out-Null
+    kubectl delete configmap nginx-proxy-config --ignore-not-found 2>&1 | Out-Null
+
+    Write-Host "Deploying nginx reverse proxy..."
+    kubectl apply -f $nginxYamlPath 2>&1 | Out-Null
+
+    # Wait for LoadBalancer external IP
+    Write-Host "Waiting for LoadBalancer external IP..."
+    $lbTimeout = 120
+    $lbElapsed = 0
+    $externalIp = $null
+
+    while ($lbElapsed -lt $lbTimeout -and -not $externalIp) {
+        try {
+            $svcJsonStr = kubectl get svc nginx-proxy -o json 2>&1 | Out-String
+            $svcJson = $svcJsonStr | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($svcJson -and $svcJson.status.loadBalancer.ingress) {
+                $externalIp = $svcJson.status.loadBalancer.ingress[0].ip
+            }
+        } catch { }
+        if (-not $externalIp) {
+            [System.Threading.Thread]::Sleep(5000)
+            $lbElapsed += 5
+        }
+    }
+
+    if (-not $externalIp) {
+        Write-Warning "LoadBalancer IP not assigned within ${lbTimeout}s. Check: kubectl get svc nginx-proxy"
+        $externalIp = "PENDING"
+    }
+
+    $urlA = "http://${externalIp}:8081"
+    $urlB = "http://${externalIp}:8082"
+    $urlC = "http://${externalIp}:8083"
+
+    Write-Header "Pod Endpoints"
+    Write-Host "External Access (via nginx reverse proxy on LoadBalancer):"
+    Write-Host "  Contoso:        $urlA" -ForegroundColor Green
+    Write-Host "  Fabrikam:       $urlB" -ForegroundColor Green
+    Write-Host "  Woodgrove-Bank: $urlC" -ForegroundColor Green
+    Write-Host ""
+
+    # Wait for HTTP readiness via proxy
+    Write-Host "Waiting for HTTP endpoints to respond..."
+    $httpTimeout = 60
+    $httpElapsed = 0
+    $httpA = $false; $httpB = $false; $httpC = $false
+
+    while ($httpElapsed -lt $httpTimeout -and (-not $httpA -or -not $httpB -or -not $httpC)) {
+        if (-not $httpA) {
+            try {
+                $response = Invoke-WebRequest -Uri $urlA -Method Head -TimeoutSec 5 -UseBasicParsing -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) { $httpA = $true; Write-Success "Contoso HTTP ready!" }
+            } catch { }
+        }
+        if (-not $httpB) {
+            try {
+                $response = Invoke-WebRequest -Uri $urlB -Method Head -TimeoutSec 5 -UseBasicParsing -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) { $httpB = $true; Write-Success "Fabrikam HTTP ready!" }
+            } catch { }
+        }
+        if (-not $httpC) {
+            try {
+                $response = Invoke-WebRequest -Uri $urlC -Method Head -TimeoutSec 5 -UseBasicParsing -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) { $httpC = $true; Write-Success "Woodgrove HTTP ready!" }
+            } catch { }
+        }
+
+        if (-not $httpA -or -not $httpB -or -not $httpC) {
+            [System.Threading.Thread]::Sleep(5000)
+            $httpElapsed += 5
+        }
+    }
+
+    # ========== Open Browser ==========
+    $edgeProcess = $null
+    if (-not $SkipBrowser -and $externalIp -ne "PENDING") {
+        Write-Host ""
+        Write-Host "Opening Microsoft Edge with each company in a separate tab..."
+        Write-Host "  Tab 1: Contoso      - $urlA"
+        Write-Host "  Tab 2: Fabrikam     - $urlB"
+        Write-Host "  Tab 3: Woodgrove    - $urlC"
+        Write-Host ""
+        $edgeProcess = Start-Process "msedge" -ArgumentList "--new-window `"$urlA`" `"$urlB`" `"$urlC`"" -PassThru
+    } else {
+        Write-Host "Browser access:"
+        Write-Host "  $urlA"
+        Write-Host "  $urlB"
+        Write-Host "  $urlC"
+    }
+    
+    # ========== Cleanup Prompt ==========
+    Write-Host ""
+    Write-Host "Kubernetes status:" -ForegroundColor Cyan
+    kubectl get pods -l demo=multi-party-confidential -o wide
+    Write-Host ""
+    Write-Host "Press Enter when done viewing to cleanup pods..." -ForegroundColor Yellow
+    Read-Host
+    
+    Write-Header "Cleanup Virtual Node Pods"
+    
+    if ($edgeProcess -and -not $edgeProcess.HasExited) {
+        $closeBrowser = Read-Host "Close the browser window? (Y/n)"
+        if ($closeBrowser -ne 'n' -and $closeBrowser -ne 'N') {
+            try { $edgeProcess | Stop-Process -Force -ErrorAction SilentlyContinue } catch { }
+        }
+    }
+    
+    Write-Host "Deleting pods..."
+    kubectl delete pod $pod_companyA --ignore-not-found 2>&1 | Out-Null
+    kubectl delete pod $pod_companyB --ignore-not-found 2>&1 | Out-Null
+    kubectl delete pod $pod_companyC --ignore-not-found 2>&1 | Out-Null
+    kubectl delete secret acr-secret --ignore-not-found 2>&1 | Out-Null
+
+    # Cleanup nginx proxy
+    kubectl delete deployment nginx-proxy --ignore-not-found 2>&1 | Out-Null
+    kubectl delete service nginx-proxy --ignore-not-found 2>&1 | Out-Null
+    kubectl delete configmap nginx-proxy-config --ignore-not-found 2>&1 | Out-Null
+    
+    # Cleanup temp files
+    Remove-Item -Path $contosoYamlPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $fabrikamYamlPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $woodgroveYamlPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $PSScriptRoot "nginx-proxy.yaml") -Force -ErrorAction SilentlyContinue
+    
+    Write-Success "All pods deleted. AKS cluster, ACR, and Key Vaults preserved."
+    Write-Host "Run -Cleanup to delete all resources including the AKS cluster."
+}
+
+# ============================================================================
 # Cleanup Phase
 # ============================================================================
 
@@ -1580,11 +3116,16 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
     Write-Host "  Fabrikam:       Confidential (AMD SEV-SNP) - CAN attest" -ForegroundColor Green
     Write-Host "  Woodgrove-Bank: Confidential (AMD SEV-SNP) - CAN attest + cross-company access" -ForegroundColor Green
     Write-Host ""
-    Write-Host "Usage:" -ForegroundColor Yellow
+    Write-Host "Usage (Direct ACI):" -ForegroundColor Yellow
     Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Build         # Build container image"
     Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Deploy        # Deploy all 3 containers"
     Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Build -Deploy # Build and deploy"
     Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Cleanup       # Delete all resources"
+    Write-Host ""
+    Write-Host "Usage (AKS Virtual Nodes):" -ForegroundColor Yellow
+    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Build -AKS         # Build + create AKS cluster"
+    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Deploy -AKS        # Deploy pods on virtual nodes"
+    Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Build -Deploy -AKS # Full AKS pipeline"
     Write-Host ""
     Write-Host "Required Parameter:" -ForegroundColor Yellow
     Write-Host "  -Prefix <code>  A short, unique identifier (3-8 lowercase alphanumeric chars)"
@@ -1593,6 +3134,7 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
     Write-Host "                  Examples: jd01, dev, team42, acme" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Options:"
+    Write-Host "  -AKS            Deploy to AKS with confidential virtual nodes instead of direct ACI"
     Write-Host "  -SkipBrowser    Don't open browser after deployment"
     Write-Host "  -RegistryName   Custom ACR name (default: random)"
     Write-Host "  -Location       Azure region (default: eastus)"
@@ -1605,6 +3147,13 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
         Write-Host "  Resource Group: $($config.resourceGroup)"
         Write-Host "  Registry: $($config.loginServer)"
         Write-Host "  Image: $($config.fullImage)"
+        if ($config.deploymentTarget -eq 'AKS') {
+            Write-Host "  Deployment Target: AKS Virtual Nodes" -ForegroundColor Cyan
+            Write-Host "  AKS Cluster: $($config.aksClusterName)" -ForegroundColor Cyan
+            Write-Host "  VNet: $($config.vnetName)" -ForegroundColor Cyan
+        } else {
+            Write-Host "  Deployment Target: Direct ACI" -ForegroundColor Green
+        }
     } else {
         Write-Host "No existing configuration. Run with -Prefix <code> -Build to get started." -ForegroundColor Yellow
     }
@@ -1646,16 +3195,36 @@ try {
     
     if ($Build) {
         $config = Invoke-Build -RegistryName $RegistryName
+        
+        # If -AKS specified, also create AKS cluster with virtual nodes
+        if ($AKS) {
+            Invoke-BuildAKS
+        }
     }
     
     if ($Deploy) {
-        Invoke-Deploy -SkipBrowser:$SkipBrowser
+        if ($AKS) {
+            # Deploy as pods on AKS virtual nodes (runs as ACI container groups)
+            Invoke-DeployAKS -SkipBrowser:$SkipBrowser
+        } else {
+            # Deploy directly to ACI (default)
+            Invoke-Deploy -SkipBrowser:$SkipBrowser
+        }
     }
     
     if ($Cleanup) {
         Invoke-Cleanup
     }
 } catch {
-    Write-Error "Error: $_"
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Red
+    Write-Host "║  DEPLOYMENT ERROR                                            ║" -ForegroundColor Red
+    Write-Host "╠══════════════════════════════════════════════════════════════╣" -ForegroundColor Red
+    Write-Host "║  $_" -ForegroundColor Red
+    Write-Host "║" -ForegroundColor Red
+    Write-Host "║  Script:     $($_.InvocationInfo.ScriptName | Split-Path -Leaf)" -ForegroundColor Red
+    Write-Host "║  Line:       $($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Red
+    Write-Host "║  Command:    $($_.InvocationInfo.Line.Trim().Substring(0, [Math]::Min(50, $_.InvocationInfo.Line.Trim().Length)))" -ForegroundColor Red
+    Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Red
     exit 1
 }
