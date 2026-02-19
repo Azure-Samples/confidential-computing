@@ -1,0 +1,15 @@
+# Requirements for CVM multi-party confidential computing demo
+# Shared by app.py (Flask web app) and skr_shim.py (CVM attestation service)
+
+# Web framework + WSGI server
+flask>=3.0.0,<4.0.0
+gunicorn>=22.0.0,<24.0.0
+
+# HTTP client (inter-VM calls + IMDS + AKV REST API)
+requests>=2.31.0,<3.0.0
+
+# Cryptography (RSA-OAEP encryption/decryption of company data)
+cryptography>=42.0.0,<45.0.0
+
+# Azure managed identity (fallback for IMDS token acquisition in skr_shim)
+azure-identity>=1.15.0,<2.0.0
