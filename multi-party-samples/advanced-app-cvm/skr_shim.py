@@ -67,6 +67,16 @@ except ImportError as e:
     _CVM_IMPORT_ERROR = str(e)
     log.warning(f"cvm-attestation-tools not available: {e}")
 
+# Lower-level TPM wrapper for key_hsm unwrapping
+_TPM_UNWRAP_AVAILABLE = False
+try:
+    from src.tpm_wrapper import TssWrapper
+    from src.os_info import OsInfo
+    _TPM_UNWRAP_AVAILABLE = True
+    log.info("TPM unwrap modules loaded successfully")
+except ImportError as e:
+    log.warning(f"TPM unwrap modules not available: {e}")
+
 
 # ---------------------------------------------------------------------------
 # Managed Identity token (via IMDS — works on any Azure VM with MI assigned)
@@ -256,6 +266,180 @@ def decode_jws_payload(jws_token):
 
     payload_bytes = base64.urlsafe_b64decode(payload_b64)
     return json.loads(payload_bytes)
+
+
+# ---------------------------------------------------------------------------
+# key_hsm JWE Unwrapping — extract private RSA components from TPM-encrypted blob
+# ---------------------------------------------------------------------------
+def unwrap_key_hsm(key_hsm_value):
+    """
+    Unwrap the key_hsm JWE field from an AKV key release response.
+
+    key_hsm contains the RSA private key material encrypted with the TPM
+    ephemeral key using CKM_RSA_AES_KEY_WRAP:
+      1. A random AES-256 key is RSA-encrypted with the TPM ephemeral RSA public key
+      2. The actual RSA private key material is AES Key Wrapped with that AES key
+      3. ciphertext = RSA_encrypted_AES_key || AES_wrapped_key_material
+
+    Since TPM primary keys are deterministic (same hierarchy seed + template +
+    PCR policy → same key), we recreate the same ephemeral key that was used
+    during MAA attestation by calling get_ephemeral_key() again.
+
+    Returns:
+        dict: JWK with private components (d, p, q, dp, dq, qi) or None on failure
+    """
+    if not _TPM_UNWRAP_AVAILABLE:
+        log.warning("TPM unwrap not available — cannot extract private key from key_hsm")
+        return None
+
+    try:
+        # ---- Parse key_hsm ----
+        # key_hsm is base64url-encoded JSON:
+        #   {"schema_version":"1.0","header":{"kid":"TpmEphemeralEncryptionKey",
+        #    "alg":"dir","enc":"CKM_RSA_AES_KEY_WRAP"},"ciphertext":"..."}
+        if isinstance(key_hsm_value, str):
+            # base64url decode
+            padded = key_hsm_value + '=' * (4 - len(key_hsm_value) % 4)
+            hsm_bytes = base64.urlsafe_b64decode(padded)
+            hsm_json = json.loads(hsm_bytes)
+        elif isinstance(key_hsm_value, dict):
+            hsm_json = key_hsm_value
+        else:
+            log.error(f"key_hsm: unexpected type {type(key_hsm_value)}")
+            return None
+
+        header = hsm_json.get('header', {})
+        enc = header.get('enc', '')
+        ct_b64 = hsm_json.get('ciphertext', '')
+
+        if enc != 'CKM_RSA_AES_KEY_WRAP':
+            log.error(f"key_hsm: unsupported enc={enc}")
+            return None
+
+        # Decode ciphertext (may be base64 or base64url)
+        try:
+            ciphertext = base64.urlsafe_b64decode(ct_b64 + '=' * (4 - len(ct_b64) % 4))
+        except Exception:
+            ciphertext = base64.b64decode(ct_b64 + '=' * (4 - len(ct_b64) % 4))
+
+        # Split: first 256 bytes = RSA-encrypted AES key (RSA-2048)
+        # Remainder  = AES Key Wrapped private key material
+        RSA_SIZE = 256  # RSA-2048 output is 256 bytes
+        if len(ciphertext) <= RSA_SIZE:
+            log.error(f"key_hsm: ciphertext too short ({len(ciphertext)} bytes)")
+            return None
+
+        rsa_encrypted_aes_key = ciphertext[:RSA_SIZE]
+        aes_wrapped_material = ciphertext[RSA_SIZE:]
+        log.info(f"key_hsm: total={len(ciphertext)}, RSA part={RSA_SIZE}, "
+                 f"AES wrapped={len(aes_wrapped_material)} bytes")
+
+        # ---- Re-create the TPM ephemeral key ----
+        # TPM primary keys are deterministic: same hierarchy seed + template + PCR
+        # policy → same key pair.  PCRs haven't changed since attestation (seconds ago).
+        uwlog = CvmLogger("skr-unwrap").get_logger()
+        tss = TssWrapper(uwlog)
+        os_info = OsInfo()
+        eph_key, key_handle, tpm = tss.get_ephemeral_key(os_info.pcr_list)
+
+        try:
+            # ---- RSA decrypt the AES key via TPM ----
+            aes_key = _tpm_rsa_decrypt_for_unwrap(
+                tss, tpm, key_handle, rsa_encrypted_aes_key, os_info.pcr_list
+            )
+            log.info(f"key_hsm: RSA decrypt OK, AES key={len(aes_key)} bytes")
+
+            # ---- AES Key Unwrap (RFC 5649 / NIST SP 800-38F) ----
+            from cryptography.hazmat.primitives.keywrap import (
+                aes_key_unwrap_with_padding,
+                aes_key_unwrap,
+            )
+            try:
+                unwrapped = aes_key_unwrap_with_padding(aes_key, aes_wrapped_material)
+            except Exception:
+                # Some AKV versions use RFC 3394 (without padding)
+                unwrapped = aes_key_unwrap(aes_key, aes_wrapped_material)
+
+            log.info(f"key_hsm: AES unwrap OK, material={len(unwrapped)} bytes")
+
+            # ---- Parse unwrapped key material ----
+            key_material = json.loads(unwrapped)
+            log.info(f"key_hsm: unwrapped key type={key_material.get('kty')}, "
+                     f"has_d={'d' in key_material}, has_p={'p' in key_material}")
+            return key_material
+
+        finally:
+            try:
+                tpm.close()
+            except Exception:
+                pass
+
+    except Exception as e:
+        log.error(f"key_hsm unwrap failed: {e}", exc_info=True)
+        return None
+
+
+def _tpm_rsa_decrypt_for_unwrap(tss, tpm, key_handle, ciphertext, pcr_list):
+    """
+    RSA decrypt using the TPM ephemeral key for key_hsm unwrapping.
+
+    CKM_RSA_AES_KEY_WRAP uses RSA-OAEP (SHA-256) for the AES key encryption.
+    We try OAEP first; if the TPM types aren't available we fall back to the
+    existing TssWrapper.decrypt_with_ephemeral_key() which uses RSAES.
+    """
+    # Try direct TPM call with OAEP first
+    try:
+        # TSS.MSR Python types — path is under CVM_ATTEST_BASE/TSS_MSR/
+        tss_py_base = os.path.join(CVM_ATTEST_BASE, 'TSS_MSR', 'TSS.Py')
+        if os.path.isdir(tss_py_base) and tss_py_base not in sys.path:
+            sys.path.insert(0, tss_py_base)
+
+        # Import TPM type definitions (auto-generated from TPM 2.0 spec)
+        from tpm_20.TpmTypes import (
+            TPM_SE, TPM_ALG_ID, TPMS_SCHEME_OAEP,
+            TPMS_PCR_SELECTION, TPMT_SYM_DEF, TPM_RH,
+        )
+
+        # Start a policy session (required for PCR-bound keys)
+        # Full TPM2_StartAuthSession signature: (tpmKey, bind, nonceCaller,
+        #   encryptedSalt, sessionType, symmetric, authHash)
+        sess = tpm.StartAuthSession(
+            TPM_RH.NULL,           # tpmKey (unsalted — no encryption key)
+            TPM_RH.NULL,           # bind   (unbound session)
+            bytes(),               # nonceCaller (library generates one)
+            bytes(),               # encryptedSalt (unsalted)
+            TPM_SE.POLICY,         # sessionType = POLICY
+            TPMT_SYM_DEF(),        # symmetric = NULL (no parameter encryption)
+            TPM_ALG_ID.SHA256      # authHash
+        )
+
+        # Satisfy the PCR policy that protects the ephemeral key
+        pcr_sel = TPMS_PCR_SELECTION(TPM_ALG_ID.SHA256, pcr_list)
+        tpm.PolicyPCR(sess, b'', [pcr_sel])
+
+        # RSA-OAEP decrypt (SHA-256) — matches CKM_RSA_AES_KEY_WRAP spec
+        scheme = TPMS_SCHEME_OAEP(TPM_ALG_ID.SHA256)
+        decrypted = tpm.withSession(sess).RSA_Decrypt(
+            key_handle, ciphertext, scheme, b''
+        )
+        log.info("key_hsm: RSA-OAEP decrypt via TPM succeeded")
+        return bytes(decrypted)
+
+    except ImportError as ie:
+        log.warning(f"TPM OAEP types not importable ({ie}), trying RSAES fallback")
+    except Exception as e:
+        log.warning(f"RSA-OAEP decrypt failed ({e}), trying RSAES fallback")
+
+    # Fallback: try RSAES via TssWrapper (may work if AKV used PKCS#1 v1.5)
+    log.info("key_hsm: attempting RSAES fallback via TssWrapper")
+    # decrypt_with_ephemeral_key closes the TPM, so we need a fresh key
+    uwlog2 = CvmLogger("skr-unwrap-rsaes").get_logger()
+    tss2 = TssWrapper(uwlog2)
+    os_info2 = OsInfo()
+    _, kh2, tpm2 = tss2.get_ephemeral_key(os_info2.pcr_list)
+    result = tss2.decrypt_with_ephemeral_key(ciphertext, os_info2.pcr_list, kh2, tpm2)
+    log.info("key_hsm: RSAES fallback succeeded")
+    return bytes(result)
 
 
 def extract_key_from_release(release_payload):
@@ -508,9 +692,37 @@ def key_release():
         key_data = extract_key_from_release(key_payload)
 
         log.info(
-            f"Key released successfully: {kid} "
-            f"(type={key_data.get('kty', '?')}, ops={key_data.get('key_ops', [])})"
+            f"Key released: {kid} "
+            f"(type={key_data.get('kty', '?')}, ops={key_data.get('key_ops', [])}, "
+            f"has_d={'d' in key_data}, has_key_hsm={'key_hsm' in key_data})"
         )
+
+        # ---- Step 5: Unwrap key_hsm to extract private RSA components ----
+        # AKV returns the private key material inside key_hsm, encrypted with
+        # the TPM ephemeral key from attestation.  Without unwrapping, we only
+        # have public components (n, e) — encryption works but decryption fails.
+        if 'key_hsm' in key_data and 'd' not in key_data:
+            log.info("  Step 5: Unwrapping key_hsm to extract private key...")
+            unwrapped_jwk = unwrap_key_hsm(key_data['key_hsm'])
+            if unwrapped_jwk:
+                # Merge private components into the key
+                private_fields = ['d', 'p', 'q', 'dp', 'dq', 'qi']
+                merged = 0
+                for field in private_fields:
+                    if field in unwrapped_jwk:
+                        key_data[field] = unwrapped_jwk[field]
+                        merged += 1
+                # Also pick up any other fields from the unwrapped key
+                for field in unwrapped_jwk:
+                    if field not in key_data:
+                        key_data[field] = unwrapped_jwk[field]
+                log.info(f"  Step 5: Merged {merged} private components into JWK")
+                # Remove the encrypted blob — no longer needed
+                key_data.pop('key_hsm', None)
+            else:
+                log.warning("  Step 5: key_hsm unwrap failed — returning public-only key")
+        elif 'd' in key_data:
+            log.info("  Key already has private component 'd' — no unwrap needed")
 
         # Return in the exact format the ACI SKR sidecar uses:
         #   { "key": { <JWK> } }
