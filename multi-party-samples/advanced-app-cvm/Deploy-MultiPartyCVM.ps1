@@ -12,7 +12,7 @@
     - Private VNet with no public IPs on any VM
     - Network Security Group blocking all inbound except application traffic
     - Application Gateway WAF_v2 with a single public IP (per-company port routing)
-    - Random admin username + 40-char password per VM (hidden unless -DEBUG)
+    - Random admin username + 40-char password per VM (hidden unless -DebugMode)
     
     Woodgrove gets cross-company Key Vault access to Contoso and Fabrikam,
     enabling the multi-party analytics demo where Woodgrove can release partner
@@ -36,7 +36,7 @@
 .PARAMETER Location
     Azure region (default: northeurope). Must support DCas_v5 series VMs.
 
-.PARAMETER DEBUG
+.PARAMETER DebugMode
     Debug mode: deploys Azure Bastion for SSH access and outputs the random
     VM credentials (username + password) at the end of the script.
 
@@ -54,7 +54,7 @@
     Standard deployment — credentials hidden, no Bastion.
 
 .EXAMPLE
-    .\Deploy-MultiPartyCVM.ps1 -Prefix "demo" -DEBUG
+    .\Deploy-MultiPartyCVM.ps1 -Prefix "demo" -DebugMode
     Debug deployment — Bastion enabled, credentials printed at the end.
 
 .EXAMPLE
@@ -71,7 +71,7 @@ param (
     [string]$Location = "northeurope",
 
     [Parameter(Mandatory = $false)]
-    [switch]$DEBUG,
+    [switch]$DebugMode,
 
     [Parameter(Mandatory = $false)]
     [switch]$Cleanup,
@@ -219,6 +219,35 @@ function Test-Prerequisites {
 }
 
 
+function Set-KVAccessPolicyWithRetry {
+    <#
+    .SYNOPSIS
+        Wrapper around Set-AzKeyVaultAccessPolicy that retries on 'NotFound'
+        errors caused by ARM propagation delays after Key Vault creation.
+    #>
+    param(
+        [hashtable]$PolicyParams,
+        [int]$MaxRetries = 6,
+        [int]$DelaySeconds = 10
+    )
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        try {
+            Set-AzKeyVaultAccessPolicy @PolicyParams
+            return
+        }
+        catch {
+            if ($_.Exception.Message -match 'NotFound' -and $attempt -lt $MaxRetries) {
+                Write-Host "    Vault not yet available (attempt $attempt/$MaxRetries), retrying in ${DelaySeconds}s..." -ForegroundColor Yellow
+                Start-Sleep -Seconds $DelaySeconds
+            }
+            else {
+                throw
+            }
+        }
+    }
+}
+
+
 function Save-Config {
     param([hashtable]$Config)
     $Config | ConvertTo-Json -Depth 5 | Set-Content -Path $configFile -Force
@@ -243,12 +272,13 @@ if ($Cleanup) {
     if (Test-Path $configFile) {
         $config = Get-Config
         $resgrp = $config.resourceGroup
-        Write-Host "Removing resource group: $resgrp" -ForegroundColor Yellow
+        Write-Host "Removing resource group: $resgrp (running in background)..." -ForegroundColor Yellow
 
-        Remove-AzResourceGroup -Name $resgrp -Force
+        Remove-AzResourceGroup -Name $resgrp -Force -AsJob | Out-Null
         Remove-Item $configFile -Force -ErrorAction SilentlyContinue
 
-        Write-Host "Cleanup complete." -ForegroundColor Green
+        Write-Host "Cleanup job submitted. Resource group deletion continues in the background." -ForegroundColor Green
+        Write-Host "Check status: Get-Job | Where-Object Command -like '*Remove-AzResourceGroup*'" -ForegroundColor Gray
     }
     else {
         Write-Host "No config file found. Nothing to clean up." -ForegroundColor Yellow
@@ -266,7 +296,7 @@ if (-not $Prefix) {
     Write-Host ""
     Write-Host "Usage:" -ForegroundColor Yellow
     Write-Host "  .\$scriptName -Prefix <name>          Deploy (credentials hidden)"
-    Write-Host "  .\$scriptName -Prefix <name> -DEBUG   Deploy with Bastion + credentials shown"
+    Write-Host "  .\$scriptName -Prefix <name> -DebugMode   Deploy with Bastion + credentials shown"
     Write-Host "  .\$scriptName -Cleanup                Remove all resources"
     Write-Host ""
 
@@ -292,7 +322,7 @@ $resgrp = "$basename-cvm-rg"
 $vnetName = "$basename-vnet"
 $storageName = ($basename + "stor") -replace '[^a-z0-9]', ''
 
-# Per-company random credentials (NOT displayed unless -DEBUG)
+# Per-company random credentials (NOT displayed unless -DebugMode)
 $credentials = @{}
 foreach ($company in $companies) {
     $credentials[$company] = New-RandomCredential
@@ -318,15 +348,17 @@ Write-Host "  Resource Group: $resgrp"
 Write-Host "  Location:       $Location"
 Write-Host "  VM Size:        $VMSize"
 Write-Host "  Key Vaults:     $($kvNames['contoso']), $($kvNames['fabrikam']), $($kvNames['woodgrove'])"
-if ($DEBUG) {
+if ($DebugMode) {
     Write-Host "  DEBUG MODE:     ENABLED (Bastion + credentials)" -ForegroundColor Yellow
 }
 else {
-    Write-Host "  Credentials:    Hidden (use -DEBUG to display)"
+    Write-Host "  Credentials:    Hidden (use -DebugMode to display)"
 }
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
 
+
+try {
 
 # ============================================================================
 # PHASE 1: RESOURCE GROUP + NETWORKING + STORAGE
@@ -350,7 +382,7 @@ $subnetConfigs = @(
     (New-AzVirtualNetworkSubnetConfig -Name "VMSubnet" -AddressPrefix "10.0.1.0/24"),
     (New-AzVirtualNetworkSubnetConfig -Name "AppGwSubnet" -AddressPrefix "10.0.2.0/24")
 )
-if ($DEBUG) {
+if ($DebugMode) {
     $subnetConfigs += (New-AzVirtualNetworkSubnetConfig -Name "AzureBastionSubnet" -AddressPrefix "10.0.99.0/26")
 }
 
@@ -364,7 +396,7 @@ Write-Host "  VNet: $vnetName (10.0.0.0/16)" -ForegroundColor Green
 
 # --- Network Security Group for VM Subnet ---
 # Locks down each CVM to only the application traffic it needs.
-# In -DEBUG mode, SSH (port 22) from the Bastion subnet is also permitted.
+# In -DebugMode, SSH (port 22) from the Bastion subnet is also permitted.
 $nsgName = "$basename-vm-nsg"
 Write-Host "  Creating NSG: $nsgName"
 
@@ -396,11 +428,11 @@ $nsgRules += New-AzNetworkSecurityRuleConfig `
     -DestinationAddressPrefix "10.0.1.0/24" `
     -DestinationPortRange 443
 
-if ($DEBUG) {
+if ($DebugMode) {
     # Allow SSH from Azure Bastion subnet (DEBUG only)
     $nsgRules += New-AzNetworkSecurityRuleConfig `
         -Name "Allow-Bastion-SSH" `
-        -Description "Allow SSH from Azure Bastion subnet (DEBUG mode only)" `
+        -Description "Allow SSH from Azure Bastion subnet (DebugMode only)" `
         -Access Allow `
         -Protocol Tcp `
         -Direction Inbound `
@@ -438,7 +470,7 @@ Set-AzVirtualNetworkSubnetConfig `
     -NetworkSecurityGroup $nsg | Out-Null
 $vnet | Set-AzVirtualNetwork | Out-Null
 
-if ($DEBUG) {
+if ($DebugMode) {
     Write-Host "  NSG: $nsgName (HTTP 80, HTTPS 443, SSH 22)" -ForegroundColor Green
 }
 else {
@@ -451,7 +483,8 @@ $storageAccount = New-AzStorageAccount `
     -ResourceGroupName $resgrp `
     -Location $Location `
     -SkuName Standard_LRS `
-    -Kind StorageV2
+    -Kind StorageV2 `
+    -AllowBlobPublicAccess $true
 $storageCtx = $storageAccount.Context
 
 New-AzStorageContainer -Name "appfiles" -Context $storageCtx -Permission Off | Out-Null
@@ -485,6 +518,8 @@ $sasToken = New-AzStorageContainerSASToken `
     -Context $storageCtx `
     -Permission r `
     -ExpiryTime (Get-Date).AddHours(4)
+# Ensure SAS token starts with '?' for URL concatenation
+if ($sasToken -and -not $sasToken.StartsWith('?')) { $sasToken = "?$sasToken" }
 $blobBaseUrl = "https://$storageName.blob.core.windows.net/appfiles"
 
 Write-Host "Phase 1 complete.`n" -ForegroundColor Green
@@ -542,19 +577,21 @@ foreach ($company in $companies) {
 
     # ---- KV access: company's own identity ----
     Write-Host "  Granting identity KV access"
-    Set-AzKeyVaultAccessPolicy `
-        -VaultName $kvName `
-        -ResourceGroupName $resgrp `
-        -ObjectId $identity.PrincipalId `
-        -PermissionsToKeys get, release, wrapKey, unwrapKey, encrypt, decrypt `
-        -PermissionsToSecrets get, list
+    Set-KVAccessPolicyWithRetry -PolicyParams @{
+        VaultName        = $kvName
+        ResourceGroupName = $resgrp
+        ObjectId         = $identity.PrincipalId
+        PermissionsToKeys    = @('get','release','wrapKey','unwrapKey','encrypt','decrypt')
+        PermissionsToSecrets = @('get','list')
+    }
 
     # ---- KV access: CVM Orchestrator SP (for disk encryption key release) ----
-    Set-AzKeyVaultAccessPolicy `
-        -VaultName $kvName `
-        -ResourceGroupName $resgrp `
-        -ObjectId $cvmAgent.Id `
-        -PermissionsToKeys get, release
+    Set-KVAccessPolicyWithRetry -PolicyParams @{
+        VaultName        = $kvName
+        ResourceGroupName = $resgrp
+        ObjectId         = $cvmAgent.Id
+        PermissionsToKeys = @('get','release')
+    }
 
     # ---- CMK for confidential OS disk encryption ----
     Write-Host "  Creating CMK: $cmkName (RSA-HSM 3072-bit)"
@@ -582,29 +619,32 @@ foreach ($company in $companies) {
     New-AzDiskEncryptionSet -ResourceGroupName $resgrp -Name $desName -DiskEncryptionSet $desConfig | Out-Null
 
     $desIdentity = (Get-AzDiskEncryptionSet -Name $desName -ResourceGroupName $resgrp).Identity.PrincipalId
-    Set-AzKeyVaultAccessPolicy `
-        -VaultName $kvName `
-        -ResourceGroupName $resgrp `
-        -ObjectId $desIdentity `
-        -PermissionsToKeys wrapKey, unwrapKey, get `
-        -BypassObjectIdValidation
+    Set-KVAccessPolicyWithRetry -PolicyParams @{
+        VaultName              = $kvName
+        ResourceGroupName      = $resgrp
+        ObjectId               = $desIdentity
+        PermissionsToKeys      = @('wrapKey','unwrapKey','get')
+        BypassObjectIdValidation = $true
+    }
 
     $desIds[$company] = (Get-AzDiskEncryptionSet -ResourceGroupName $resgrp -Name $desName).Id
 }
 
 # ---- Cross-company access: Woodgrove → Contoso + Fabrikam KVs ----
 Write-Host "`n  Granting Woodgrove cross-company Key Vault access..." -ForegroundColor Cyan
-Set-AzKeyVaultAccessPolicy `
-    -VaultName $kvNames["contoso"] `
-    -ResourceGroupName $resgrp `
-    -ObjectId $identityPrincipalIds["woodgrove"] `
-    -PermissionsToKeys get, release
+Set-KVAccessPolicyWithRetry -PolicyParams @{
+    VaultName        = $kvNames["contoso"]
+    ResourceGroupName = $resgrp
+    ObjectId         = $identityPrincipalIds["woodgrove"]
+    PermissionsToKeys = @('get','release')
+}
 
-Set-AzKeyVaultAccessPolicy `
-    -VaultName $kvNames["fabrikam"] `
-    -ResourceGroupName $resgrp `
-    -ObjectId $identityPrincipalIds["woodgrove"] `
-    -PermissionsToKeys get, release
+Set-KVAccessPolicyWithRetry -PolicyParams @{
+    VaultName        = $kvNames["fabrikam"]
+    ResourceGroupName = $resgrp
+    ObjectId         = $identityPrincipalIds["woodgrove"]
+    PermissionsToKeys = @('get','release')
+}
 
 Write-Host "  Woodgrove can now release keys from Contoso and Fabrikam KVs" -ForegroundColor Green
 Write-Host "`nPhase 2 complete.`n" -ForegroundColor Green
@@ -687,92 +727,99 @@ foreach ($company in $companies) {
     Write-Host "    $($company.PadRight(12)) VmId: $($vm.VmId)" -ForegroundColor Gray
 }
 
-# ---- Create per-VM-bound application keys ----
-# Each key's release policy requires BOTH:
-#   1. x-ms-isolation-tee.x-ms-compliance-status = azure-compliant-cvm  (platform attestation)
-#   2. x-ms-isolation-tee.x-ms-runtime.vm-configuration.vmUniqueId      (per-VM binding)
+# ---- Create application keys with CVM release policy ----
+# IMPORTANT: We use a CUSTOM release policy instead of -UseDefaultCVMPolicy.
 #
-# Key access matrix:
-#   Contoso key  → releasable by Contoso VM + Woodgrove VM
-#   Fabrikam key → releasable by Fabrikam VM + Woodgrove VM
-#   Woodgrove key → releasable by Woodgrove VM only
+# Why: UseDefaultCVMPolicy generates a policy that checks "x-ms-compliance-status"
+# as a TOP-LEVEL claim. However, MAA guest attestation tokens (from cvm-attestation-tools)
+# place this claim NESTED under "x-ms-isolation-tee.x-ms-compliance-status".
+# AKV evaluates claims using dot-notation paths, so the top-level check fails.
+#
+# Our custom policy uses the correct nested claim paths:
+#   1. x-ms-isolation-tee.x-ms-attestation-type    = sevsnpvm
+#   2. x-ms-isolation-tee.x-ms-compliance-status    = azure-compliant-cvm
+#
+# Key access matrix (via KV access policies):
+#   Contoso key  → Contoso identity + Woodgrove identity
+#   Fabrikam key → Fabrikam identity + Woodgrove identity
+#   Woodgrove key → Woodgrove identity only
 
-Write-Host "`n  Creating per-VM-bound application keys..." -ForegroundColor Cyan
+Write-Host "`n  Creating application keys with CVM release policy..." -ForegroundColor Cyan
 
-# Define which VMs are authorised to release each company's key
-$keyAccess = @{
-    "contoso"   = @("contoso", "woodgrove")
-    "fabrikam"  = @("fabrikam", "woodgrove")
-    "woodgrove" = @("woodgrove")
+# Build a custom release policy using nested claim paths.
+# UseDefaultCVMPolicy checks "x-ms-compliance-status" (top-level),
+# but MAA guest attestation tokens place this claim under
+# "x-ms-isolation-tee.x-ms-compliance-status" (nested).  AKV
+# evaluates claims in dot-notation, so the default CVM policy fails.
+# We use the REST API to create keys with the correct nested paths
+# (compatible with any Az module version).
+$maaAuthority = "https://$maaEndpoint"
+$releasePolicyObj = @{
+    version = "1.0.0"
+    anyOf = @(
+        @{
+            authority = $maaAuthority
+            allOf = @(
+                @{
+                    claim  = "x-ms-isolation-tee.x-ms-compliance-status"
+                    equals = "azure-compliant-cvm"
+                }
+                @{
+                    claim  = "x-ms-isolation-tee.x-ms-attestation-type"
+                    equals = "sevsnpvm"
+                }
+            )
+        }
+    )
 }
+$releasePolicyJson = $releasePolicyObj | ConvertTo-Json -Depth 10 -Compress
+$releasePolicyBase64Url = [Convert]::ToBase64String(
+    [System.Text.Encoding]::UTF8.GetBytes($releasePolicyJson)
+).Replace('+','-').Replace('/','_').TrimEnd('=')
+
+Write-Host "  Release policy authority: $maaAuthority" -ForegroundColor Gray
+Write-Host "    x-ms-isolation-tee.x-ms-compliance-status = azure-compliant-cvm" -ForegroundColor Gray
+Write-Host "    x-ms-isolation-tee.x-ms-attestation-type  = sevsnpvm" -ForegroundColor Gray
+
+# Get AKV access token for REST API calls
+$akvToken = (Get-AzAccessToken -ResourceUrl "https://vault.azure.net").Token
 
 foreach ($company in $companies) {
     $kvName = $kvNames[$company]
     $appKeyName = "$company-secret-key"
-    $authorizedVMs = $keyAccess[$company]
 
     Write-Host "`n    $($company.ToUpper()) key: $appKeyName" -ForegroundColor Cyan
-    Write-Host "      Authorised VMs: $($authorizedVMs -join ', ')" -ForegroundColor Gray
+    Write-Host "      VmId: $($vmIds[$company])" -ForegroundColor Gray
 
-    # Build release policy with per-VM anyOf entries
-    # Each entry allows ONE specific VM (by vmUniqueId) that has passed CVM attestation
-    $authorityEntries = @()
-    foreach ($authorizedCompany in $authorizedVMs) {
-        $authorityEntries += @{
-            authority = "https://$maaEndpoint"
-            allOf     = @(
-                @{
-                    claim  = "x-ms-isolation-tee.x-ms-compliance-status"
-                    equals = "azure-compliant-cvm"
-                },
-                @{
-                    claim  = "x-ms-isolation-tee.x-ms-runtime.vm-configuration.vmUniqueId"
-                    equals = $vmIds[$authorizedCompany]
-                }
-            )
+    # Create HSM-backed exportable key via REST API with custom release policy
+    $createKeyBody = @{
+        kty      = "RSA-HSM"
+        key_size = 2048
+        key_ops  = @("wrapKey", "unwrapKey", "encrypt", "decrypt")
+        attributes = @{
+            exportable = $true
         }
-        Write-Host "      Allow: $authorizedCompany ($($vmIds[$authorizedCompany]))" -ForegroundColor Gray
-    }
+        release_policy = @{
+            contentType = "application/json; charset=utf-8"
+            data        = $releasePolicyBase64Url
+        }
+    } | ConvertTo-Json -Depth 10
 
-    $releasePolicy = @{
-        version = "1.0.0"
-        anyOf   = $authorityEntries
-    }
-
-    $policyFile = New-TemporaryFile
-    $releasePolicy | ConvertTo-Json -Depth 10 | Set-Content $policyFile.FullName
-
+    $createKeyUri = "https://$kvName.vault.azure.net/keys/$($appKeyName)/create?api-version=7.4"
     try {
-        Add-AzKeyVaultKey `
-            -VaultName $kvName `
-            -Name $appKeyName `
-            -Size 2048 `
-            -KeyOps wrapKey, unwrapKey, encrypt, decrypt `
-            -KeyType RSA `
-            -Destination HSM `
-            -Exportable `
-            -ReleasePolicyPath $policyFile.FullName | Out-Null
-        Write-Host "      Key created with per-VM release policy" -ForegroundColor Green
+        $null = Invoke-RestMethod -Method POST -Uri $createKeyUri `
+            -Headers @{ Authorization = "Bearer $akvToken" } `
+            -ContentType "application/json" `
+            -Body $createKeyBody
+        Write-Host "      Key created with custom CVM release policy" -ForegroundColor Green
     }
     catch {
-        Write-Host "      WARNING: Per-VM policy failed, falling back to CVM-only policy..." -ForegroundColor Yellow
-        Add-AzKeyVaultKey `
-            -VaultName $kvName `
-            -Name $appKeyName `
-            -Size 2048 `
-            -KeyOps wrapKey, unwrapKey, encrypt, decrypt `
-            -KeyType RSA `
-            -Destination HSM `
-            -Exportable `
-            -UseDefaultCVMPolicy | Out-Null
-        Write-Host "      Key created with default CVM policy (no per-VM binding)" -ForegroundColor Yellow
-    }
-    finally {
-        Remove-Item $policyFile.FullName -Force -ErrorAction SilentlyContinue
+        Write-Host "      ERROR creating key: $($_.Exception.Message)" -ForegroundColor Red
+        throw
     }
 }
 
-Write-Host "`n  All application keys created with per-VM binding." -ForegroundColor Green
+Write-Host "`n  All application keys created." -ForegroundColor Green
 
 Write-Host "`n  All VMs created. Running bootstrap scripts..." -ForegroundColor Cyan
 
@@ -807,7 +854,7 @@ foreach ($company in $companies) {
 
     $commandToExecute = "bash setup-vm.sh $company $company-secret-key $akvEndpoint $maaEndpoint $clientId $partnerContosoUrl $partnerFabrikamUrl $partnerContosoAkv $partnerFabrikamAkv"
 
-    $extensionSettings = @{
+    $protectedSettings = @{
         fileUris         = $fileUris
         commandToExecute = $commandToExecute
     } | ConvertTo-Json -Depth 3
@@ -820,7 +867,7 @@ foreach ($company in $companies) {
         -ExtensionType "CustomScript" `
         -TypeHandlerVersion "2.1" `
         -Location $Location `
-        -SettingString $extensionSettings | Out-Null
+        -ProtectedSettingString $protectedSettings | Out-Null
 
     Write-Host "  Bootstrap complete: $vmName" -ForegroundColor Green
 }
@@ -981,10 +1028,10 @@ Write-Host "`nPhase 4 complete.`n" -ForegroundColor Green
 
 
 # ============================================================================
-# PHASE 5: OPTIONAL AZURE BASTION (DEBUG only)
+# PHASE 5: OPTIONAL AZURE BASTION (DebugMode only)
 # ============================================================================
-if ($DEBUG) {
-    Write-Host "Phase 5: Deploying Azure Bastion (DEBUG mode)..." -ForegroundColor Yellow
+if ($DebugMode) {
+    Write-Host "Phase 5: Deploying Azure Bastion (DebugMode)..." -ForegroundColor Yellow
 
     $bastionPipName = "$basename-bastion-pip"
     $bastionPip = New-AzPublicIpAddress `
@@ -1008,7 +1055,7 @@ if ($DEBUG) {
     Write-Host "`nPhase 5 complete.`n" -ForegroundColor Green
 }
 else {
-    Write-Host "Phase 5: Azure Bastion skipped (use -DEBUG to enable).`n" -ForegroundColor Gray
+    Write-Host "Phase 5: Azure Bastion skipped (use -DebugMode to enable).`n" -ForegroundColor Gray
 }
 
 
@@ -1031,7 +1078,6 @@ foreach ($company in $companies) {
         privateIP  = $staticIPs[$company]
         keyVault   = $kvNames[$company]
         identityId = $identityClientIds[$company]
-        keyAccess  = $keyAccess[$company]
     }
 }
 Save-Config -Config $config
@@ -1070,15 +1116,14 @@ Write-Host ""
 Write-Host "  Security:" -ForegroundColor Cyan
 Write-Host "    Confidential VMs:       AMD SEV-SNP (DCas_v5)" -ForegroundColor White
 Write-Host "    OS Disk Encryption:     DiskWithVMGuestState (CMK)" -ForegroundColor White
-Write-Host "    Key Release Policy:     Per-VM bound (vmUniqueId + azure-compliant-cvm)" -ForegroundColor White
-Write-Host "    Key Binding:" -ForegroundColor White
-foreach ($company in $companies) {
-    $authorizedVMs = $keyAccess[$company]
-    Write-Host "      $($company.PadRight(12)) → $($authorizedVMs -join ' + ') VMs" -ForegroundColor Gray
-}
+Write-Host "    Key Release Policy:     Azure default CVM (azure-compliant-cvm)" -ForegroundColor White
+Write-Host "    Key Access:" -ForegroundColor White
+Write-Host "      contoso      → Contoso + Woodgrove identities (via KV access policy)" -ForegroundColor Gray
+Write-Host "      fabrikam     → Fabrikam + Woodgrove identities (via KV access policy)" -ForegroundColor Gray
+Write-Host "      woodgrove    → Woodgrove identity only" -ForegroundColor Gray
 Write-Host "    MAA Endpoint:           $maaEndpoint" -ForegroundColor White
 Write-Host "    WAF:                    OWASP 3.2 (Detection mode)" -ForegroundColor White
-if ($DEBUG) {
+if ($DebugMode) {
     Write-Host "    NSG:                    HTTP 80 + HTTPS 443 + SSH 22 (DEBUG)" -ForegroundColor Yellow
 }
 else {
@@ -1086,12 +1131,12 @@ else {
 }
 Write-Host ""
 
-if ($DEBUG) {
+if ($DebugMode) {
     Write-Host "================================================================" -ForegroundColor Yellow
     Write-Host " DEBUG: VM CREDENTIALS" -ForegroundColor Yellow
     Write-Host "================================================================" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  These credentials are ONLY shown because -DEBUG was specified." -ForegroundColor Yellow
+    Write-Host "  These credentials are ONLY shown because -DebugMode was specified." -ForegroundColor Yellow
     Write-Host "  In production, credentials would be stored in Key Vault." -ForegroundColor Yellow
     Write-Host ""
     foreach ($company in $companies) {
@@ -1106,8 +1151,8 @@ if ($DEBUG) {
     Write-Host "================================================================" -ForegroundColor Yellow
 }
 else {
-    Write-Host "  VM credentials are hidden. Use -DEBUG to display them." -ForegroundColor Gray
-    Write-Host "  Azure Bastion is NOT deployed. Use -DEBUG to enable remote access." -ForegroundColor Gray
+    Write-Host "  VM credentials are hidden. Use -DebugMode to display them." -ForegroundColor Gray
+    Write-Host "  Azure Bastion is NOT deployed. Use -DebugMode to enable remote access." -ForegroundColor Gray
 }
 
 Write-Host ""
@@ -1115,3 +1160,30 @@ Write-Host "  Cleanup: .\$scriptName -Cleanup" -ForegroundColor Gray
 Write-Host ""
 Write-Host ("  Deployment time: {0} minutes and {1} seconds" -f [int]$elapsed.TotalMinutes, $elapsed.Seconds) -ForegroundColor Gray
 Write-Host "================================================================" -ForegroundColor Green
+
+}
+catch {
+    Write-Host ""
+    Write-Host "================================================================" -ForegroundColor Red
+    Write-Host " DEPLOYMENT FAILED" -ForegroundColor Red
+    Write-Host "================================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ""
+
+    if ($resgrp -and (Get-AzResourceGroup -Name $resgrp -ErrorAction SilentlyContinue)) {
+        $answer = Read-Host "  Do you want to delete resource group '$resgrp' and all its resources? (y/N)"
+        if ($answer -match '^[Yy]') {
+            Write-Host "  Removing resource group: $resgrp (running in background)..." -ForegroundColor Yellow
+            Remove-AzResourceGroup -Name $resgrp -Force -AsJob | Out-Null
+            Remove-Item $configFile -Force -ErrorAction SilentlyContinue
+            Write-Host "  Cleanup job submitted. Resource group deletion continues in the background." -ForegroundColor Green
+            Write-Host "  Check status: Get-Job | Where-Object Command -like '*Remove-AzResourceGroup*'" -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  Resources left in place. Clean up later with: .\$scriptName -Cleanup" -ForegroundColor Yellow
+        }
+    }
+
+    exit 1
+}

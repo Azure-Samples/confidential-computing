@@ -10,22 +10,35 @@ Exposes the same localhost:8080 API surface that app.py already expects:
     POST /key/release → Release a key from Azure Key Vault using attestation
 
 On a Confidential VM (AMD SEV-SNP), attestation uses the vTPM which contains
-the SNP attestation report. The guest attestation client (AttestationClient)
-handles the full TPM quote → MAA token flow. Key release uses AKV's REST API
-with the MAA token + managed identity authentication.
+the SNP attestation report. The cvm-attestation-tools library
+(https://github.com/Azure/cvm-attestation-tools) reads the HCL report from
+the vTPM NV index, extracts the SNP report + runtime data, retrieves the
+VCEK certificate from IMDS, and submits platform evidence to MAA.
 
 This shim maintains the localhost:8080 contract so app.py requires ZERO changes
 when migrating from ACI confidential containers to Confidential VMs.
 """
 
+import sys
+import os
+
+# ---------------------------------------------------------------------------
+# cvm-attestation-tools path setup — MUST happen before other imports
+# The library uses a generic 'src' module name, so we insert its base path
+# at position 0 to ensure it takes priority.
+# See: https://github.com/Azure/cvm-attestation-tools
+# ---------------------------------------------------------------------------
+CVM_ATTEST_BASE = '/opt/cvm-attestation-tools/cvm-attestation'
+if os.path.isdir(CVM_ATTEST_BASE) and CVM_ATTEST_BASE not in sys.path:
+    sys.path.insert(0, CVM_ATTEST_BASE)
+
 from flask import Flask, jsonify, request
-import subprocess
 import requests as http_requests  # avoid collision with flask.request
 import json
 import base64
-import os
 import logging
 import time
+import struct
 
 app = Flask(__name__)
 logging.basicConfig(
@@ -35,21 +48,24 @@ logging.basicConfig(
 log = logging.getLogger('skr_shim')
 
 # ---------------------------------------------------------------------------
-# Guest attestation client binary — installed from azguestattestation package
+# cvm-attestation-tools import — Python-native vTPM attestation via TSS_MSR
+# Replaces the deprecated azguestattestation binary (unavailable on Ubuntu 24.04)
 # ---------------------------------------------------------------------------
-ATTESTATION_CLIENT_PATHS = [
-    '/opt/azguestattestation/AttestationClient',
-    '/usr/bin/AttestationClient',
-    '/usr/local/bin/AttestationClient',
-]
-
-
-def find_attestation_client():
-    """Find the guest attestation client binary on the filesystem."""
-    for path in ATTESTATION_CLIENT_PATHS:
-        if os.path.exists(path) and os.access(path, os.X_OK):
-            return path
-    return None
+_CVM_ATTEST_AVAILABLE = False
+_CVM_IMPORT_ERROR = None
+try:
+    from src.attestation_client import (
+        AttestationClient as CvmAttestClient,
+        AttestationClientParameters,
+        Verifier,
+    )
+    from src.isolation import IsolationType
+    from src.logger import Logger as CvmLogger
+    _CVM_ATTEST_AVAILABLE = True
+    log.info("cvm-attestation-tools loaded successfully")
+except ImportError as e:
+    _CVM_IMPORT_ERROR = str(e)
+    log.warning(f"cvm-attestation-tools not available: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -87,64 +103,142 @@ def get_managed_identity_token(resource="https://vault.azure.net", client_id=Non
 
 
 # ---------------------------------------------------------------------------
-# MAA attestation token (via guest attestation client + vTPM)
+# MAA attestation token (via cvm-attestation-tools + vTPM)
 # ---------------------------------------------------------------------------
 def get_maa_token(maa_endpoint, nonce=None):
     """
-    Get an MAA attestation JWT using the CVM guest attestation client.
+    Get an MAA attestation JWT using cvm-attestation-tools via the vTPM.
 
-    The client:
-      1. Reads the vTPM quote (which embeds the AMD SEV-SNP report)
-      2. Sends the evidence to the specified MAA endpoint
-      3. Returns the signed JWT from MAA
+    The flow (all in Python, no binary dependency):
+      1. TSS_MSR reads the HCL report from vTPM NV index 0x01400001
+      2. OS info, AIK cert, PCR quotes, TCG logs, and isolation evidence are collected
+      3. Guest attestation evidence is POSTed to the MAA AzureGuest endpoint
+      4. MAA returns an encrypted response; client decrypts via TPM ephemeral key
+      5. The decrypted JWT includes x-ms-isolation-tee claims with vmUniqueId
 
-    This is the CVM equivalent of the ACI SKR sidecar's /attest/maa endpoint.
+    Guest attestation (not platform) is required because AKV key release policies
+    check claims under x-ms-isolation-tee.*, which only guest attestation provides.
     """
-    client_path = find_attestation_client()
-    if not client_path:
+    if not _CVM_ATTEST_AVAILABLE:
         raise RuntimeError(
-            "Guest attestation client not found. "
-            "Install the azguestattestation package: "
-            "sudo apt-get install azguestattestation. "
-            f"Searched paths: {', '.join(ATTESTATION_CLIENT_PATHS)}"
+            "cvm-attestation-tools not available. "
+            f"Import error: {_CVM_IMPORT_ERROR}. "
+            "Ensure /opt/cvm-attestation-tools is installed with TSS_MSR. "
+            "See: https://github.com/Azure/cvm-attestation-tools"
         )
 
-    if not nonce:
-        nonce = base64.b64encode(os.urandom(32)).decode()
+    # Clean the MAA endpoint to just the hostname
+    maa_clean = maa_endpoint.replace('https://', '').replace('http://', '').rstrip('/')
 
-    # Strip protocol prefix from endpoint
-    maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+    # Use the AzureGuest endpoint — guest attestation produces tokens with
+    # x-ms-isolation-tee.x-ms-compliance-status and vmUniqueId claims
+    # that AKV key release policies require.
+    attest_url = f"https://{maa_clean}/attest/AzureGuest?api-version=2020-10-01"
 
-    cmd = [client_path, "-a", maa_clean, "-n", nonce, "-o", "token"]
-    log.info(f"Attestation: {' '.join(cmd)}")
+    # Build user claims if nonce was provided
+    claims = None
+    if nonce:
+        claims = {"user-claims": {"nonce": nonce}}
+
+    log.info(f"Attestation: provider=MAA, isolation=SEV_SNP, type=Guest, url={attest_url}")
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60
+        logger = CvmLogger("skr-attest").get_logger()
+
+        # Build proper AttestationClientParameters
+        params = AttestationClientParameters(
+            endpoint=attest_url,
+            verifier=Verifier.MAA,
+            isolation_type=IsolationType.SEV_SNP,
+            claims=claims,
         )
-        if result.returncode == 0:
-            token = result.stdout.strip()
-            if token:
-                log.info(f"MAA token obtained ({len(token)} chars)")
-                return token
+        client = CvmAttestClient(logger, params)
+
+        # attest_guest() collects OS info + TPM PCR quotes + TCG logs +
+        # isolation evidence (SNP report + VCEK cert), sends to MAA, and
+        # decrypts the response using a TPM ephemeral key.
+        # Returns bytes (the decrypted JWT).
+        result = client.attest_guest()
+
+        if not result:
+            raise RuntimeError("AttestationClient.attest_guest() returned empty token")
+
+        # attest_guest() returns bytes — decode to string and strip whitespace
+        token = result.decode('utf-8').strip() if isinstance(result, bytes) else str(result).strip()
+
+        log.info(f"MAA token obtained ({len(token)} chars)")
+
+        # Decode JWT payload to inspect claims (diagnostic logging)
+        token_claims = decode_jwt_payload(token)
+        if token_claims:
+            iss = token_claims.get('iss', '(missing)')
+            log.info(f"  Token issuer (iss): {iss}")
+            iso_tee = token_claims.get('x-ms-isolation-tee')
+            if iso_tee and isinstance(iso_tee, dict):
+                att_type = iso_tee.get('x-ms-attestation-type', '(missing)')
+                comp_status = iso_tee.get('x-ms-compliance-status', '(missing)')
+                log.info(f"  x-ms-isolation-tee.x-ms-attestation-type: {att_type}")
+                log.info(f"  x-ms-isolation-tee.x-ms-compliance-status: {comp_status}")
             else:
-                raise RuntimeError(
-                    f"AttestationClient returned empty output. stderr: {result.stderr}"
-                )
-        else:
-            raise RuntimeError(
-                f"AttestationClient exit code {result.returncode}: {result.stderr.strip()}"
-            )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("AttestationClient timed out after 60 seconds")
+                log.warning("  WARNING: x-ms-isolation-tee claim MISSING from token")
+                # Check if platform-level claims exist instead (would indicate
+                # platform attestation was done instead of guest attestation)
+                if 'x-ms-attestation-type' in token_claims:
+                    log.warning(f"  Found top-level x-ms-attestation-type: "
+                                f"{token_claims['x-ms-attestation-type']}")
+                    log.warning("  This suggests PLATFORM attestation — "
+                                "AKV default CVM policy requires GUEST attestation")
+
+            # Log runtime keys (needed for AKV to wrap the released key)
+            runtime = token_claims.get('x-ms-runtime', {})
+            if isinstance(runtime, dict):
+                keys = runtime.get('keys', [])
+                log.info(f"  x-ms-runtime.keys: {len(keys)} key(s) present")
+                for i, k in enumerate(keys):
+                    log.info(f"    key[{i}]: kty={k.get('kty')}, "
+                             f"key_ops={k.get('key_ops')}, "
+                             f"kid={k.get('kid', 'n/a')}")
+            else:
+                log.warning("  WARNING: x-ms-runtime claim missing or not an object")
+
+        return token
+
+    except Exception as e:
+        log.error(f"Attestation failed: {e}")
+        # Provide diagnostic info
+        tpm_present = os.path.exists('/dev/tpmrm0')
+        log.error(f"  vTPM (/dev/tpmrm0): {'PRESENT' if tpm_present else 'MISSING'}")
+        log.error(f"  CVM attest base: {CVM_ATTEST_BASE}")
+        log.error(f"  TSS_MSR dir exists: {os.path.isdir(os.path.join(CVM_ATTEST_BASE, 'TSS_MSR'))}")
+        raise
 
 
 # ---------------------------------------------------------------------------
-# JWS (JSON Web Signature) decoding — for AKV key release response
+# JWT / JWS decoding helpers
 # ---------------------------------------------------------------------------
+def decode_jwt_payload(token):
+    """
+    Decode the payload from a JWT token (header.payload.signature) without
+    verifying the signature. Used for diagnostic logging of MAA token claims.
+    Returns the decoded payload dict or None on failure.
+    """
+    try:
+        parts = token.split('.')
+        if len(parts) != 3:
+            log.warning(f"JWT decode: expected 3 parts, got {len(parts)}")
+            return None
+        payload_b64 = parts[1]
+        # Add base64url padding
+        padding_needed = 4 - len(payload_b64) % 4
+        if padding_needed != 4:
+            payload_b64 += '=' * padding_needed
+        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+        return json.loads(payload_bytes)
+    except Exception as e:
+        log.warning(f"JWT payload decode failed: {e}")
+        return None
+
+
 def decode_jws_payload(jws_token):
     """
     Decode the payload from a JWS token (header.payload.signature).
@@ -196,19 +290,18 @@ def status():
     Health check endpoint.
     app.py polls GET http://localhost:8080/ to know the sidecar is ready.
     """
-    sev_available = os.path.exists('/dev/sev-guest') or os.path.exists('/dev/sev')
     tpm_available = os.path.exists('/dev/tpmrm0') or os.path.exists('/dev/tpm0')
-    client_path = find_attestation_client()
+    tss_available = os.path.isdir(os.path.join(CVM_ATTEST_BASE, 'TSS_MSR'))
 
     return jsonify({
         'status': 'running',
         'type': 'cvm-skr-shim',
-        'version': '1.0.0',
+        'version': '2.0.0',
         'platform': 'confidential-vm',
-        'sev_snp_available': sev_available,
         'vtpm_available': tpm_available,
-        'attestation_client': client_path or 'not found',
-        'message': 'CVM SKR Shim ready — AMD SEV-SNP attestation via vTPM'
+        'cvm_attest_tools': _CVM_ATTEST_AVAILABLE,
+        'tss_msr_available': tss_available,
+        'message': 'CVM SKR Shim ready — AMD SEV-SNP attestation via vTPM + cvm-attestation-tools'
     })
 
 
@@ -242,8 +335,8 @@ def attest_maa():
             'error': str(e),
             'maa_endpoint': maa_endpoint,
             'platform': 'confidential-vm',
-            'sev_device': os.path.exists('/dev/sev-guest'),
-            'tpm_device': os.path.exists('/dev/tpmrm0')
+            'tpm_device': os.path.exists('/dev/tpmrm0'),
+            'cvm_attest_tools': _CVM_ATTEST_AVAILABLE
         }), 500
 
 
@@ -300,12 +393,56 @@ def key_release():
         # Clean up the AKV endpoint
         akv_host = akv_endpoint.replace('https://', '').replace('http://', '').rstrip('/')
 
-        # Build the key release URL
-        # kid can be: just a key name, "name/version", or full URL
+        # First GET the key to retrieve its version and release policy
+        # (versioned URL is required by the AKV release API spec)
+        key_info_url = f"https://{akv_host}/keys/{kid}?api-version=7.4"
+        log.info(f"    Fetching key metadata: {kid}")
+        key_info_resp = http_requests.get(
+            key_info_url,
+            headers={"Authorization": f"Bearer {akv_token}"},
+            timeout=30
+        )
+
+        key_version = None
+        if key_info_resp.status_code == 200:
+            key_info = key_info_resp.json()
+            key_kid_url = key_info.get('key', {}).get('kid', '')
+            log.info(f"    Key kid: {key_kid_url}")
+
+            # Extract version from kid URL: https://{vault}/keys/{name}/{version}
+            if key_kid_url:
+                key_version = key_kid_url.rstrip('/').split('/')[-1]
+                log.info(f"    Key version: {key_version}")
+
+            # Log the release policy for debugging
+            rp = key_info.get('release_policy', {})
+            if rp:
+                rp_data = rp.get('data', '')
+                if rp_data:
+                    try:
+                        padded = rp_data + '=' * (4 - len(rp_data) % 4)
+                        rp_bytes = base64.urlsafe_b64decode(padded)
+                        rp_text = rp_bytes.decode('utf-8')
+                        log.info(f"    Release policy: {rp_text[:500]}")
+                    except Exception as rp_err:
+                        log.warning(f"    Failed to decode release policy: {rp_err}")
+            else:
+                log.warning("    NO RELEASE POLICY on key — release will fail!")
+
+            log.info(f"    Exportable: {key_info.get('attributes', {}).get('exportable')}")
+        else:
+            log.warning(f"    Failed to get key info: HTTP {key_info_resp.status_code}")
+
+        # Build the key release URL — use versioned URL when available
+        # The AKV release API spec requires: /keys/{name}/{version}/release
         if kid.startswith('https://'):
             key_url = f"{kid}/release"
+        elif key_version:
+            key_url = f"https://{akv_host}/keys/{kid}/{key_version}/release"
         else:
             key_url = f"https://{akv_host}/keys/{kid}/release"
+
+        log.info(f"    Release URL: {key_url}")
 
         resp = http_requests.post(
             f"{key_url}?api-version=7.4",
@@ -320,10 +457,40 @@ def key_release():
         if resp.status_code != 200:
             error_text = resp.text[:1000]
             log.error(f"AKV key release failed: HTTP {resp.status_code} - {error_text}")
+
+            # On 403, decode the MAA token to diagnose which claims failed
+            diagnostics = {}
+            if resp.status_code == 403:
+                token_claims = decode_jwt_payload(maa_token)
+                if token_claims:
+                    diagnostics['token_issuer'] = token_claims.get('iss', '(missing)')
+                    diagnostics['token_nbf'] = token_claims.get('nbf')
+                    diagnostics['token_exp'] = token_claims.get('exp')
+                    iso_tee = token_claims.get('x-ms-isolation-tee')
+                    if iso_tee and isinstance(iso_tee, dict):
+                        diagnostics['x-ms-isolation-tee.x-ms-attestation-type'] = iso_tee.get('x-ms-attestation-type', '(missing)')
+                        diagnostics['x-ms-isolation-tee.x-ms-compliance-status'] = iso_tee.get('x-ms-compliance-status', '(missing)')
+                        diagnostics['x-ms-isolation-tee.x-ms-sevsnpvm-is-debuggable'] = iso_tee.get('x-ms-sevsnpvm-is-debuggable')
+                    else:
+                        diagnostics['x-ms-isolation-tee'] = '(MISSING - this is required for default CVM policy)'
+                        if 'x-ms-attestation-type' in token_claims:
+                            diagnostics['top-level-x-ms-attestation-type'] = token_claims['x-ms-attestation-type']
+                            diagnostics['diagnosis'] = 'Token has top-level claims but missing x-ms-isolation-tee — likely platform attestation instead of guest attestation'
+                    runtime = token_claims.get('x-ms-runtime', {})
+                    if isinstance(runtime, dict):
+                        diagnostics['x-ms-runtime.keys_count'] = len(runtime.get('keys', []))
+                    # Include all top-level claim keys for debugging
+                    diagnostics['all_claim_keys'] = sorted(token_claims.keys())
+                else:
+                    diagnostics['jwt_decode'] = 'Failed to decode MAA token payload'
+
+                log.error(f"  Token diagnostics: {json.dumps(diagnostics, indent=2, default=str)}")
+
             return jsonify({
                 'error': f'Key release failed with status {resp.status_code}',
                 'detail': error_text,
-                'key_url': key_url
+                'key_url': key_url,
+                'diagnostics': diagnostics
             }), resp.status_code
 
         # ---- Step 4: Parse JWS → extract JWK ----
@@ -370,8 +537,11 @@ if __name__ == '__main__':
     log.info("CVM SKR Shim starting")
     log.info("=" * 60)
     log.info(f"  Port:               {port}")
-    log.info(f"  Attestation client: {find_attestation_client() or 'NOT FOUND'}")
-    log.info(f"  /dev/sev-guest:     {os.path.exists('/dev/sev-guest')}")
+    log.info(f"  cvm-attest-tools:   {'LOADED' if _CVM_ATTEST_AVAILABLE else 'NOT AVAILABLE'}")
+    if _CVM_IMPORT_ERROR:
+        log.info(f"  Import error:       {_CVM_IMPORT_ERROR}")
+    log.info(f"  CVM attest base:    {CVM_ATTEST_BASE}")
+    log.info(f"  TSS_MSR dir:        {os.path.isdir(os.path.join(CVM_ATTEST_BASE, 'TSS_MSR'))}")
     log.info(f"  /dev/tpmrm0:        {os.path.exists('/dev/tpmrm0')}")
     log.info(f"  MAA endpoint:       {os.environ.get('SKR_MAA_ENDPOINT', '(not set)')}")
     log.info(f"  AKV endpoint:       {os.environ.get('SKR_AKV_ENDPOINT', '(not set)')}")

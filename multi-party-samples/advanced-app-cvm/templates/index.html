@@ -1128,6 +1128,153 @@
                     icon: '📌',
                     category: 'Metadata',
                     description: 'Version of the MAA attestation token schema. "1.0" is the current schema version. Allows relying parties to parse tokens correctly as the schema evolves.'
+                },
+                // ---- Guest Attestation Claims (from /attest/AzureGuest) ----
+                // These appear in guest attestation tokens used for CVM Secure Key Release.
+                // The x-ms-isolation-tee object contains nested SNP/TDX claims.
+                'x-ms-isolation-tee': {
+                    title: 'Isolation TEE Evidence',
+                    icon: '🛡️',
+                    category: 'Platform Identity',
+                    description: 'Contains the hardware isolation evidence from the Trusted Execution Environment (TEE). For AMD SEV-SNP CVMs, this includes the SNP compliance status, attestation type, firmware versions, and runtime data. These nested claims are what Azure Key Vault release policies evaluate to decide whether to release secrets.'
+                },
+                'x-ms-azurevm-attestation-protocol-ver': {
+                    title: 'Attestation Protocol Version',
+                    icon: '📋',
+                    category: 'Guest VM Security',
+                    description: 'Version of the Azure VM guest attestation protocol used. This protocol defines how the guest OS collects and formats TPM evidence (PCR quotes, AIK certificates, TCG logs) for submission to the MAA service.'
+                },
+                'x-ms-azurevm-attested-pcrs': {
+                    title: 'Attested PCR Banks',
+                    icon: '📊',
+                    category: 'Guest VM Security',
+                    description: 'List of TPM Platform Configuration Register (PCR) banks that were included in the attestation quote. PCRs record cryptographic measurements of boot components — each bank (e.g., SHA-256) contains 24 registers tracking firmware, bootloader, OS kernel, and configuration measurements.'
+                },
+                'x-ms-azurevm-bootdebug-enabled': {
+                    title: 'Boot Debug Enabled',
+                    icon: '🐛',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether the boot debugger is enabled. When enabled, the boot process can be paused and inspected, potentially exposing secrets in memory. Must be false for secure workloads.',
+                    detail: value === false ? '✅ Boot debug disabled' : '⚠️ Boot debug enabled — boot process may be inspectable'
+                },
+                'x-ms-azurevm-dbvalidated': {
+                    title: 'Secure Boot DB Validated',
+                    icon: '✅',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether the UEFI Secure Boot Allowed Signature Database (db) has been validated. The db contains certificates and hashes of trusted boot components. Validation confirms only authorized firmware and bootloaders are permitted to execute.'
+                },
+                'x-ms-azurevm-dbxvalidated': {
+                    title: 'Secure Boot DBX Validated',
+                    icon: '✅',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether the UEFI Secure Boot Forbidden Signature Database (dbx) has been validated. The dbx contains revoked certificates and hashes of known-vulnerable boot components. Validation confirms known-bad firmware is blocked from loading.'
+                },
+                'x-ms-azurevm-debuggersdisabled': {
+                    title: 'All Debuggers Disabled',
+                    icon: '🔒',
+                    category: 'Guest VM Security',
+                    description: 'Confirms all debugging interfaces (boot, kernel, hypervisor) are disabled. Debuggers can read memory contents and bypass security controls. This is a composite check — true only if ALL debug paths are disabled.',
+                    detail: value === true ? '✅ All debuggers disabled — memory is protected' : '⚠️ One or more debuggers may be active'
+                },
+                'x-ms-azurevm-default-securebootkeysvalidated': {
+                    title: 'Default Secure Boot Keys Validated',
+                    icon: '🔑',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether the VM is using Microsoft\'s default Secure Boot key set (PK, KEK, db, dbx). When true, the VM uses the standard Azure Secure Boot chain of trust, ensuring boot integrity without custom keys.'
+                },
+                'x-ms-azurevm-elam-enabled': {
+                    title: 'Early Launch Anti-Malware',
+                    icon: '🛡️',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether Early Launch Anti-Malware (ELAM) is enabled. ELAM allows anti-malware software to start before all other boot drivers, providing protection against boot-time rootkits. Primarily relevant for Windows VMs.'
+                },
+                'x-ms-azurevm-flightsigning-enabled': {
+                    title: 'Flight Signing Enabled',
+                    icon: '✈️',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether Windows flight (preview/insider) signed code is allowed to load. Flight-signed binaries are pre-release and may contain security vulnerabilities. Should be false for production workloads.'
+                },
+                'x-ms-azurevm-hvci-policy': {
+                    title: 'HVCI Policy',
+                    icon: '🏰',
+                    category: 'Guest VM Security',
+                    description: 'Hypervisor-protected Code Integrity (HVCI) policy status. HVCI uses the hypervisor to enforce code integrity policies, preventing unsigned or tampered kernel-mode code from executing. Provides defense-in-depth for the guest OS kernel.'
+                },
+                'x-ms-azurevm-hypervisordebug-enabled': {
+                    title: 'Hypervisor Debug Enabled',
+                    icon: '🐛',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether the hypervisor debugger is enabled. A hypervisor debugger could inspect guest VM memory from outside the TEE. Must be false to maintain confidential computing guarantees.',
+                    detail: value === false ? '✅ Hypervisor debug disabled' : '⚠️ Hypervisor debug enabled — TEE isolation may be weakened'
+                },
+                'x-ms-azurevm-is-windows': {
+                    title: 'Windows OS',
+                    icon: '🪟',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether the guest OS is Windows. Different OS types have different attestation evidence formats and security properties. Azure CVMs support both Windows and Linux confidential VMs.',
+                    detail: value === false ? 'Linux guest OS' : 'Windows guest OS'
+                },
+                'x-ms-azurevm-kerneldebug-enabled': {
+                    title: 'Kernel Debug Enabled',
+                    icon: '🐛',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether the OS kernel debugger is enabled. A kernel debugger allows reading and modifying kernel memory, which could expose secrets processed by the application. Must be false for secure deployments.',
+                    detail: value === false ? '✅ Kernel debug disabled' : '⚠️ Kernel debug enabled — secrets in kernel memory may be exposed'
+                },
+                'x-ms-azurevm-osbuild': {
+                    title: 'OS Build String',
+                    icon: '🏗️',
+                    category: 'Guest VM Security',
+                    description: 'The build identifier string of the guest operating system. For Linux this is typically the kernel build string. Allows relying parties to verify the guest OS version meets minimum security patch requirements.'
+                },
+                'x-ms-azurevm-osdistro': {
+                    title: 'OS Distribution',
+                    icon: '🐧',
+                    category: 'Guest VM Security',
+                    description: 'The Linux distribution name (e.g., "Ubuntu") or Windows edition. Identifies the specific OS running inside the confidential VM, allowing release policies to restrict key access to specific distros if needed.'
+                },
+                'x-ms-azurevm-ostype': {
+                    title: 'OS Type',
+                    icon: '💻',
+                    category: 'Guest VM Security',
+                    description: 'The type of operating system: "Linux" or "Windows". Determines the attestation evidence collection path — Linux uses IMA/TPM, Windows uses Measured Boot/ELAM.'
+                },
+                'x-ms-azurevm-osversion-major': {
+                    title: 'OS Major Version',
+                    icon: '🔢',
+                    category: 'Guest VM Security',
+                    description: 'The major version number of the guest operating system. Used with the minor version to identify the exact OS release (e.g., Ubuntu 24.04 has major version 24). Release policies can enforce minimum OS versions.'
+                },
+                'x-ms-azurevm-osversion-minor': {
+                    title: 'OS Minor Version',
+                    icon: '🔢',
+                    category: 'Guest VM Security',
+                    description: 'The minor version number of the guest operating system. Together with the major version, uniquely identifies the OS release and patch level.'
+                },
+                'x-ms-azurevm-signingdisabled': {
+                    title: 'Code Signing Enforcement',
+                    icon: '🔏',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether driver signing enforcement is disabled. When signing is disabled, unsigned kernel drivers can be loaded, potentially introducing malicious code. Should report as signing enabled for production environments.'
+                },
+                'x-ms-azurevm-testsigning-enabled': {
+                    title: 'Test Signing Enabled',
+                    icon: '🧪',
+                    category: 'Guest VM Security',
+                    description: 'Indicates whether Windows test-signed code is allowed to load. Test signing allows drivers signed with test certificates to load. Must be false in production to prevent loading of unverified kernel code.',
+                    detail: value === false ? '✅ Test signing disabled' : '⚠️ Test signing enabled'
+                },
+                'x-ms-azurevm-vmid': {
+                    title: 'Azure VM Unique ID',
+                    icon: '🆔',
+                    category: 'Guest VM Security',
+                    description: 'The unique identifier (GUID) of this Azure Virtual Machine, as reported by the guest OS from SMBIOS. This value matches the ARM VM ID and can be used in release policies for per-VM key binding — ensuring a specific key can only be released to a specific VM instance.'
+                },
+                'x-ms-azurevm-os-provisioning': {
+                    title: 'OS Provisioning Claims',
+                    icon: '⚙️',
+                    category: 'Guest VM Security',
+                    description: 'Contains OS provisioning information including the provisioning agent, configuration status, and any provisioning-related security settings applied during VM first boot.'
                 }
             };
             return explanations[key] || null;
@@ -1139,7 +1286,7 @@
                 'JWT Standard', 'Request Binding', 'Platform Identity', 'Policy',
                 'Container Identity', 'SEV-SNP Identity', 'Hardware Identity',
                 'SEV-SNP Versions', 'Security State', 'Hardware Security Features',
-                'Platform Endorsement', 'Metadata'
+                'Guest VM Security', 'Platform Endorsement', 'Metadata'
             ];
             const categoryColors = {
                 'JWT Standard': '#6c757d',
@@ -1152,6 +1299,7 @@
                 'SEV-SNP Versions': '#0dcaf0',
                 'Security State': '#ffc107',
                 'Hardware Security Features': '#d63384',
+                'Guest VM Security': '#17a2b8',
                 'Platform Endorsement': '#6f42c1',
                 'Metadata': '#adb5bd'
             };
@@ -1202,15 +1350,113 @@
                 html += '</div>';
             }
             
-            // Show any unknown claims
+            // Show any unknown claims with heuristic descriptions
             if (unknownClaims.length > 0) {
                 html += '<div style="margin-bottom: 20px;">';
                 html += '<h4 style="color: #6c757d; border-bottom: 2px solid #6c757d; padding-bottom: 6px; margin-bottom: 12px; font-size: 0.95em;">Other Claims</h4>';
+                html += '<p style="font-size: 0.82em; color: #6c757d; margin-bottom: 12px;">Additional claims from the attestation token. These may include region-specific, version-specific, or provider-specific claims not yet documented above.</p>';
                 for (const claim of unknownClaims) {
                     let displayValue = typeof claim.value === 'object' ? JSON.stringify(claim.value, null, 2) : String(claim.value);
-                    html += '<div style="margin-bottom: 8px; padding: 10px; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #6c757d;">';
-                    html += '<code style="font-size: 0.85em; color: #495057;">' + escapeHtml(claim.key) + '</code>';
-                    html += '<div style="font-family: monospace; font-size: 0.78em; margin-top: 4px; color: #333; background: #e9ecef; padding: 6px 10px; border-radius: 4px; word-break: break-all;">' + escapeHtml(displayValue) + '</div>';
+                    // Generate rich heuristic descriptions for common claim patterns
+                    let hint = '';
+                    let hintIcon = '📋';
+                    let hintColor = '#6c757d';
+
+                    if (claim.key === 'x-ms-isolation-tee' || claim.key.startsWith('x-ms-isolation-tee.')) {
+                        hint = 'Trusted Execution Environment isolation evidence. This is the primary claim object evaluated by Azure Key Vault release policies during Secure Key Release (SKR). It contains nested sub-claims about the hardware attestation type (sevsnpvm for AMD SEV-SNP), compliance status (azure-compliant-cvm), firmware versions, launch measurements, and the runtime encryption key. Both x-ms-attestation-type and x-ms-compliance-status within this object must match the release policy for keys to be released.';
+                        hintIcon = '🛡️';
+                        hintColor = '#198754';
+                    } else if (claim.key.startsWith('x-ms-azurevm-')) {
+                        const fieldName = claim.key.replace('x-ms-azurevm-', '');
+                        hint = 'Azure VM guest attestation property. ';
+                        if (fieldName.includes('pcr')) {
+                            hint += 'Platform Configuration Registers (PCRs) record cryptographic hash measurements of boot-time components (firmware, bootloader, kernel, config). Each PCR bank (e.g., SHA-256) contains 24 registers that form a chain of trust from hardware power-on through OS startup. Tampering with any boot component changes the PCR values, which the attestation service detects.';
+                            hintIcon = '📊';
+                        } else if (fieldName.includes('debug') || fieldName.includes('debugger')) {
+                            hint += 'Debug interface status indicator. Hardware and software debuggers can read and modify memory, potentially exposing secrets. For confidential computing workloads, all debug interfaces (boot debugger, kernel debugger, hypervisor debugger) must be disabled to maintain the integrity of the Trusted Execution Environment.';
+                            hintIcon = '🐛';
+                        } else if (fieldName.includes('secure') || fieldName.includes('signing') || fieldName.includes('dbx') || fieldName.includes('db')) {
+                            hint += 'UEFI Secure Boot validation status. Secure Boot uses public-key cryptography to verify that only signed, trusted firmware and boot components can execute. The db (allowed signatures) and dbx (revoked signatures) databases define which components are trusted or blocklisted.';
+                            hintIcon = '🔒';
+                        } else if (fieldName.includes('os') || fieldName.includes('distro') || fieldName.includes('build') || fieldName.includes('version')) {
+                            hint += 'Guest operating system identification. Reports the OS type, distribution, version, and build string as measured during boot. Release policies can use these values to restrict key access to specific OS versions or patch levels, ensuring workloads run on supported, up-to-date software.';
+                            hintIcon = '🐧';
+                        } else if (fieldName.includes('vmid')) {
+                            hint += 'The unique Azure VM identifier (GUID) from SMBIOS. This value, present in both the Azure Resource Manager (ARM) API and the guest attestation token, enables per-VM key binding — release policies can limit key access to a specific VM instance for maximum isolation.';
+                            hintIcon = '🆔';
+                        } else if (fieldName.includes('provisioning')) {
+                            hint += 'OS provisioning metadata collected during VM first boot. Includes the provisioning agent used, configuration status, and related security settings applied during initial setup of the guest OS.';
+                            hintIcon = '⚙️';
+                        } else if (fieldName.includes('elam') || fieldName.includes('hvci')) {
+                            hint += 'Advanced Windows security feature status. ELAM (Early Launch Anti-Malware) starts anti-malware before other boot drivers. HVCI (Hypervisor-protected Code Integrity) uses the hypervisor to prevent unsigned kernel-mode code from executing.';
+                            hintIcon = '🏰';
+                        } else {
+                            hint += 'This value is measured and reported by the guest attestation agent running inside the VM. It becomes part of the attestation evidence sent to Microsoft Azure Attestation (MAA), which includes it in the signed attestation token. Relying parties and release policies can evaluate this claim.';
+                            hintIcon = '💻';
+                        }
+                        hintColor = '#17a2b8';
+                    } else if (claim.key.startsWith('x-ms-sevsnpvm-')) {
+                        const fieldName = claim.key.replace('x-ms-sevsnpvm-', '');
+                        hint = 'AMD SEV-SNP hardware attestation claim. ';
+                        if (fieldName.includes('svn') || fieldName.includes('version')) {
+                            hint += 'Security Version Number (SVN) tracking firmware or microcode versions in the SEV-SNP attestation report. The processor enforces that SVN values only increase, preventing rollback to vulnerable firmware. TCB (Trusted Computing Base) version fields combine bootloader, TEE, SNP firmware, and microcode SVNs into a single comparable version.';
+                            hintIcon = '🔢';
+                        } else if (fieldName.includes('measurement') || fieldName.includes('launch')) {
+                            hint += 'Cryptographic measurement of the initial guest VM image at launch time. The AMD SP (Secure Processor) computes a SHA-384 hash of all pages loaded into the guest before first execution. This measurement uniquely identifies the VM firmware image and can be used by release policies to ensure only authorized images receive secrets.';
+                            hintIcon = '📏';
+                        } else if (fieldName.includes('report') || fieldName.includes('hostdata') || fieldName.includes('idkey') || fieldName.includes('authorkey')) {
+                            hint += 'Identity or binding data from the AMD SEV-SNP attestation report. Hostdata is host-provided data bound to the attestation; author and ID key digests identify the guest owner and migration agent keys. These enable multi-party trust scenarios where different stakeholders can verify their involvement.';
+                            hintIcon = '🔑';
+                        } else if (fieldName.includes('debug') || fieldName.includes('debuggable')) {
+                            hint += 'AMD SEV-SNP debug policy flag. When debugging is enabled at the hardware level, the hypervisor can read and modify encrypted guest memory, completely bypassing confidential computing protections. This must be false for production confidential workloads.';
+                            hintIcon = '🐛';
+                        } else if (fieldName.includes('compliance') || fieldName.includes('attestation-type')) {
+                            hint += 'Core compliance claim checked by Azure Key Vault release policies. The attestation-type must be "sevsnpvm" for AMD SEV-SNP, and compliance-status must be "azure-compliant-cvm" to indicate the VM meets Azure\'s confidential computing requirements.';
+                            hintIcon = '✅';
+                        } else if (fieldName.includes('uvm') || fieldName.includes('endorsement')) {
+                            hint += 'Microsoft\'s endorsement of the Utility VM (UVM) image. The UVM endorsement contains a signed statement from Microsoft that the guest firmware image is a genuine, unmodified Azure confidential computing image. The endorsement headers include the signing certificate chain (DID) and feed identifier.';
+                            hintIcon = '📝';
+                        } else {
+                            hint += 'Extracted from the AMD SEV-SNP attestation report generated by the Secure Processor (SP). This report is cryptographically signed by the VCEK (Versioned Chip Endorsement Key), a per-chip key derived from fused secrets unique to each physical AMD EPYC processor.';
+                            hintIcon = '🔐';
+                        }
+                        hintColor = '#fd7e14';
+                    } else if (claim.key === 'x-ms-runtime' || claim.key.startsWith('x-ms-runtime.') || claim.key.startsWith('x-ms-runtime-')) {
+                        hint = 'Application-layer runtime data cryptographically bound to the hardware attestation. The x-ms-runtime object typically contains: (1) "keys" — an array of JWK public keys generated by the TPM; Azure Key Vault uses these to wrap released key material, ensuring only the attested environment can decrypt it; (2) "user-data" — a SHA-256 digest of application-provided claims bound into the vTPM report; (3) "vm-configuration" — guest VM configuration details like TPM persistence. This binding ensures that runtime data cannot be separated from the hardware evidence.';
+                        hintIcon = '🔗';
+                        hintColor = '#0d6efd';
+                    } else if (claim.key === 'secureboot' || claim.key === 'x-ms-secureboot') {
+                        hint = 'UEFI Secure Boot enabled status. Secure Boot verifies the cryptographic signature of all boot components (firmware, bootloader, kernel) using the UEFI key database before execution. When enabled, it prevents boot-time rootkits and ensures the integrity of the boot chain from firmware through OS kernel.';
+                        hintIcon = '🔒';
+                        hintColor = '#198754';
+                    } else if (claim.key.startsWith('x-ms-policy')) {
+                        hint = 'Attestation policy metadata. The x-ms-policy-hash is a SHA-256 hash of the attestation policy applied by the MAA (Microsoft Azure Attestation) service when evaluating the evidence. The x-ms-policy-signer identifies who set the policy. For shared MAA endpoints, the default Microsoft policy is used.';
+                        hintIcon = '📜';
+                        hintColor = '#6610f2';
+                    } else if (claim.key.startsWith('x-ms-')) {
+                        hint = 'Microsoft Azure attestation service claim. This value was set by the Microsoft Azure Attestation (MAA) service after evaluating the hardware and guest evidence. MAA validates all evidence cryptographically (SNP report signature via VCEK, TPM quotes via AIK) before including claims in the signed token. Claims prefixed with x-ms- are Azure-specific extensions to the JWT standard.';
+                        hintIcon = '☁️';
+                        hintColor = '#0078d4';
+                    } else if (claim.key === 'cnf' || claim.key === 'x5c') {
+                        hint = 'Cryptographic key confirmation or certificate chain. The "cnf" (confirmation) claim binds a key to the token — the presenter must prove possession of the private key. The "x5c" claim contains the X.509 certificate chain used to sign the token, enabling offline signature verification.';
+                        hintIcon = '🔐';
+                    } else if (claim.key === 'nonce' || claim.key === 'jti') {
+                        hint = 'Replay protection value. The nonce is a client-provided random value included in the attestation request to ensure freshness — it proves the token was generated for this specific request and cannot be replayed. JTI (JWT ID) uniquely identifies the token instance.';
+                        hintIcon = '🎲';
+                    } else if (claim.key === 'iat' || claim.key === 'auth_time') {
+                        hint = 'Token timing claim (Unix timestamp). "iat" (issued at) records when the token was created. These timestamps, combined with "nbf" (not before) and "exp" (expires), establish the token\'s validity window — typically 8 hours for MAA tokens.';
+                        hintIcon = '⏰';
+                    }
+                    
+                    html += '<div style="margin-bottom: 10px; padding: 12px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid ' + hintColor + ';">';
+                    html += '<div style="display: flex; align-items: center; margin-bottom: 4px;">';
+                    html += '<span style="font-size: 1.1em; margin-right: 8px;">' + hintIcon + '</span>';
+                    html += '<code style="font-size: 0.85em; color: #495057; font-weight: bold;">' + escapeHtml(claim.key) + '</code>';
+                    html += '</div>';
+                    if (hint) {
+                        html += '<p style="margin: 6px 0 8px 0; font-size: 0.8em; color: #555; line-height: 1.5;">' + escapeHtml(hint) + '</p>';
+                    }
+                    html += '<div style="font-family: monospace; font-size: 0.78em; color: #333; background: #e9ecef; padding: 6px 10px; border-radius: 4px; word-break: break-all; max-height: 120px; overflow-y: auto; white-space: pre-wrap;">' + escapeHtml(displayValue) + '</div>';
                     html += '</div>';
                 }
                 html += '</div>';

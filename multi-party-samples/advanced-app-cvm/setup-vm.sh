@@ -63,73 +63,61 @@ apt-get update -qq
 apt-get install -y -qq \
     python3 python3-pip python3-venv \
     nginx supervisor \
-    curl wget gnupg2 lsb-release \
+    curl wget gnupg2 lsb-release git \
     openssl tpm2-tools \
     jq 2>&1 | tail -3
 echo "  System packages installed"
 
 # ============================================================================
-# Phase 2: Azure guest attestation client
+# Phase 2: CVM attestation tools (Python-based vTPM attestation)
 # ============================================================================
 echo ""
-echo "[Phase 2/6] Installing guest attestation client..."
-ATTESTATION_INSTALLED=false
+echo "[Phase 2/6] Installing CVM attestation tools..."
 
-# Add Microsoft package repository
-curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
-    | tee /etc/apt/trusted.gpg.d/microsoft.asc > /dev/null 2>&1 || true
+# cvm-attestation-tools replaces the deprecated azguestattestation binary.
+# It uses Python + TSS_MSR to talk directly to the vTPM — no native binary needed.
+# See: https://github.com/Azure/cvm-attestation-tools
 
-AZ_DIST=$(lsb_release -cs 2>/dev/null || echo "noble")
-AZ_VER=$(lsb_release -rs 2>/dev/null || echo "24.04")
-echo "deb [arch=amd64] https://packages.microsoft.com/ubuntu/${AZ_VER}/prod ${AZ_DIST} main" \
-    > /etc/apt/sources.list.d/microsoft-prod.list
+CVM_ATTEST_DIR="/opt/cvm-attestation-tools"
 
-apt-get update -qq 2>/dev/null || true
-
-# Install guest attestation + DCAP client (for SNP evidence)
-if apt-get install -y -qq azguestattestation 2>/dev/null; then
-    ATTESTATION_INSTALLED=true
-    echo "  Guest attestation client installed from Microsoft repository"
-fi
-
-# Also try the DCAP client (provides Azure DCAP quote provider)
-apt-get install -y -qq az-dcap-client 2>/dev/null || true
-
-if [ "$ATTESTATION_INSTALLED" = false ]; then
-    echo "  WARNING: Guest attestation package not available from repo"
-    echo "  Attempting direct download..."
-    # Try downloading a .deb directly (fallback)
-    wget -q "https://packages.microsoft.com/ubuntu/${AZ_VER}/prod/pool/main/a/azguestattestation/azguestattestation_1.0.5_amd64.deb" \
-        -O /tmp/azguestattestation.deb 2>/dev/null && \
-        dpkg -i /tmp/azguestattestation.deb 2>/dev/null && \
-        ATTESTATION_INSTALLED=true && \
-        echo "  Guest attestation client installed from direct download" || \
-        echo "  WARNING: Could not install guest attestation client"
-fi
-
-# Verify
-if [ -x "/opt/azguestattestation/AttestationClient" ]; then
-    echo "  AttestationClient binary: /opt/azguestattestation/AttestationClient"
-elif [ -x "/usr/bin/AttestationClient" ]; then
-    echo "  AttestationClient binary: /usr/bin/AttestationClient"
+if [ -d "$CVM_ATTEST_DIR" ]; then
+    echo "  cvm-attestation-tools already present at $CVM_ATTEST_DIR"
 else
-    echo "  WARNING: AttestationClient binary not found — attestation will not work"
+    echo "  Cloning cvm-attestation-tools..."
+    git clone --depth 1 https://github.com/Azure/cvm-attestation-tools.git "$CVM_ATTEST_DIR" 2>&1 | tail -2
+    echo "  Cloned cvm-attestation-tools"
 fi
 
-# Check for SEV-SNP device
-if [ -e "/dev/sev-guest" ]; then
-    echo "  /dev/sev-guest: PRESENT (AMD SEV-SNP hardware confirmed)"
-elif [ -e "/dev/sev" ]; then
-    echo "  /dev/sev: PRESENT (AMD SEV device found)"
+# TSS.MSR — Python TPM library (provides Tpm class for vTPM NV index read/write)
+TSS_DIR="$CVM_ATTEST_DIR/cvm-attestation/TSS_MSR"
+if [ -d "$TSS_DIR" ]; then
+    echo "  TSS.MSR already present"
 else
-    echo "  WARNING: No SEV device found — this may not be a Confidential VM"
+    echo "  Cloning TSS.MSR (Python TPM library)..."
+    git clone --depth 1 https://github.com/microsoft/TSS.MSR.git "$TSS_DIR" 2>&1 | tail -2
+    echo "  Cloned TSS.MSR"
 fi
 
-# Check for vTPM
+# Verify vTPM availability (required for attestation)
 if [ -e "/dev/tpmrm0" ]; then
     echo "  /dev/tpmrm0: PRESENT (vTPM available)"
+elif [ -e "/dev/tpm0" ]; then
+    echo "  /dev/tpm0: PRESENT (TPM available)"
 else
-    echo "  WARNING: /dev/tpmrm0 not found — vTPM may not be available"
+    echo "  WARNING: No TPM device found — attestation may not work"
+fi
+
+# Quick tpm2-tools sanity check (installed in Phase 1)
+if command -v tpm2_nvreadpublic &>/dev/null; then
+    echo "  tpm2-tools: INSTALLED"
+    # Try to list NV indices to confirm TPM access
+    if tpm2_nvreadpublic 2>/dev/null | grep -q "0x1400001"; then
+        echo "  HCL report NV index (0x1400001): PRESENT"
+    else
+        echo "  HCL report NV index: not confirmed (may still work via TSS_MSR)"
+    fi
+else
+    echo "  WARNING: tpm2-tools not found"
 fi
 
 # ============================================================================
@@ -140,7 +128,8 @@ echo "[Phase 3/6] Setting up application files..."
 mkdir -p /app/templates /app/encrypted-data /var/log/supervisor /var/log/nginx
 
 # Copy app files (CustomScriptExtension downloads them to the current directory)
-for f in app.py skr_shim.py; do
+DOWNLOAD_DIR="$(pwd)"
+for f in app.py skr_shim.py nginx.conf; do
     if [ -f "$f" ]; then
         cp -f "$f" /app/
         echo "  Copied $f → /app/"
@@ -185,6 +174,17 @@ python3 -m venv /app/venv
 source /app/venv/bin/activate
 pip install --no-cache-dir --upgrade pip 2>&1 | tail -1
 pip install --no-cache-dir -r requirements.txt 2>&1 | tail -5
+
+# Install cvm-attestation-tools Python dependencies (pyjwt, construct, etc.)
+CVM_ATTEST_REQS="/opt/cvm-attestation-tools/cvm-attestation/requirements.txt"
+if [ -f "$CVM_ATTEST_REQS" ]; then
+    echo "  Installing cvm-attestation-tools Python dependencies..."
+    pip install --no-cache-dir -r "$CVM_ATTEST_REQS" 2>&1 | tail -5
+    echo "  cvm-attestation-tools dependencies installed"
+else
+    echo "  WARNING: cvm-attestation-tools requirements.txt not found at $CVM_ATTEST_REQS"
+fi
+
 echo "  Python venv: /app/venv"
 echo "  Python:      $(python3 --version)"
 
@@ -208,10 +208,22 @@ chmod 600 /etc/nginx/ssl/server.key
 chmod 644 /etc/nginx/ssl/server.crt
 echo "  TLS certificate generated for ${COMPANY_NAME}.cvm.local"
 
+# Remove default site to prevent it overriding our config
+rm -f /etc/nginx/sites-enabled/default
+rm -f /etc/nginx/conf.d/default.conf
+
 if [ -f "nginx.conf" ]; then
     cp -f nginx.conf /etc/nginx/nginx.conf
     echo "  nginx.conf installed"
+else
+    echo "  ERROR: nginx.conf not found in $(pwd)" >&2
+    ls -la >&2
+    exit 1
 fi
+
+# Validate nginx config before proceeding
+nginx -t 2>&1
+echo "  nginx config validated"
 
 # ============================================================================
 # Phase 6: Supervisord configuration (with environment variables)
@@ -219,9 +231,10 @@ fi
 echo ""
 echo "[Phase 6/6] Configuring and starting services..."
 
-# Stop default nginx service — supervisor will manage it
+# Stop and fully mask default nginx service — supervisor will manage it
 systemctl stop nginx 2>/dev/null || true
 systemctl disable nginx 2>/dev/null || true
+systemctl mask nginx 2>/dev/null || true
 
 # Generate supervisord config with company-specific environment variables
 cat > /etc/supervisor/conf.d/cvm-demo.conf << SUPERVISOREOF
@@ -271,11 +284,51 @@ supervisorctl reread 2>/dev/null || true
 supervisorctl update 2>/dev/null || true
 systemctl restart supervisor
 
-# Wait briefly and check services
-sleep 3
+# Wait for services to start (flask has startsecs=5, gunicorn needs time to fork workers)
+echo ""
+echo "  Waiting for services to start..."
+for i in $(seq 1 12); do
+    sleep 5
+    # Check if any service is still in STARTING state
+    if ! supervisorctl status 2>/dev/null | grep -q STARTING; then
+        break
+    fi
+    echo "    Still waiting... (${i}0s)"
+done
+
 echo ""
 echo "  Service status:"
 supervisorctl status 2>/dev/null || echo "  (supervisor not yet reporting status)"
+
+# Verify critical services are running
+echo ""
+echo "  Verification:"
+VERIFY_FAILED=false
+for svc in nginx flask skr_shim; do
+    status=$(supervisorctl status "$svc" 2>/dev/null | awk '{print $2}')
+    if [ "$status" = "RUNNING" ]; then
+        echo "  [OK] $svc is RUNNING"
+    elif [ "$status" = "STARTING" ]; then
+        echo "  [WARN] $svc is still STARTING (may need more time)"
+    else
+        echo "  [FAIL] $svc status: $status" >&2
+        supervisorctl tail "$svc" stderr 2>/dev/null | tail -5 || true
+        VERIFY_FAILED=true
+    fi
+done
+if curl -sf -o /dev/null http://127.0.0.1:80/; then
+    echo "  [OK] HTTP port 80 responding"
+else
+    echo "  [WARN] HTTP port 80 not yet responding (may need more startup time)"
+fi
+if [ "$VERIFY_FAILED" = true ]; then
+    echo ""
+    echo "  ERROR: Critical services failed to start. Check logs:" >&2
+    echo "    /var/log/supervisor/supervisord.log" >&2
+    echo "    /var/log/supervisor/nginx_error.log" >&2
+    echo "    /var/log/supervisor/flask_error.log" >&2
+    exit 1
+fi
 
 echo ""
 echo "================================================================"

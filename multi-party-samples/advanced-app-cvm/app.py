@@ -116,28 +116,52 @@ def _safe_error_detail(text, max_len=500):
 
 # Log file paths (configured in supervisord.conf)
 LOG_FILES = {
-    'skr': '/var/log/supervisor/skr.log',
-    'skr_error': '/var/log/supervisor/skr_error.log',
+    'skr': '/var/log/supervisor/skr_shim.log',
+    'skr_error': '/var/log/supervisor/skr_shim_error.log',
     'flask': '/var/log/supervisor/flask.log',
     'flask_error': '/var/log/supervisor/flask_error.log',
     'supervisord': '/var/log/supervisor/supervisord.log'
 }
 
 def check_sev_guest_device():
-    """Check for AMD SEV-SNP guest device and return status info"""
+    """Check for AMD SEV-SNP guest device or vTPM and return status info.
+    
+    On newer CVM images (Ubuntu 24.04+), the /dev/sev-guest device may not be
+    exposed directly. The vTPM at /dev/tpmrm0 is the primary attestation path
+    and contains the HCL report (SNP evidence embedded in the vTPM NV index).
+    """
     sev_devices = [
         '/dev/sev-guest',
         '/dev/sev',
         '/dev/sev0'
     ]
     
+    # Also check vTPM — this is the actual attestation path on CVMs
+    tpm_devices = [
+        '/dev/tpmrm0',
+        '/dev/tpm0'
+    ]
+    
     result = {
         'available': False,
         'device_path': None,
         'device_info': None,
-        'explanation': None
+        'explanation': None,
+        'vtpm_available': False,
+        'vtpm_path': None
     }
     
+    # Check for vTPM first (primary attestation path)
+    for device in tpm_devices:
+        if os.path.exists(device):
+            result['vtpm_available'] = True
+            result['vtpm_path'] = device
+            result['available'] = True  # vTPM = confidential VM
+            if not result['device_path']:
+                result['device_path'] = device
+            break
+    
+    # Also check for direct SEV devices
     for device in sev_devices:
         if os.path.exists(device):
             result['available'] = True
@@ -156,12 +180,19 @@ def check_sev_guest_device():
                 result['device_info'] = f'Error reading device info: {str(e)}'
             break
     
+    if result['vtpm_available'] and not result.get('explanation'):
+        result['explanation'] = (
+            f'vTPM found at {result["vtpm_path"]}. '
+            'Attestation uses the HCL report from the vTPM NV index (contains SNP evidence). '
+            'This is the standard attestation path for Azure Confidential VMs.'
+        )
+    
     if not result['available']:
         result['explanation'] = (
-            'No AMD SEV-SNP device found (/dev/sev-guest, /dev/sev, /dev/sev0). '
-            'This means the container is NOT running inside a Trusted Execution Environment (TEE). '
+            'No AMD SEV-SNP device or vTPM found (/dev/sev-guest, /dev/tpmrm0). '
+            'This means the VM is NOT running as a Confidential VM. '
             'Hardware-based attestation is not possible. '
-            'To enable attestation, deploy with Confidential SKU (without -NoAcc flag) on AMD SEV-SNP capable hardware.'
+            'To enable attestation, deploy with Confidential SKU on AMD SEV-SNP capable hardware.'
         )
         # Check if we're in a container and list available devices
         try:
@@ -444,12 +475,18 @@ def skr_release():
         if response.status_code != 200:
             error_detail = _safe_error_detail(response.text, 1000)
             
-            # Try to parse error JSON
+            # Try to parse error JSON — include the full AKV error detail
             error_json = None
             try:
                 error_json = response.json()
+                # Build a combined error detail with the AKV error body
+                parts = []
                 if 'error' in error_json:
-                    error_detail = error_json['error']
+                    parts.append(str(error_json['error']))
+                if 'detail' in error_json:
+                    parts.append(str(error_json['detail']))
+                if parts:
+                    error_detail = ' | '.join(parts)
             except:
                 pass
             
@@ -468,6 +505,11 @@ def skr_release():
             elif response.status_code == 500:
                 failure_reason = "Internal error in SKR sidecar - likely no TEE hardware available"
             
+            # Extract diagnostics from the sidecar response (JWT claim inspection)
+            sidecar_diagnostics = {}
+            if error_json and 'diagnostics' in error_json:
+                sidecar_diagnostics = error_json['diagnostics']
+
             return jsonify({
                 'status': 'error',
                 'message': f'Secure Key Release failed with status {response.status_code}',
@@ -477,13 +519,16 @@ def skr_release():
                 'maa_endpoint': maa_endpoint,
                 'akv_endpoint': akv_endpoint,
                 'key_name': kid,
+                'token_diagnostics': sidecar_diagnostics,
                 'diagnosis': {
-                    'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
-                    'explanation': 'Secure Key Release requires hardware attestation to prove the container is running in a TEE. Without AMD SEV-SNP, the attestation fails and the key cannot be released.',
-                    'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
-                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
+                    'likely_cause': 'MAA attestation token claims do not satisfy the key release policy',
+                    'explanation': 'Azure Key Vault evaluates the MAA token claims against the key release policy. '
+                                   'The default CVM policy requires: x-ms-isolation-tee.x-ms-attestation-type=sevsnpvm '
+                                   'AND x-ms-isolation-tee.x-ms-compliance-status=azure-compliant-cvm. '
+                                   'Check token_diagnostics to see actual claim values.',
+                    'solution': 'Verify the CVM is AMD SEV-SNP hardware with guest attestation. Check token_diagnostics for claim values.',
                 },
-                'note': 'SKR requires: 1) Confidential SKU with AMD SEV-SNP, 2) Key Vault Premium with HSM-backed key, 3) Release policy trusting the MAA endpoint',
+                'note': 'SKR requires: 1) CVM with AMD SEV-SNP and vTPM, 2) Key Vault Premium with HSM-backed exportable key, 3) Release policy trusting the MAA endpoint',
                 'logs': read_log_files()
             }), response.status_code
 

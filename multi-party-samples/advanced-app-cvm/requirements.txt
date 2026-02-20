@@ -13,3 +13,10 @@ cryptography>=42.0.0,<45.0.0
 
 # Azure managed identity (fallback for IMDS token acquisition in skr_shim)
 azure-identity>=1.15.0,<2.0.0
+
+# cvm-attestation-tools dependencies (for vTPM-based MAA attestation)
+# These are also listed in /opt/cvm-attestation-tools/cvm-attestation/requirements.txt
+# but we pin them here for completeness
+pyjwt>=2.8.0,<3.0.0
+construct>=2.10.0,<3.0.0
+click>=8.0.0,<9.0.0
