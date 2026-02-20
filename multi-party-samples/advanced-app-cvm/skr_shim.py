@@ -67,11 +67,17 @@ except ImportError as e:
     _CVM_IMPORT_ERROR = str(e)
     log.warning(f"cvm-attestation-tools not available: {e}")
 
-# Lower-level TPM wrapper for key_hsm unwrapping
+# Lower-level TPM wrapper for key_hsm unwrapping.
+# tpm_wrapper.py does 'from external.TSS_MSR.src.Tpm import *' which brings
+# all TSS.MSR types (Tpm, TPMA_OBJECT, NullPwSession, Session, Owner, etc.)
+# into its module namespace.  We import the module so we can reference them
+# as _tw.Symbol without fighting TSS.MSR's relative-import structure.
 _TPM_UNWRAP_AVAILABLE = False
+_tw = None
 try:
     from src.tpm_wrapper import TssWrapper
     from src.os_info import OsInfo
+    import src.tpm_wrapper as _tw
     _TPM_UNWRAP_AVAILABLE = True
     log.info("TPM unwrap modules loaded successfully")
 except ImportError as e:
@@ -271,6 +277,194 @@ def decode_jws_payload(jws_token):
 # ---------------------------------------------------------------------------
 # key_hsm JWE Unwrapping — extract private RSA components from TPM-encrypted blob
 # ---------------------------------------------------------------------------
+
+# PCR list matching what cvm-attestation-tools uses for the ephemeral key
+_LINUX_PCR_LIST = [0, 1, 2, 3, 4, 5, 6, 7]
+
+# Serialize TPM access — the vTPM has limited session slots, and concurrent
+# requests (gunicorn threads) can exhaust them.
+import threading
+_tpm_lock = threading.Lock()
+
+
+def _tpm_create_primary_and_decrypt(rsa_encrypted_aes_key, use_oaep=True):
+    """
+    Create the same deterministic TPM primary key that was used during
+    MAA attestation and RSA-decrypt the AES key from key_hsm.
+
+    Mirrors get_ephemeral_key() (trial session → CreatePrimary) and
+    decrypt_with_ephemeral_key() (policy session → RSA_Decrypt) from
+    tpm_wrapper.py but **skips the Certify step** which requires the
+    AIK at 0x81000003 and fails outside attestation context.
+
+    The key is deterministic because:
+      same Owner hierarchy seed + same template + empty unique = same RSA key
+
+    Returns:
+        bytes: The decrypted AES key, or raises on failure
+    """
+    if not _TPM_UNWRAP_AVAILABLE or _tw is None:
+        raise RuntimeError("TPM unwrap modules not available")
+
+    with _tpm_lock:
+        os_info = OsInfo()
+        tss = TssWrapper(log)
+        pcr_list = os_info.pcr_list
+        pcr_select = tss.get_pcr_select(pcr_list)
+        pcrs = tss.get_pcr_values(pcr_list)        # reads PCRs (own TPM session)
+
+        # Main TPM connection for CreatePrimary + RSA_Decrypt
+        tpm = _tw.Tpm()
+        tpm.connect()
+
+        try:
+            # 1. Trial session → compute PCR policy digest
+            #    (identical to get_ephemeral_key lines 249-263)
+            nonce = _tw.crypto.randomBytes(20)
+            trial_resp = tpm.StartAuthSession(
+                None, None, nonce, None,
+                _tw.TPM_SE.TRIAL, _tw.NullSymDef, _tw.TPM_ALG_ID.SHA256,
+            )
+            trial_handle = trial_resp.handle
+            log.info(f"key_hsm: trial session handle={trial_handle.handle}")
+
+            pcr_digest = tss.sha256_hash_update(pcrs)       # hex string
+            tpm.PolicyPCR(trial_handle, bytes.fromhex(pcr_digest), pcr_select)
+            policy_digest = tpm.PolicyGetDigest(trial_handle)
+            log.info("key_hsm: trial policy digest computed")
+
+            # 2. CreatePrimary with the EXACT same template as get_ephemeral_key()
+            attributes = (
+                _tw.TPMA_OBJECT.decrypt
+                | _tw.TPMA_OBJECT.fixedTPM
+                | _tw.TPMA_OBJECT.fixedParent
+                | _tw.TPMA_OBJECT.sensitiveDataOrigin
+                | _tw.TPMA_OBJECT.noDA
+            )
+            parameters = _tw.TPMS_RSA_PARMS(
+                _tw.TPMT_SYM_DEF_OBJECT(),        # symmetric = NULL
+                _tw.TPMS_NULL_ASYM_SCHEME(),       # scheme = NULL
+                2048,                               # keyBits
+                0,                                  # exponent (default 65537)
+            )
+            in_public = _tw.TPMT_PUBLIC(
+                _tw.TPM_ALG_ID.SHA256,
+                attributes,
+                policy_digest,                      # from trial session
+                parameters,
+                _tw.TPM2B_PUBLIC_KEY_RSA(),         # unique = empty → deterministic
+            )
+
+            id_key = tpm.withSession(_tw.NullPwSession).CreatePrimary(
+                _tw.Owner, _tw.TPMS_SENSITIVE_CREATE(),
+                in_public, None, pcr_select,
+            )
+            key_handle = id_key.getHandle()
+            if not key_handle:
+                raise RuntimeError("CreatePrimary returned null handle")
+            log.info(f"key_hsm: CreatePrimary OK (handle={key_handle})")
+
+            # 3. Real policy session → RSA_Decrypt
+            #    (identical to decrypt_with_ephemeral_key lines 283-303)
+            nonce2 = _tw.crypto.randomBytes(20)
+            policy_resp = tpm.StartAuthSession(
+                None, None, nonce2, None,
+                _tw.TPM_SE.POLICY, _tw.NullSymDef, _tw.TPM_ALG_ID.SHA256,
+            )
+            policy_handle = policy_resp.handle
+            policy_sess = _tw.Session(policy_handle, policy_resp.nonceTPM)
+
+            # satisfy the PCR policy
+            tpm.PolicyPCR(policy_handle, bytes.fromhex(pcr_digest), pcr_select)
+
+            # RSA decrypt
+            if use_oaep:
+                scheme = _tw.TPMS_SCHEME_OAEP(_tw.TPM_ALG_ID.SHA1)
+            else:
+                scheme = _tw.TPMS_SCHEME_RSAES()
+
+            decrypted = tpm.withSession(policy_sess).RSA_Decrypt(
+                key_handle, rsa_encrypted_aes_key, scheme, None,
+            )
+            sname = "OAEP-SHA1" if use_oaep else "RSAES"
+            log.info(f"key_hsm: RSA-{sname} decrypt via TPM succeeded")
+            return bytes(decrypted)
+
+        finally:
+            try:
+                tss.cleanSlots(tpm, _tw.TPM_HT.TRANSIENT)
+                tss.cleanSlots(tpm, _tw.TPM_HT.LOADED_SESSION)
+            except Exception:
+                pass
+            try:
+                tpm.close()
+            except Exception:
+                pass
+
+
+def _int_to_b64url(n, length=None):
+    """Convert a Python int to a base64url-encoded string (JWK format)."""
+    byte_len = length or (n.bit_length() + 7) // 8
+    return base64.urlsafe_b64encode(
+        n.to_bytes(byte_len, byteorder='big')
+    ).rstrip(b'=').decode('ascii')
+
+
+def _parse_der_private_key(der_bytes):
+    """
+    Parse DER-encoded RSA private key material into a JWK dict.
+
+    AKV wraps the private key in DER (PKCS#8 or RSAPrivateKey) format,
+    not JSON.  Uses the ``cryptography`` library to load the key and
+    extract the private numbers.
+
+    Returns:
+        dict: JWK with kty, n, e, d, p, q, dp, dq, qi — or None on failure
+    """
+    from cryptography.hazmat.primitives.serialization import (
+        load_der_private_key,
+        load_der_public_key,
+    )
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateNumbers
+
+    try:
+        # Try PKCS#8 first, then raw RSAPrivateKey
+        private_key = None
+        for loader in [load_der_private_key]:
+            try:
+                private_key = loader(der_bytes, password=None)
+                break
+            except Exception:
+                continue
+
+        if private_key is None:
+            log.error("key_hsm DER: could not load as private key")
+            return None
+
+        pn = private_key.private_numbers()
+        pub = pn.public_numbers
+        key_size_bytes = (pub.n.bit_length() + 7) // 8
+
+        jwk = {
+            'kty': 'RSA',
+            'n':  _int_to_b64url(pub.n, key_size_bytes),
+            'e':  _int_to_b64url(pub.e),
+            'd':  _int_to_b64url(pn.d, key_size_bytes),
+            'p':  _int_to_b64url(pn.p),
+            'q':  _int_to_b64url(pn.q),
+            'dp': _int_to_b64url(pn.dmp1),
+            'dq': _int_to_b64url(pn.dmq1),
+            'qi': _int_to_b64url(pn.iqmp),
+        }
+        log.info(f"key_hsm DER: parsed RSA-{pub.n.bit_length()} key, "
+                 f"n={len(jwk['n'])}chars, d={len(jwk['d'])}chars")
+        return jwk
+
+    except Exception as e:
+        log.error(f"key_hsm DER parse failed: {e}", exc_info=True)
+        return None
+
+
 def unwrap_key_hsm(key_hsm_value):
     """
     Unwrap the key_hsm JWE field from an AKV key release response.
@@ -283,22 +477,18 @@ def unwrap_key_hsm(key_hsm_value):
 
     Since TPM primary keys are deterministic (same hierarchy seed + template +
     PCR policy → same key), we recreate the same ephemeral key that was used
-    during MAA attestation by calling get_ephemeral_key() again.
+    during MAA attestation by calling CreatePrimary() with the identical template.
 
     Returns:
         dict: JWK with private components (d, p, q, dp, dq, qi) or None on failure
     """
-    if not _TPM_UNWRAP_AVAILABLE:
-        log.warning("TPM unwrap not available — cannot extract private key from key_hsm")
+    if not _TPM_UNWRAP_AVAILABLE or _tw is None:
+        log.warning("TPM unwrap modules not available — cannot unwrap key_hsm")
         return None
 
     try:
         # ---- Parse key_hsm ----
-        # key_hsm is base64url-encoded JSON:
-        #   {"schema_version":"1.0","header":{"kid":"TpmEphemeralEncryptionKey",
-        #    "alg":"dir","enc":"CKM_RSA_AES_KEY_WRAP"},"ciphertext":"..."}
         if isinstance(key_hsm_value, str):
-            # base64url decode
             padded = key_hsm_value + '=' * (4 - len(key_hsm_value) % 4)
             hsm_bytes = base64.urlsafe_b64decode(padded)
             hsm_json = json.loads(hsm_bytes)
@@ -316,130 +506,74 @@ def unwrap_key_hsm(key_hsm_value):
             log.error(f"key_hsm: unsupported enc={enc}")
             return None
 
-        # Decode ciphertext (may be base64 or base64url)
+        # Decode ciphertext
         try:
             ciphertext = base64.urlsafe_b64decode(ct_b64 + '=' * (4 - len(ct_b64) % 4))
         except Exception:
             ciphertext = base64.b64decode(ct_b64 + '=' * (4 - len(ct_b64) % 4))
 
-        # Split: first 256 bytes = RSA-encrypted AES key (RSA-2048)
-        # Remainder  = AES Key Wrapped private key material
-        RSA_SIZE = 256  # RSA-2048 output is 256 bytes
+        RSA_SIZE = 256  # RSA-2048
         if len(ciphertext) <= RSA_SIZE:
             log.error(f"key_hsm: ciphertext too short ({len(ciphertext)} bytes)")
             return None
 
         rsa_encrypted_aes_key = ciphertext[:RSA_SIZE]
         aes_wrapped_material = ciphertext[RSA_SIZE:]
-        log.info(f"key_hsm: total={len(ciphertext)}, RSA part={RSA_SIZE}, "
-                 f"AES wrapped={len(aes_wrapped_material)} bytes")
+        log.info(f"key_hsm: ciphertext total={len(ciphertext)}, "
+                 f"RSA part={RSA_SIZE}, AES wrapped={len(aes_wrapped_material)} bytes")
 
-        # ---- Re-create the TPM ephemeral key ----
-        # TPM primary keys are deterministic: same hierarchy seed + template + PCR
-        # policy → same key pair.  PCRs haven't changed since attestation (seconds ago).
-        uwlog = CvmLogger("skr-unwrap").get_logger()
-        tss = TssWrapper(uwlog)
-        os_info = OsInfo()
-        eph_key, key_handle, tpm = tss.get_ephemeral_key(os_info.pcr_list)
-
-        try:
-            # ---- RSA decrypt the AES key via TPM ----
-            aes_key = _tpm_rsa_decrypt_for_unwrap(
-                tss, tpm, key_handle, rsa_encrypted_aes_key, os_info.pcr_list
-            )
-            log.info(f"key_hsm: RSA decrypt OK, AES key={len(aes_key)} bytes")
-
-            # ---- AES Key Unwrap (RFC 5649 / NIST SP 800-38F) ----
-            from cryptography.hazmat.primitives.keywrap import (
-                aes_key_unwrap_with_padding,
-                aes_key_unwrap,
-            )
+        # ---- RSA decrypt the AES key via TPM ----
+        # Try OAEP-SHA1 first (CKM_RSA_AES_KEY_WRAP standard), then RSAES fallback
+        aes_key = None
+        for use_oaep in [True, False]:
+            scheme_name = "OAEP-SHA1" if use_oaep else "RSAES"
             try:
-                unwrapped = aes_key_unwrap_with_padding(aes_key, aes_wrapped_material)
-            except Exception:
-                # Some AKV versions use RFC 3394 (without padding)
-                unwrapped = aes_key_unwrap(aes_key, aes_wrapped_material)
+                log.info(f"key_hsm: Trying RSA-{scheme_name} decrypt...")
+                aes_key = _tpm_create_primary_and_decrypt(
+                    rsa_encrypted_aes_key, use_oaep=use_oaep
+                )
+                log.info(f"key_hsm: RSA-{scheme_name} succeeded, AES key={len(aes_key)} bytes")
+                break
+            except Exception as e:
+                log.warning(f"key_hsm: RSA-{scheme_name} failed: {e}")
+                if not use_oaep:
+                    raise  # both OAEP and RSAES failed
 
-            log.info(f"key_hsm: AES unwrap OK, material={len(unwrapped)} bytes")
+        if not aes_key:
+            log.error("key_hsm: All RSA decrypt attempts failed")
+            return None
 
-            # ---- Parse unwrapped key material ----
+        # ---- AES Key Unwrap ----
+        from cryptography.hazmat.primitives.keywrap import (
+            aes_key_unwrap_with_padding,
+            aes_key_unwrap,
+        )
+        try:
+            unwrapped = aes_key_unwrap_with_padding(aes_key, aes_wrapped_material)
+        except Exception:
+            unwrapped = aes_key_unwrap(aes_key, aes_wrapped_material)
+
+        log.info(f"key_hsm: AES unwrap OK, material={len(unwrapped)} bytes")
+
+        # ---- Parse unwrapped key material ----
+        # AKV may encode the private key as JSON (JWK) or as DER (ASN.1).
+        # Try JSON first; fall back to DER.
+        key_material = None
+        try:
             key_material = json.loads(unwrapped)
+            log.info(f"key_hsm: parsed as JSON JWK (kty={key_material.get('kty')})")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            log.info("key_hsm: material is not JSON — attempting DER parse")
+            key_material = _parse_der_private_key(unwrapped)
+
+        if key_material:
             log.info(f"key_hsm: unwrapped key type={key_material.get('kty')}, "
                      f"has_d={'d' in key_material}, has_p={'p' in key_material}")
-            return key_material
-
-        finally:
-            try:
-                tpm.close()
-            except Exception:
-                pass
+        return key_material
 
     except Exception as e:
         log.error(f"key_hsm unwrap failed: {e}", exc_info=True)
         return None
-
-
-def _tpm_rsa_decrypt_for_unwrap(tss, tpm, key_handle, ciphertext, pcr_list):
-    """
-    RSA decrypt using the TPM ephemeral key for key_hsm unwrapping.
-
-    CKM_RSA_AES_KEY_WRAP uses RSA-OAEP (SHA-256) for the AES key encryption.
-    We try OAEP first; if the TPM types aren't available we fall back to the
-    existing TssWrapper.decrypt_with_ephemeral_key() which uses RSAES.
-    """
-    # Try direct TPM call with OAEP first
-    try:
-        # TSS.MSR Python types — path is under CVM_ATTEST_BASE/TSS_MSR/
-        tss_py_base = os.path.join(CVM_ATTEST_BASE, 'TSS_MSR', 'TSS.Py')
-        if os.path.isdir(tss_py_base) and tss_py_base not in sys.path:
-            sys.path.insert(0, tss_py_base)
-
-        # Import TPM type definitions (auto-generated from TPM 2.0 spec)
-        from tpm_20.TpmTypes import (
-            TPM_SE, TPM_ALG_ID, TPMS_SCHEME_OAEP,
-            TPMS_PCR_SELECTION, TPMT_SYM_DEF, TPM_RH,
-        )
-
-        # Start a policy session (required for PCR-bound keys)
-        # Full TPM2_StartAuthSession signature: (tpmKey, bind, nonceCaller,
-        #   encryptedSalt, sessionType, symmetric, authHash)
-        sess = tpm.StartAuthSession(
-            TPM_RH.NULL,           # tpmKey (unsalted — no encryption key)
-            TPM_RH.NULL,           # bind   (unbound session)
-            bytes(),               # nonceCaller (library generates one)
-            bytes(),               # encryptedSalt (unsalted)
-            TPM_SE.POLICY,         # sessionType = POLICY
-            TPMT_SYM_DEF(),        # symmetric = NULL (no parameter encryption)
-            TPM_ALG_ID.SHA256      # authHash
-        )
-
-        # Satisfy the PCR policy that protects the ephemeral key
-        pcr_sel = TPMS_PCR_SELECTION(TPM_ALG_ID.SHA256, pcr_list)
-        tpm.PolicyPCR(sess, b'', [pcr_sel])
-
-        # RSA-OAEP decrypt (SHA-256) — matches CKM_RSA_AES_KEY_WRAP spec
-        scheme = TPMS_SCHEME_OAEP(TPM_ALG_ID.SHA256)
-        decrypted = tpm.withSession(sess).RSA_Decrypt(
-            key_handle, ciphertext, scheme, b''
-        )
-        log.info("key_hsm: RSA-OAEP decrypt via TPM succeeded")
-        return bytes(decrypted)
-
-    except ImportError as ie:
-        log.warning(f"TPM OAEP types not importable ({ie}), trying RSAES fallback")
-    except Exception as e:
-        log.warning(f"RSA-OAEP decrypt failed ({e}), trying RSAES fallback")
-
-    # Fallback: try RSAES via TssWrapper (may work if AKV used PKCS#1 v1.5)
-    log.info("key_hsm: attempting RSAES fallback via TssWrapper")
-    # decrypt_with_ephemeral_key closes the TPM, so we need a fresh key
-    uwlog2 = CvmLogger("skr-unwrap-rsaes").get_logger()
-    tss2 = TssWrapper(uwlog2)
-    os_info2 = OsInfo()
-    _, kh2, tpm2 = tss2.get_ephemeral_key(os_info2.pcr_list)
-    result = tss2.decrypt_with_ephemeral_key(ciphertext, os_info2.pcr_list, kh2, tpm2)
-    log.info("key_hsm: RSAES fallback succeeded")
-    return bytes(result)
 
 
 def extract_key_from_release(release_payload):
