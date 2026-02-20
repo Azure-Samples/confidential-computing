@@ -995,25 +995,53 @@ $ruleFabrikam = New-AzApplicationGatewayRequestRoutingRule `
     -BackendAddressPool $poolFabrikam `
     -BackendHttpSettings $backendSettings
 
-# ---- Create the Application Gateway ----
+# ---- Create the Application Gateway (with retry for transient Azure errors) ----
 $sku = New-AzApplicationGatewaySku -Name WAF_v2 -Tier WAF_v2 -Capacity 1
 $appGwName = "$basename-appgw"
 
 Write-Host "  Creating Application Gateway: $appGwName..."
-New-AzApplicationGateway `
-    -Name $appGwName `
-    -ResourceGroupName $resgrp `
-    -Location $Location `
-    -Sku $sku `
-    -GatewayIPConfigurations $gipConfig `
-    -FrontendIPConfigurations $fipConfig `
-    -FrontendPorts @($fpWoodgrove, $fpContoso, $fpFabrikam) `
-    -BackendAddressPools @($poolContoso, $poolFabrikam, $poolWoodgrove) `
-    -BackendHttpSettingsCollection $backendSettings `
-    -HttpListeners @($listenerWoodgrove, $listenerContoso, $listenerFabrikam) `
-    -RequestRoutingRules @($ruleWoodgrove, $ruleContoso, $ruleFabrikam) `
-    -Probes $probe `
-    -FirewallPolicy $wafPolicy | Out-Null
+$appGwCreated = $false
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+        # Check if a previous attempt left a failed gateway resource
+        $existingGw = Get-AzApplicationGateway -Name $appGwName -ResourceGroupName $resgrp -ErrorAction SilentlyContinue
+        if ($existingGw -and $existingGw.ProvisioningState -eq 'Failed') {
+            Write-Host "    Existing gateway in Failed state — re-applying config (attempt $attempt/3)..." -ForegroundColor Yellow
+            Set-AzApplicationGateway -ApplicationGateway $existingGw | Out-Null
+        }
+        elseif ($existingGw -and $existingGw.ProvisioningState -eq 'Succeeded') {
+            Write-Host "    Gateway already exists and is healthy." -ForegroundColor Green
+        }
+        else {
+            New-AzApplicationGateway `
+                -Name $appGwName `
+                -ResourceGroupName $resgrp `
+                -Location $Location `
+                -Sku $sku `
+                -GatewayIPConfigurations $gipConfig `
+                -FrontendIPConfigurations $fipConfig `
+                -FrontendPorts @($fpWoodgrove, $fpContoso, $fpFabrikam) `
+                -BackendAddressPools @($poolContoso, $poolFabrikam, $poolWoodgrove) `
+                -BackendHttpSettingsCollection $backendSettings `
+                -HttpListeners @($listenerWoodgrove, $listenerContoso, $listenerFabrikam) `
+                -RequestRoutingRules @($ruleWoodgrove, $ruleContoso, $ruleFabrikam) `
+                -Probes $probe `
+                -FirewallPolicy $wafPolicy | Out-Null
+        }
+        $appGwCreated = $true
+        break
+    }
+    catch {
+        Write-Host "    App Gateway attempt $attempt/3 failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        if ($attempt -lt 3) {
+            Write-Host "    Retrying in 30 seconds..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 30
+        }
+        else {
+            throw
+        }
+    }
+}
 
 $appGwPip = Get-AzPublicIpAddress -Name $pipName -ResourceGroupName $resgrp
 $publicIP = $appGwPip.IpAddress
