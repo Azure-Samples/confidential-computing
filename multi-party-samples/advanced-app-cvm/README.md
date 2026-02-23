@@ -48,6 +48,85 @@ Three companies — **Contoso**, **Fabrikam**, and **Woodgrove** — each get th
     └─────────────────────────────────────────────────────┘
 ```
 
+## Compensating Controls for Removing Interactive Access
+
+In the ACI version, each container's `ccePolicy` cryptographically prevents interactive access — `docker exec`, SSH, and shell commands are blocked at the hardware level by the security policy hash embedded in the attestation evidence. CVMs do not have an equivalent container-level policy enforcement, so this deployment applies **compensating controls** across multiple layers to achieve the same outcome: **no operator can interactively access a running CVM**.
+
+### Layer 1 — OS-Level: SSH Disabled at Boot
+
+The `setup-vm.sh` bootstrap script unconditionally disables the SSH service on every CVM unless the deployment was created with `-EnableDebug`:
+
+```bash
+if [[ "$ENABLE_DEBUG" != "true" ]]; then
+    systemctl stop ssh && systemctl disable ssh
+fi
+```
+
+With SSH stopped and disabled, there is no listening daemon to accept connections — even if network access were available.
+
+### Layer 2 — Network: No Public IP + NSG Deny-All
+
+Every CVM is assigned a **private IP only** (10.0.1.x) within a VNet. The Network Security Group on the VM subnet enforces:
+
+| Priority | Rule | Source | Destination | Ports | Action |
+|----------|------|--------|-------------|-------|--------|
+| 100 | Allow-AppGw-HTTP | AppGw subnet (10.0.2.0/24) | VM subnet (10.0.1.0/24) | 80 | Allow |
+| 110 | Allow-InterVM-HTTPS | VM subnet | VM subnet | 443 | Allow |
+| 120 | Allow-Bastion-SSH (**DEBUG only**) | Bastion subnet (10.0.99.0/26) | VM subnet | 22 | Allow |
+| 4000 | Deny-All-Other-Inbound | VirtualNetwork | VirtualNetwork | * | **Deny** |
+
+In a standard (non-debug) deployment, there is **no SSH rule at all** — the deny-all rule at priority 4000 blocks every port except HTTP 80 from the Application Gateway and HTTPS 443 between VMs.
+
+### Layer 3 — No Bastion Unless Debug
+
+Azure Bastion (the only service that could proxy SSH through the Azure control plane) is **not deployed** in standard mode. Without Bastion, there is no path to reach port 22 even if SSH were somehow re-enabled inside the VM.
+
+### Layer 4 — Credentials Hidden from Operator
+
+Each VM is provisioned with a randomly generated 12-character username and 40-character password. In a standard deployment these credentials are **never displayed** to the operator — they exist only in Azure's internal provisioning pipeline and are not stored anywhere accessible.
+
+### Layer 5 — Hardware Isolation (AMD SEV-SNP)
+
+The AMD SEV-SNP hardware encrypts all VM memory with a per-VM key managed by the CPU's Secure Processor. Even if an attacker had physical access to the host, or compromised the hypervisor, they **cannot read or modify CVM memory**. This is the same hardware protection that backs ACI confidential containers.
+
+### Layer 6 — Confidential OS Disk Encryption
+
+Each CVM's OS disk uses `DiskWithVMGuestState` encryption with a customer-managed key (CMK) stored in the company's own Key Vault. The disk encryption key can only be released via attestation (`UseDefaultCVMPolicy`), so even detaching the disk and mounting it elsewhere would not reveal its contents.
+
+### Layer 7 — Application Gateway WAF
+
+The only public-facing endpoint is the Application Gateway with WAF_v2 (OWASP 3.2 rules). Port-based routing exposes only HTTP traffic — there is no path from the internet to any management port on the VMs.
+
+### Summary: Defence in Depth
+
+```
+                    Internet
+                       │
+          ┌────────────▼────────────┐
+          │  Application Gateway    │  Layer 7 — WAF filtering
+          │  (WAF_v2, single IP)    │
+          └────────────┬────────────┘
+                       │ HTTP 80 only
+          ┌────────────▼────────────┐
+          │  NSG (Deny-All default) │  Layer 2 — Network isolation
+          └────────────┬────────────┘
+                       │
+   ┌───────────────────┼───────────────────┐
+   │ ┌─────────────┐ ┌┴─────────────┐ ┌───┴─────────┐
+   │ │ Contoso CVM │ │ Fabrikam CVM │ │Woodgrove CVM│
+   │ │             │ │              │ │             │
+   │ │ SSH: OFF    │ │ SSH: OFF     │ │ SSH: OFF    │  Layer 1 — SSH disabled
+   │ │ No pub IP   │ │ No pub IP    │ │ No pub IP   │  Layer 2 — Private only
+   │ │ Creds: ???  │ │ Creds: ???   │ │ Creds: ???  │  Layer 4 — Hidden creds
+   │ │ SEV-SNP  🔒 │ │ SEV-SNP  🔒  │ │ SEV-SNP 🔒  │  Layer 5 — HW isolation
+   │ │ CMK disk 🔐 │ │ CMK disk 🔐  │ │ CMK disk 🔐 │  Layer 6 — Disk encrypt
+   │ └─────────────┘ └──────────────┘ └─────────────┘
+   │         No Bastion deployed (Layer 3)           │
+   └─────────────────────────────────────────────────┘
+```
+
+These seven layers collectively ensure that **no operator or external party can gain interactive access to a production CVM**, matching the security posture of ACI's container-level policy enforcement with defence-in-depth controls.
+
 ## Key Differences from ACI Version
 
 | Aspect | ACI (`advanced-app/`) | CVM (`advanced-app-cvm/`) |
@@ -56,12 +135,13 @@ Three companies — **Contoso**, **Fabrikam**, and **Woodgrove** — each get th
 | **Attestation** | ACI SKR sidecar binary (`/usr/local/bin/skr`) | CVM SKR shim (`skr_shim.py`) using vTPM + guest attestation client |
 | **Key Release Claim** | `x-ms-sevsnpvm-hostdata` (per-container policy hash) | `vmUniqueId` (per-VM) + `azure-compliant-cvm` |
 | **Multi-Party Isolation** | ccePolicy hash binds keys to specific container images | Per-VM `vmUniqueId` in release policy + KV access policies |
+| **Interactive Access Prevention** | ccePolicy blocks `exec`, SSH, shell at hardware level | SSH disabled + NSG deny-all + no Bastion + hidden credentials (see [Compensating Controls](#compensating-controls-for-removing-interactive-access)) |
 | **Disk Encryption** | N/A (ephemeral containers) | ConfidentialVmEncryptedWithCustomerKey (CMK via DES) |
 | **Networking** | Per-container public FQDN | Private VNet + Application Gateway WAF |
-| **NSG** | N/A (ACI managed networking) | Deny-all inbound except AppGw HTTP, inter-VM HTTPS, Bastion SSH (DEBUG) |
+| **NSG** | N/A (ACI managed networking) | Deny-all inbound except AppGw HTTP, inter-VM HTTPS, Bastion SSH (DEBUG only) |
 | **Public Access** | Direct container FQDN | Single WAF IP with port-based routing |
-| **Credentials** | N/A (managed identity only) | Random per-VM, hidden unless `-DEBUG` |
-| **Remote Access** | N/A | Azure Bastion (only with `-DEBUG`) |
+| **Credentials** | N/A (managed identity only) | Random per-VM, hidden unless `-EnableDebug` |
+| **Remote Access** | Blocked by ccePolicy | Azure Bastion (only with `-EnableDebug`); otherwise none |
 
 ### Trust Model
 
@@ -83,13 +163,14 @@ The key access matrix defines which VMs can release which keys:
 | `fabrikam-secret-key` | Fabrikam VM + Woodgrove VM | Fabrikam owns the data; Woodgrove aggregates |
 | `woodgrove-secret-key` | Woodgrove VM only | Woodgrove's own data is private |
 
-This provides **two layers of isolation**:
+This provides **three layers of isolation**:
 - **Hardware attestation + per-VM binding**: The AKV release policy ensures only the specific CVM instance (by `vmUniqueId`) running on attested AMD SEV-SNP hardware can release the key
 - **Identity-based access**: Key Vault access policies restrict which managed identities can call the release API at all
+- **No interactive access**: Compensating controls (SSH disabled, NSG deny-all, no Bastion, hidden credentials, confidential OS disk encryption) prevent any operator from gaining shell access to the running VM — see [Compensating Controls](#compensating-controls-for-removing-interactive-access) above
 
 Compared to ACI:
-- **ACI**: Cryptographic binding of code to keys (code identity via ccePolicy hash)
-- **CVM**: Cryptographic binding of VM instance to keys (`vmUniqueId`) + hardware attestation (proves CVM) + identity-based access (managed identity)
+- **ACI**: Cryptographic binding of code to keys (code identity via ccePolicy hash) + ccePolicy blocks interactive access at the hardware level
+- **CVM**: Cryptographic binding of VM instance to keys (`vmUniqueId`) + hardware attestation (proves CVM) + identity-based access (managed identity) + defence-in-depth compensating controls to prevent interactive access
 
 ## Prerequisites
 
@@ -108,17 +189,21 @@ Compared to ACI:
 .\Deploy-MultiPartyCVM.ps1 -Prefix "demo"
 ```
 
-This creates all resources with default settings (North Europe, Standard_DC2as_v5). VM credentials are randomly generated and **not displayed** — the operator cannot SSH into the VMs.
+This creates all resources with default settings (North Europe, Standard_DC2as_v5). All [compensating controls](#compensating-controls-for-removing-interactive-access) are active: SSH is disabled, no Bastion is deployed, NSG blocks all management traffic, and VM credentials are randomly generated and **not displayed** — the operator has no path to interactively access any CVM.
 
 ### Debug Deployment (credentials shown + Bastion)
 
 ```powershell
-.\Deploy-MultiPartyCVM.ps1 -Prefix "demo" -DEBUG
+.\Deploy-MultiPartyCVM.ps1 -Prefix "demo" -EnableDebug
 ```
 
-Same as above, but:
+Same as above, but the compensating controls for interactive access prevention are **relaxed** for debugging purposes:
+- **SSH remains enabled** on each CVM (not stopped/disabled in `setup-vm.sh`)
 - **Azure Bastion** (Basic SKU) is deployed for SSH access via the Azure Portal
+- **NSG rule** added to allow SSH (port 22) from the Bastion subnet
 - The random **username and password** for each VM are printed at the end of the script
+
+> **Warning:** Debug mode weakens the interactive access controls. Use only in development/testing environments.
 
 ### Custom Region and VM Size
 

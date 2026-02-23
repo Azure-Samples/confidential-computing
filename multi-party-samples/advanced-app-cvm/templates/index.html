@@ -945,14 +945,19 @@
                 html += '<div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4;">';
                 html += '<h4 style="color: #004085; margin: 0 0 10px 0;">🛡️ How is the CVM protected?</h4>';
                 html += '<p style="color: #004085; margin: 0 0 10px 0;">';
-                html += 'Azure Confidential VMs use AMD SEV-SNP hardware to provide strong isolation that prevents <em>anyone</em> — including the cloud operator and hypervisor — from accessing VM memory:';
+                html += 'Azure Confidential VMs use AMD SEV-SNP hardware plus multiple compensating controls to prevent <em>anyone</em> — including the cloud operator and hypervisor — from accessing VM memory or gaining interactive access:';
                 html += '</p>';
                 html += '<ul style="color: #004085; margin: 0 0 15px 20px;">';
                 html += '<li><strong>Memory Encryption</strong> — All VM memory is encrypted by the AMD hardware with a key inaccessible to the host</li>';
-                html += '<li><strong>SSH Disabled</strong> — SSH is disabled by default (deploy with <code>-EnableDebug</code> to enable)</li>';
+                html += '<li><strong>SSH Disabled</strong> — SSH is disabled at boot by the setup script (deploy with <code>-EnableDebug</code> to keep it enabled)</li>';
+                html += '<li><strong>No Public IP</strong> — VMs have private IPs only; the Application Gateway WAF is the sole public endpoint</li>';
+                html += '<li><strong>NSG Deny-All</strong> — Network Security Group blocks all inbound traffic except HTTP 80 from the AppGw and HTTPS 443 between VMs</li>';
+                html += '<li><strong>No Azure Bastion</strong> — Bastion is not deployed in standard mode, so there is no path to SSH via the Azure Portal</li>';
+                html += '<li><strong>Hidden Credentials</strong> — VM usernames and passwords are randomly generated and never shown to the operator</li>';
+                html += '<li><strong>Confidential OS Disk</strong> — OS disk is encrypted with a customer-managed key released only via attestation</li>';
                 html += '<li><strong>Attestation-Bound Keys</strong> — Cryptographic keys can only be released after MAA verifies the VM\'s integrity</li>';
                 html += '</ul>';
-                html += '<p style="color: #004085; margin: 0;">These protections are enforced by the AMD SEV-SNP hardware — the hypervisor itself cannot bypass them.</p>';
+                html += '<p style="color: #004085; margin: 0;">These layered controls ensure that no operator can gain interactive access to a production CVM, matching the security posture of ACI container-level policy enforcement.</p>';
                 html += '</div>';
                 
                 resultDiv.innerHTML = html;
