@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Confidential ACI - Attestation Demo</title>
+    <title>Confidential CVM - Attestation Demo</title>
     <style>
         * {
             margin: 0;
@@ -320,7 +320,7 @@
     
     <div class="container">
         <div class="header">
-            <h1>🔒 Confidential Azure Container Instances</h1>
+            <h1>🔒 Confidential Azure Virtual Machines</h1>
             <p>Remote Attestation Demo with AMD SEV-SNP</p>
         </div>
         
@@ -361,7 +361,7 @@
             <details class="section">
                 <summary style="cursor: pointer;"><h2 style="display: inline;">🔑 Secure Key Release</h2></summary>
                 <div class="attestation-box" style="margin-top: 15px;">
-                    <p><strong>Secure Key Release (SKR)</strong> allows Azure Key Vault to release cryptographic keys only to verified confidential computing environments. The key is released only if the container proves it's running in a genuine AMD SEV-SNP TEE with the correct security policy.</p>
+                    <p><strong>Secure Key Release (SKR)</strong> allows Azure Key Vault to release cryptographic keys only to verified confidential computing environments. The key is released only if the VM proves it's running in a genuine AMD SEV-SNP TEE with the correct security policy.</p>
                     
                     <div id="skrConfigInfo" style="margin: 20px 0; padding: 20px; background: #e7f3ff; border-radius: 8px; border: 2px solid #0078d4;">
                         <p style="color: #004085;"><em>Loading SKR configuration...</em></p>
@@ -377,12 +377,24 @@
                 </div>
             </details>
             
+            <!-- Key Release Policy Section -->
+            <details class="section" id="releasePolicySection">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">📋 Key Release Policy</h2></summary>
+                <div class="attestation-box" style="margin-top: 15px;">
+                    <p><strong>The release policy</strong> defines the conditions Azure Key Vault checks before releasing a cryptographic key. Only VMs that pass all policy checks receive the key.</p>
+                    
+                    <div id="releasePolicyContent" style="margin: 20px 0; padding: 20px; background: #f0f7ff; border-radius: 8px; border: 2px solid #0078d4;">
+                        <p style="color: #004085;"><em>Loading release policy from Key Vault...</em></p>
+                    </div>
+                </div>
+            </details>
+            
             <!-- Cross-Company Key Access Attempt Section -->
             <details class="section" id="crossCompanySection" style="display: none;">
                 <summary style="cursor: pointer;"><h2 style="display: inline;">&#128683; Attempt to Use Key from Other Company</h2></summary>
                 <div class="attestation-box" style="border-left-color: #dc3545; margin-top: 15px;">
                     <div style="margin-bottom: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545;">
-                        <p style="color: #721c24;"><strong>Cross-Company Access Test:</strong> This demonstrates that even though both Contoso and Fabrikam are running in confidential containers with TEE protection, each company can ONLY access their own cryptographic keys.</p>
+                        <p style="color: #721c24;"><strong>Cross-Company Access Test:</strong> This demonstrates that even though both Contoso and Fabrikam are running in confidential VMs with TEE protection, each company can ONLY access their own cryptographic keys.</p>
                     </div>
                     
                     <div id="crossCompanyInfo" style="margin-bottom: 20px; padding: 15px; background: #e2e3e5; border-radius: 8px;">
@@ -605,13 +617,13 @@
             
             <details class="section">
                 <summary style="cursor: pointer; display: flex; align-items: center; gap: 10px;">
-                    <h2 style="margin: 0;">🖥️ Try to Access Container OS</h2>
+                    <h2 style="margin: 0;">🖥️ CVM Security Isolation</h2>
                 </summary>
                 <div class="attestation-box">
-                    <p><strong>Can an operator shell into a Confidential Container?</strong> This test attempts several ways an infrastructure operator might try to get command-line access to a running container — SSH, <code>az container exec</code>, and spawning a shell process. All are blocked by the Confidential Computing Enforcement Policy.</p>
+                    <p><strong>Can an operator access the Confidential VM?</strong> This test verifies security isolation of the CVM environment. SSH is disabled by default (unless deployed with <code>-EnableDebug</code>), and the AMD SEV-SNP hardware prevents the hypervisor from accessing VM memory.</p>
                     
                     <div style="margin: 20px 0;">
-                        <button id="accessTestBtn" onclick="testContainerAccess()" style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 1em; cursor: pointer; font-weight: bold;">
+                        <button id="accessTestBtn" onclick="testVMSecurity()" style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 1em; cursor: pointer; font-weight: bold;">
                             🔓 Attempt to Connect
                         </button>
                     </div>
@@ -621,17 +633,17 @@
             </details>
             
             <details class="section">
-                <summary style="cursor: pointer;"><h2 style="display: inline;">📦 Container Image Information</h2></summary>
-                <div id="containerInfo" style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #6c757d; margin-top: 15px;">
-                    <p><em>Loading container information...</em></p>
+                <summary style="cursor: pointer;"><h2 style="display: inline;">📦 VM Environment Information</h2></summary>
+                <div id="vmInfo" style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #6c757d; margin-top: 15px;">
+                    <p><em>Loading VM information...</em></p>
                 </div>
             </details>
         </div>
         
         <div class="footer">
-            <p><strong>Powered by Azure Container Instances Confidential Computing</strong></p>
-            <p>Learn more: <a href="https://learn.microsoft.com/azure/container-instances/container-instances-confidential-overview" target="_blank">Confidential containers on ACI documentation</a></p>
-            <p>Sample based on: <a href="https://github.com/Azure-Samples/confidential-container-samples" target="_blank">Azure Confidential Container Samples</a></p>
+            <p><strong>Powered by Azure Confidential Virtual Machines (AMD SEV-SNP)</strong></p>
+            <p>Learn more: <a href="https://learn.microsoft.com/azure/confidential-computing/confidential-vm-overview" target="_blank">Azure Confidential VMs documentation</a></p>
+            <p>Sample based on: <a href="https://github.com/Azure-Samples/confidential-computing" target="_blank">Azure Confidential Computing Samples</a></p>
         </div>
     </div>
     
@@ -658,7 +670,7 @@
                             html += '<div style="margin-top: 15px; padding: 12px; background: linear-gradient(135deg, #e8f4ff 0%, #f0f7ff 100%); border-radius: 6px; border: 1px solid #b8daff;">';
                             html += '<p style="color: #0056b3; font-size: 0.85em; margin-bottom: 5px;"><strong>🛡️ SECURITY POLICY BINDING</strong></p>';
                             html += '<p style="font-family: monospace; font-size: 0.75em; color: #004085; word-break: break-all; background: white; padding: 8px; border-radius: 4px; margin-bottom: 8px;">' + escapeHtml(data.security_policy_hash) + '</p>';
-                            html += '<p style="font-size: 0.75em; color: #666;">This key can ONLY be released to containers with this exact security policy hash (x-ms-sevsnpvm-hostdata)</p>';
+                            html += '<p style="font-size: 0.75em; color: #666;">This key can ONLY be released to VMs that match the release policy requirements (azure-compliant-cvm attestation)</p>';
                             html += '</div>';
                         }
                         
@@ -690,7 +702,7 @@
                     if (data.status && data.status.attestation_works) {
                         // Attestation verified - show green success header
                         header.style.background = 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)';
-                        headerH1.innerHTML = '🔒 Confidential Azure Container Instances';
+                        headerH1.innerHTML = '🔒 Confidential Azure Virtual Machines';
                         headerP.textContent = 'Running in AMD SEV-SNP Trusted Execution Environment';
                         
                         // Update security features to verified
@@ -707,20 +719,20 @@
                     console.error('Error loading info:', error);
                 });
             
-            // Load container image information
-            fetch('/container/info')
+            // Load VM environment information
+            fetch('/vm/info')
                 .then(response => response.json())
                 .then(data => {
                     let html = '';
                     
-                    // Container identity
+                    // VM identity
                     html += '<div style="margin-bottom: 20px;">';
-                    html += '<h4 style="color: #495057; margin-bottom: 10px;">🏷️ Container Identity</h4>';
+                    html += '<h4 style="color: #495057; margin-bottom: 10px;">🏷️ VM Identity</h4>';
                     html += '<table style="width: 100%; border-collapse: collapse;">';
                     html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold; width: 200px;">Hostname</td>';
                     html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.hostname || 'Unknown') + '</td></tr>';
-                    html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Container ID</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.container_id || 'Unknown') + '</td></tr>';
+                    html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">VM ID</td>';
+                    html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.vm_id || data.container_id || 'Unknown') + '</td></tr>';
                     if (data.os) {
                         html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">OS</td>';
                         html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + escapeHtml(data.os.pretty_name || 'Unknown') + '</td></tr>';
@@ -772,7 +784,7 @@
                             html += '<p style="color: #155724;"><strong>Device:</strong> ' + escapeHtml(data.sev_device.device_path) + '</p>';
                         } else {
                             html += '<p style="color: #721c24;"><strong>Device:</strong> Not found (no /dev/sev-guest)</p>';
-                            html += '<p style="color: #721c24; font-size: 0.9em; margin-top: 5px;"><em>This container is NOT running on confidential computing hardware.</em></p>';
+                            html += '<p style="color: #721c24; font-size: 0.9em; margin-top: 5px;"><em>This VM is NOT running on confidential computing hardware.</em></p>';
                         }
                         html += '</div>';
                     }
@@ -814,25 +826,93 @@
                         html += '</div>';
                     }
                     
-                    document.getElementById('containerInfo').innerHTML = html;
+                    document.getElementById('vmInfo').innerHTML = html;
                 })
                 .catch(error => {
-                    document.getElementById('containerInfo').innerHTML = 
-                        '<p style="color: #dc3545;">Error loading container info: ' + escapeHtml(error.message) + '</p>';
+                    document.getElementById('vmInfo').innerHTML = 
+                        '<p style="color: #dc3545;">Error loading VM info: ' + escapeHtml(error.message) + '</p>';
+                });
+
+            // Load release policy from Key Vault
+            fetch('/skr/release-policy')
+                .then(response => response.json())
+                .then(data => {
+                    const policyDiv = document.getElementById('releasePolicyContent');
+                    if (data.status === 'success' && data.release_policy) {
+                        let html = '';
+
+                        // VM Identity callout
+                        html += '<div style="margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, #e8f4ff 0%, #dceeff 100%); border-radius: 8px; border: 2px solid #0078d4;">';
+                        html += '<p style="color: #0056b3; font-size: 0.85em; margin-bottom: 5px;"><strong>🆔 THIS VM\'S UNIQUE ID</strong></p>';
+                        html += '<p style="font-family: monospace; font-size: 0.9em; color: #004085; background: white; padding: 10px; border-radius: 4px; word-break: break-all; margin-bottom: 10px;">' + escapeHtml(data.vm_id || 'Unknown') + '</p>';
+                        html += '<p style="font-size: 0.8em; color: #495057;">The managed identity assigned to this VM is the only identity with Azure Key Vault access policy permission to release <strong>' + escapeHtml(data.key_name) + '</strong>. This identity-based restriction works together with the attestation-based release policy below.</p>';
+                        html += '</div>';
+
+                        // Release policy JSON
+                        html += '<div style="margin-bottom: 20px;">';
+                        html += '<h4 style="color: #004085; margin-bottom: 10px;">📜 Release Policy (from Key Vault)</h4>';
+                        html += '<p style="font-size: 0.85em; color: #495057; margin-bottom: 10px;">This policy is stored on the key <strong>' + escapeHtml(data.key_name) + '</strong> in <strong>' + escapeHtml(data.key_vault) + '</strong>. Azure Key Vault evaluates it against the MAA attestation token before releasing the key.</p>';
+                        html += '<div style="background: #1e1e1e; padding: 15px; border-radius: 8px; overflow-x: auto;">';
+                        html += '<pre style="color: #d4d4d4; font-size: 0.8em; margin: 0; white-space: pre-wrap;">' + escapeHtml(JSON.stringify(data.release_policy, null, 2)) + '</pre>';
+                        html += '</div>';
+                        html += '</div>';
+
+                        // Policy claim explanations
+                        if (data.explanation && data.explanation.policy_claims) {
+                            html += '<div style="margin-bottom: 20px;">';
+                            html += '<h4 style="color: #004085; margin-bottom: 10px;">🔍 What Each Claim Means</h4>';
+                            data.explanation.policy_claims.forEach(function(c) {
+                                html += '<div style="margin-bottom: 10px; padding: 12px; background: white; border-radius: 6px; border-left: 4px solid #0078d4;">';
+                                html += '<code style="font-size: 0.8em; color: #6610f2;">' + escapeHtml(c.claim) + '</code>';
+                                html += '<span style="font-size: 0.8em; color: #28a745; margin-left: 10px;">= ' + escapeHtml(c.required) + '</span>';
+                                html += '<p style="font-size: 0.85em; color: #495057; margin-top: 6px;">' + escapeHtml(c.meaning) + '</p>';
+                                html += '</div>';
+                            });
+                            html += '</div>';
+                        }
+
+                        // How it works explanation
+                        if (data.explanation) {
+                            html += '<div style="padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">';
+                            html += '<h4 style="color: #856404; margin-bottom: 10px;">💡 How Secure Key Release Links to This VM</h4>';
+                            html += '<p style="font-size: 0.85em; color: #856404; margin-bottom: 10px;">' + escapeHtml(data.explanation.how_it_works) + '</p>';
+                            html += '<p style="font-size: 0.85em; color: #856404;">' + escapeHtml(data.explanation.vm_binding) + '</p>';
+                            html += '</div>';
+                        }
+
+                        // Key metadata
+                        html += '<div style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 6px; font-size: 0.8em; color: #6c757d;">';
+                        html += '<strong>Key:</strong> ' + escapeHtml(data.key_type || 'Unknown') + ' | ';
+                        html += '<strong>Exportable:</strong> ' + (data.exportable ? 'Yes' : 'No') + ' | ';
+                        html += '<strong>Key ID:</strong> <span style="font-family: monospace;">' + escapeHtml(data.key_id || 'Unknown') + '</span>';
+                        html += '</div>';
+
+                        policyDiv.innerHTML = html;
+                    } else if (data.status === 'error') {
+                        policyDiv.innerHTML = '<p style="color: #856404;"><em>⚠️ ' + escapeHtml(data.message || 'Unable to load release policy') + '</em></p>';
+                        policyDiv.style.background = '#fff3cd';
+                        policyDiv.style.borderColor = '#ffc107';
+                    }
+                })
+                .catch(error => {
+                    const policyDiv = document.getElementById('releasePolicyContent');
+                    policyDiv.innerHTML = '<p style="color: #856404;"><em>⚠️ Could not load release policy: ' + escapeHtml(error.message) + '</em></p>';
+                    policyDiv.style.background = '#fff3cd';
+                    policyDiv.style.borderColor = '#ffc107';
                 });
         };
         
-        // ======== Try to access container OS ========
-        function testContainerAccess() {
+        // ======== CVM security isolation test ========
+        function testVMSecurity() {
             const btn = document.getElementById('accessTestBtn');
             const resultDiv = document.getElementById('accessTestResult');
             
             btn.disabled = true;
             btn.innerHTML = '🔓 Attempting access<span class="loading"></span>';
             resultDiv.style.display = 'block';
-            resultDiv.innerHTML = '<p style="color: #856404;"><em>Running access tests against the container...</em></p>';
+            resultDiv.innerHTML = '<p style="color: #856404;"><em>Running security isolation tests on the CVM...</em></p>';
             
-            fetch('/container/access-test', { method: 'POST' })
+            fetch('/vm/security-test', { method: 'POST' })
             .then(response => response.json())
             .then(data => {
                 btn.disabled = false;
@@ -863,18 +943,16 @@
                 
                 // Summary box
                 html += '<div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4;">';
-                html += '<h4 style="color: #004085; margin: 0 0 10px 0;">🛡️ Why is access blocked?</h4>';
+                html += '<h4 style="color: #004085; margin: 0 0 10px 0;">🛡️ How is the CVM protected?</h4>';
                 html += '<p style="color: #004085; margin: 0 0 10px 0;">';
-                html += 'The <strong>Confidential Computing Enforcement Policy</strong> (ccePolicy) is cryptographically bound to this container\'s TEE. ';
-                html += 'It enforces three key protections that prevent <em>anyone</em> — including the cloud operator — from accessing the container OS:';
+                html += 'Azure Confidential VMs use AMD SEV-SNP hardware to provide strong isolation that prevents <em>anyone</em> — including the cloud operator and hypervisor — from accessing VM memory:';
                 html += '</p>';
                 html += '<ul style="color: #004085; margin: 0 0 15px 20px;">';
-                html += '<li><code>"exec_processes": []</code> — No additional processes can be spawned (blocks <code>az container exec</code>, <code>docker exec</code>)</li>';
-                html += '<li><code>"allow_stdio_access": false</code> — No stdin/stdout from host (blocks interactive shells)</li>';
-                html += '<li><strong>No SSH server</strong> — The container image has no SSH daemon, and the policy prevents adding one at runtime</li>';
+                html += '<li><strong>Memory Encryption</strong> — All VM memory is encrypted by the AMD hardware with a key inaccessible to the host</li>';
+                html += '<li><strong>SSH Disabled</strong> — SSH is disabled by default (deploy with <code>-EnableDebug</code> to enable)</li>';
+                html += '<li><strong>Attestation-Bound Keys</strong> — Cryptographic keys can only be released after MAA verifies the VM\'s integrity</li>';
                 html += '</ul>';
-                html += '<p style="color: #004085; margin: 0;">These rules are enforced by the AMD SEV-SNP hardware — the hypervisor itself cannot bypass them. ';
-                html += 'See <a href="https://github.com/vinfnet/confidential-computing/blob/main/multi-party-samples/advanced-app/SECURITY-POLICY.md" target="_blank" style="color: #0056b3; font-weight: bold;">SECURITY-POLICY.md</a> for the full annotated policy.</p>';
+                html += '<p style="color: #004085; margin: 0;">These protections are enforced by the AMD SEV-SNP hardware — the hypervisor itself cannot bypass them.</p>';
                 html += '</div>';
                 
                 resultDiv.innerHTML = html;
@@ -911,7 +989,7 @@
                     title: 'Token Issuer',
                     icon: '🏛️',
                     category: 'JWT Standard',
-                    description: 'The Microsoft Azure Attestation (MAA) endpoint that issued this token. This is the shared attestation provider for the Azure region where the container is deployed. Relying parties should verify this matches the expected MAA endpoint.'
+                    description: 'The Microsoft Azure Attestation (MAA) endpoint that issued this token. This is the shared attestation provider for the Azure region where the VM is deployed. Relying parties should verify this matches the expected MAA endpoint.'
                 },
                 'jti': {
                     title: 'JWT Token ID',
@@ -943,8 +1021,8 @@
                     title: 'Compliance Status',
                     icon: '✅',
                     category: 'Platform Identity',
-                    description: 'Indicates the compliance status of the Utility VM (UVM) running the container. "azure-compliant-uvm" means the VM image has been verified by Microsoft as meeting Azure\'s confidential computing security requirements.',
-                    detail: value === 'azure-compliant-uvm' ? '✅ Running Microsoft-verified compliant UVM' : null
+                    description: 'Indicates the compliance status of the confidential VM platform. "azure-compliant-uvm" means the platform has been verified by Microsoft as meeting Azure\'s confidential computing security requirements.',
+                    detail: value === 'azure-compliant-uvm' ? '✅ Running Microsoft-verified compliant confidential VM platform' : null
                 },
                 'x-ms-policy-hash': {
                     title: 'Attestation Policy Hash',
@@ -1009,9 +1087,9 @@
                 'x-ms-sevsnpvm-hostdata': {
                     title: 'Host Data (Security Policy Hash)',
                     icon: '🔒',
-                    category: 'Container Identity',
-                    description: 'SHA-256 hash of the confidential computing security policy (ccePolicy) set by the host at VM launch time. This is the CRITICAL binding between the container\'s security policy and the hardware attestation. Key release policies compare this value to ensure only containers with the approved security policy can access secrets.',
-                    detail: '🔑 This value is used in SKR key release policies to bind keys to specific container configurations'
+                    category: 'VM Identity',
+                    description: 'Data set by the hypervisor at VM launch time. For confidential VMs this reflects platform configuration. Key release policies use other claims (like vmUniqueId and compliance-status) to bind keys to specific VM instances.',
+                    detail: '🔑 In CVM deployments, key release policies bind to VM identity via vmUniqueId rather than hostdata'
                 },
                 'x-ms-sevsnpvm-idkeydigest': {
                     title: 'ID Key Digest',
@@ -1035,7 +1113,7 @@
                 'x-ms-sevsnpvm-launchmeasurement': {
                     title: 'Launch Measurement',
                     icon: '📏',
-                    category: 'Container Identity',
+                    category: 'VM Identity',
                     description: 'SHA-384 hash of the entire VM\'s initial memory contents at launch, computed by the AMD hardware. This cryptographic measurement covers the firmware, kernel, and initial configuration — any modification to the launch environment produces a different hash. This is the hardware-rooted proof of what code is running.'
                 },
                 'x-ms-sevsnpvm-mem-aes256-xts-required': {
@@ -1284,7 +1362,7 @@
             // Group claims by category
             const categoryOrder = [
                 'JWT Standard', 'Request Binding', 'Platform Identity', 'Policy',
-                'Container Identity', 'SEV-SNP Identity', 'Hardware Identity',
+                'VM Identity', 'SEV-SNP Identity', 'Hardware Identity',
                 'SEV-SNP Versions', 'Security State', 'Hardware Security Features',
                 'Guest VM Security', 'Platform Endorsement', 'Metadata'
             ];
@@ -1293,7 +1371,7 @@
                 'Request Binding': '#0d6efd',
                 'Platform Identity': '#198754',
                 'Policy': '#6610f2',
-                'Container Identity': '#dc3545',
+                'VM Identity': '#dc3545',
                 'SEV-SNP Identity': '#fd7e14',
                 'Hardware Identity': '#20c997',
                 'SEV-SNP Versions': '#0dcaf0',
@@ -1637,7 +1715,7 @@
             const headerP = header.querySelector('p');
             
             header.style.background = 'linear-gradient(135deg, #dc3545 0%, #a71d2a 100%)';
-            headerH1.innerHTML = '⚠️ Standard Azure Container Instances';
+            headerH1.innerHTML = '⚠️ Standard Azure Virtual Machine';
             headerP.textContent = 'NOT running on confidential hardware - Attestation Failed';
         }
         
@@ -1659,7 +1737,7 @@
                     maa_endpoint: 'sharedeus.eus.attest.azure.net',
                     runtime_data: btoa(JSON.stringify({
                         timestamp: new Date().toISOString(),
-                        demo: 'Confidential ACI Attestation Demo'
+                        demo: 'Confidential CVM Attestation Demo'
                     }))
                 })
             })
@@ -1740,10 +1818,10 @@
                         errorHtml += '</div>';
                     }
                     
-                    // Show sidecar response if available
+                    // Show SKR shim response if available
                     if (data.sidecar_response) {
                         errorHtml += '<div style="margin: 15px 0;">';
-                        errorHtml += '<p><strong>Sidecar Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
+                        errorHtml += '<p><strong>SKR Shim Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
                         errorHtml += '<div class="output-box" style="background: #2d2d2d; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + 
                             escapeHtml(data.sidecar_response) + '</pre></div></div>';
                     }
@@ -1754,8 +1832,8 @@
                     
                     // Show service logs if available
                     if (data.logs) {
-                        // Minimize logs for non-confidential (snooper) containers
-                        var detailsAttr = isConfidentialContainer ? 'open' : '';
+                        // Minimize logs for non-confidential VMs
+                        var detailsAttr = isConfidentialVM ? 'open' : '';
                         errorHtml += '<details ' + detailsAttr + ' style="margin: 20px 0; border: 1px solid #6c757d; border-radius: 8px; overflow: hidden;">';
                         errorHtml += '<summary style="padding: 15px; background: #343a40; color: #fff; cursor: pointer; font-weight: bold;">📋 Service Logs</summary>';
                         errorHtml += '<div style="padding: 15px; background: #1e1e1e;">';
@@ -1836,8 +1914,8 @@
                     '<p><span class="status-badge status-error">Request Failed</span></p>' +
                     '<p style="margin: 15px 0;"><strong>Error:</strong> ' + error.message + '</p>' +
                     '<p style="margin: 15px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;">' +
-                    '<em>💡 This demo requires deployment with the attestation sidecar. ' +
-                    'Deploy using azure-aci-custom-demo.ps1 with Confidential SKU to enable attestation.</em></p>';
+                    '<em>💡 This demo requires deployment on an Azure Confidential VM (DCas_v5 series). ' +
+                    'Deploy using Deploy-MultiPartyCVM.ps1 to enable attestation.</em></p>';
             });
         }
         
@@ -1919,7 +1997,7 @@
                     html += '<span style="font-size: 3em; color: #28a745;">✓</span>';
                     html += '<div>';
                     html += '<p><span class="status-badge status-success">Secure Key Release Successful</span></p>';
-                    html += '<p style="margin-top: 10px; color: #155724;">The key was successfully released by Azure Key Vault to this verified confidential container.</p>';
+                    html += '<p style="margin-top: 10px; color: #155724;">The key was successfully released by Azure Key Vault to this verified confidential VM.</p>';
                     html += '</div>';
                     html += '</div>';
                     
@@ -2001,18 +2079,18 @@
                         errorHtml += '</div>';
                     }
                     
-                    // Show sidecar response if available
+                    // Show SKR shim response if available
                     if (data.sidecar_response) {
                         errorHtml += '<div style="margin: 15px 0;">';
-                        errorHtml += '<p><strong>SKR Sidecar Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
+                        errorHtml += '<p><strong>SKR Shim Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
                         errorHtml += '<div class="output-box" style="background: #2d2d2d; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + 
                             escapeHtml(data.sidecar_response) + '</pre></div></div>';
                     }
                     
                     // Show service logs if available
                     if (data.logs) {
-                        // Minimize logs for non-confidential (snooper) containers
-                        var detailsAttr = isConfidentialContainer ? 'open' : '';
+                        // Minimize logs for non-confidential VMs
+                        var detailsAttr = isConfidentialVM ? 'open' : '';
                         errorHtml += '<details ' + detailsAttr + ' style="margin: 20px 0; border: 1px solid #6c757d; border-radius: 8px; overflow: hidden;">';
                         errorHtml += '<summary style="padding: 15px; background: #343a40; color: #fff; cursor: pointer; font-weight: bold;">📋 Service Logs</summary>';
                         errorHtml += '<div style="padding: 15px; background: #1e1e1e;">';
@@ -2031,7 +2109,7 @@
                                 errorHtml += '<p style="color: #155724;"><strong>Device Found:</strong> ' + escapeHtml(sevDevice.device_path) + '</p>';
                             } else {
                                 errorHtml += '<p style="color: #721c24;"><strong>Device Not Found</strong></p>';
-                                errorHtml += '<p style="color: #721c24;"><em>SKR requires AMD SEV-SNP hardware (Confidential ACI)</em></p>';
+                                errorHtml += '<p style="color: #721c24;"><em>SKR requires AMD SEV-SNP hardware (Confidential CVM)</em></p>';
                             }
                             
                             errorHtml += '<p style="margin-top: 10px; color: ' + (sevAvailable ? '#155724' : '#721c24') + ';"><em>' + escapeHtml(sevDevice.explanation) + '</em></p>';
@@ -2064,8 +2142,8 @@
                     '<p><span class="status-badge status-error">Request Failed</span></p>' +
                     '<p style="margin: 15px 0;"><strong>Error:</strong> ' + escapeHtml(error.message) + '</p>' +
                     '<p style="margin: 15px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;">' +
-                    '<em>💡 Secure Key Release requires the SKR sidecar and Key Vault configuration. ' +
-                    'Deploy using -SKR parameter to enable this feature.</em></p>';
+                    '<em>💡 Secure Key Release requires the SKR shim and Key Vault configuration. ' +
+                    'Deploy using Deploy-MultiPartyCVM.ps1 to enable this feature.</em></p>';
             });
         }
         
@@ -2226,10 +2304,10 @@
                         errorHtml += '</div>';
                     }
                     
-                    // Show sidecar response if available
+                    // Show SKR shim response if available
                     if (data.sidecar_response) {
                         errorHtml += '<div style="margin: 15px 0;">';
-                        errorHtml += '<p><strong>Sidecar Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
+                        errorHtml += '<p><strong>SKR Shim Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
                         errorHtml += '<div class="output-box" style="background: #2d2d2d; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + 
                             escapeHtml(data.sidecar_response) + '</pre></div></div>';
                     }
@@ -2249,8 +2327,8 @@
                     '<p><span class="status-badge status-error">Request Failed</span></p>' +
                     '<p style="margin: 15px 0;"><strong>Error:</strong> ' + error.message + '</p>' +
                     '<p style="margin: 15px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;">' +
-                    '<em>💡 This demo requires deployment with the attestation sidecar. ' +
-                    'Deploy using azure-aci-custom-demo.ps1 with Confidential SKU to enable attestation.</em></p>';
+                    '<em>💡 This demo requires deployment on an Azure Confidential VM (DCas_v5 series). ' +
+                    'Deploy using Deploy-MultiPartyCVM.ps1 to enable attestation.</em></p>';
             });
         }
         
@@ -2658,7 +2736,7 @@
                                 '<p style="color: #155724; margin: 5px 0;"><strong>Attempted Key:</strong> ' + escapeHtml(data.attempted_key || 'Unknown') + '</p>' +
                                 '<p style="color: #155724; margin: 5px 0;"><strong>Target Key Vault:</strong> ' + escapeHtml(data.attempted_akv || 'Unknown') + '</p>' +
                             '</div>' +
-                            '<p style="color: #155724;"><strong>This proves:</strong> Even though we are running in a trusted confidential container with TEE protection, we cannot access another company\'s cryptographic keys. The Azure Key Vault correctly rejected our managed identity.</p>' +
+                            '<p style="color: #155724;"><strong>This proves:</strong> Even though we are running in a trusted confidential VM with TEE protection, we cannot access another company\'s cryptographic keys. The Azure Key Vault correctly rejected our managed identity.</p>' +
                             '<div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px; font-family: monospace; font-size: 12px; word-break: break-all;">' +
                                 '<strong>Error:</strong> ' + escapeHtml(data.error || 'Access denied') +
                             '</div>' +
@@ -2689,8 +2767,8 @@
             });
         }
         
-        // Global flag for container type
-        var isConfidentialContainer = true; // Default, updated on page load
+        // Global flag for confidential VM status
+        var isConfidentialVM = true; // Default, updated on page load
         var partnerConfigs = null; // For Woodgrove Bank partner analysis
         
         // Company branding configuration
@@ -2767,7 +2845,7 @@
         }
         
         function initializePageConfig() {
-            // Fetch SKR config to get company name and container type
+            // Fetch SKR config to get company name and VM type
             fetch('/skr/config')
                 .then(response => response.json())
                 .then(data => {
@@ -2778,8 +2856,8 @@
                         applyCompanyBranding(data.company_name);
                     }
                     
-                    // Store container type for later use
-                    isConfidentialContainer = data.is_confidential;
+                    // Store VM confidentiality status for later use
+                    isConfidentialVM = data.is_confidential;
                     
                     // Check if this is Woodgrove Bank and show partner analysis section
                     const isWoodgrove = data.is_woodgrove || (data.key_name && data.key_name.toLowerCase().includes('woodgrove'));
@@ -2795,9 +2873,9 @@
                     const crossCompanySection = document.getElementById('crossCompanySection');
                     const crossCompanyInfo = document.getElementById('crossCompanyInfo');
                     
-                    // Show for confidential containers that have other_company config (Contoso or Fabrikam), but NOT for Woodgrove
+                    // Show for confidential VMs that have other_company config (Contoso or Fabrikam), but NOT for Woodgrove
                     if (data.other_company && data.other_company.name && !isWoodgrove) {
-                        // Show cross-company section for confidential containers
+                        // Show cross-company section for confidential VMs
                         crossCompanySection.style.display = 'block';
                         otherCompanyConfig = data.other_company;
                         
@@ -2817,11 +2895,11 @@
                                 '</div>' +
                             '</div>';
                     } else {
-                        // Hide for non-confidential containers
+                        // Hide for non-confidential VMs
                         crossCompanySection.style.display = 'none';
                     }
                     
-                    console.log('Container config:', {
+                    console.log('VM config:', {
                         company: data.company_name,
                         isConfidential: data.is_confidential,
                         otherCompany: data.other_company,

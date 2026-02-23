@@ -12,7 +12,7 @@
     - Private VNet with no public IPs on any VM
     - Network Security Group blocking all inbound except application traffic
     - Application Gateway WAF_v2 with a single public IP (per-company port routing)
-    - Random admin username + 40-char password per VM (hidden unless -DebugMode)
+    - Random admin username + 40-char password per VM (hidden unless -EnableDebug)
     
     Woodgrove gets cross-company Key Vault access to Contoso and Fabrikam,
     enabling the multi-party analytics demo where Woodgrove can release partner
@@ -36,9 +36,10 @@
 .PARAMETER Location
     Azure region (default: northeurope). Must support DCas_v5 series VMs.
 
-.PARAMETER DebugMode
-    Debug mode: deploys Azure Bastion for SSH access and outputs the random
-    VM credentials (username + password) at the end of the script.
+.PARAMETER EnableDebug
+    Debug mode: deploys Azure Bastion for SSH access, keeps SSH enabled on each
+    CVM, and outputs the random VM credentials (username + password) at the end
+    of the script.  Without this switch SSH is disabled on the VMs.
 
 .PARAMETER Cleanup
     Remove all resources in the deployment's resource group.
@@ -54,8 +55,8 @@
     Standard deployment — credentials hidden, no Bastion.
 
 .EXAMPLE
-    .\Deploy-MultiPartyCVM.ps1 -Prefix "demo" -DebugMode
-    Debug deployment — Bastion enabled, credentials printed at the end.
+    .\Deploy-MultiPartyCVM.ps1 -Prefix "demo" -EnableDebug
+    Debug deployment — Bastion enabled, SSH kept active, credentials printed at the end.
 
 .EXAMPLE
     .\Deploy-MultiPartyCVM.ps1 -Cleanup
@@ -71,7 +72,7 @@ param (
     [string]$Location = "northeurope",
 
     [Parameter(Mandatory = $false)]
-    [switch]$DebugMode,
+    [switch]$EnableDebug,
 
     [Parameter(Mandatory = $false)]
     [switch]$Cleanup,
@@ -296,7 +297,7 @@ if (-not $Prefix) {
     Write-Host ""
     Write-Host "Usage:" -ForegroundColor Yellow
     Write-Host "  .\$scriptName -Prefix <name>          Deploy (credentials hidden)"
-    Write-Host "  .\$scriptName -Prefix <name> -DebugMode   Deploy with Bastion + credentials shown"
+    Write-Host "  .\$scriptName -Prefix <name> -EnableDebug  Deploy with Bastion + SSH + credentials shown"
     Write-Host "  .\$scriptName -Cleanup                Remove all resources"
     Write-Host ""
 
@@ -322,7 +323,7 @@ $resgrp = "$basename-cvm-rg"
 $vnetName = "$basename-vnet"
 $storageName = ($basename + "stor") -replace '[^a-z0-9]', ''
 
-# Per-company random credentials (NOT displayed unless -DebugMode)
+# Per-company random credentials (NOT displayed unless -EnableDebug)
 $credentials = @{}
 foreach ($company in $companies) {
     $credentials[$company] = New-RandomCredential
@@ -348,11 +349,11 @@ Write-Host "  Resource Group: $resgrp"
 Write-Host "  Location:       $Location"
 Write-Host "  VM Size:        $VMSize"
 Write-Host "  Key Vaults:     $($kvNames['contoso']), $($kvNames['fabrikam']), $($kvNames['woodgrove'])"
-if ($DebugMode) {
-    Write-Host "  DEBUG MODE:     ENABLED (Bastion + credentials)" -ForegroundColor Yellow
+if ($EnableDebug) {
+    Write-Host "  DEBUG MODE:     ENABLED (Bastion + SSH + credentials)" -ForegroundColor Yellow
 }
 else {
-    Write-Host "  Credentials:    Hidden (use -DebugMode to display)"
+    Write-Host "  Credentials:    Hidden (use -EnableDebug to display)"
 }
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
@@ -382,7 +383,7 @@ $subnetConfigs = @(
     (New-AzVirtualNetworkSubnetConfig -Name "VMSubnet" -AddressPrefix "10.0.1.0/24"),
     (New-AzVirtualNetworkSubnetConfig -Name "AppGwSubnet" -AddressPrefix "10.0.2.0/24")
 )
-if ($DebugMode) {
+if ($EnableDebug) {
     $subnetConfigs += (New-AzVirtualNetworkSubnetConfig -Name "AzureBastionSubnet" -AddressPrefix "10.0.99.0/26")
 }
 
@@ -396,7 +397,7 @@ Write-Host "  VNet: $vnetName (10.0.0.0/16)" -ForegroundColor Green
 
 # --- Network Security Group for VM Subnet ---
 # Locks down each CVM to only the application traffic it needs.
-# In -DebugMode, SSH (port 22) from the Bastion subnet is also permitted.
+# In -EnableDebug, SSH (port 22) from the Bastion subnet is also permitted.
 $nsgName = "$basename-vm-nsg"
 Write-Host "  Creating NSG: $nsgName"
 
@@ -428,11 +429,11 @@ $nsgRules += New-AzNetworkSecurityRuleConfig `
     -DestinationAddressPrefix "10.0.1.0/24" `
     -DestinationPortRange 443
 
-if ($DebugMode) {
+if ($EnableDebug) {
     # Allow SSH from Azure Bastion subnet (DEBUG only)
     $nsgRules += New-AzNetworkSecurityRuleConfig `
         -Name "Allow-Bastion-SSH" `
-        -Description "Allow SSH from Azure Bastion subnet (DebugMode only)" `
+        -Description "Allow SSH from Azure Bastion subnet (EnableDebug only)" `
         -Access Allow `
         -Protocol Tcp `
         -Direction Inbound `
@@ -470,7 +471,7 @@ Set-AzVirtualNetworkSubnetConfig `
     -NetworkSecurityGroup $nsg | Out-Null
 $vnet | Set-AzVirtualNetwork | Out-Null
 
-if ($DebugMode) {
+if ($EnableDebug) {
     Write-Host "  NSG: $nsgName (HTTP 80, HTTPS 443, SSH 22)" -ForegroundColor Green
 }
 else {
@@ -852,7 +853,8 @@ foreach ($company in $companies) {
         $partnerFabrikamAkv = "NONE"
     }
 
-    $commandToExecute = "bash setup-vm.sh $company $company-secret-key $akvEndpoint $maaEndpoint $clientId $partnerContosoUrl $partnerFabrikamUrl $partnerContosoAkv $partnerFabrikamAkv"
+    $debugFlag = if ($EnableDebug) { "true" } else { "false" }
+    $commandToExecute = "bash setup-vm.sh $company $company-secret-key $akvEndpoint $maaEndpoint $clientId $partnerContosoUrl $partnerFabrikamUrl $partnerContosoAkv $partnerFabrikamAkv $debugFlag"
 
     $protectedSettings = @{
         fileUris         = $fileUris
@@ -1056,10 +1058,10 @@ Write-Host "`nPhase 4 complete.`n" -ForegroundColor Green
 
 
 # ============================================================================
-# PHASE 5: OPTIONAL AZURE BASTION (DebugMode only)
+# PHASE 5: OPTIONAL AZURE BASTION (EnableDebug only)
 # ============================================================================
-if ($DebugMode) {
-    Write-Host "Phase 5: Deploying Azure Bastion (DebugMode)..." -ForegroundColor Yellow
+if ($EnableDebug) {
+    Write-Host "Phase 5: Deploying Azure Bastion (EnableDebug)..." -ForegroundColor Yellow
 
     $bastionPipName = "$basename-bastion-pip"
     $bastionPip = New-AzPublicIpAddress `
@@ -1083,7 +1085,7 @@ if ($DebugMode) {
     Write-Host "`nPhase 5 complete.`n" -ForegroundColor Green
 }
 else {
-    Write-Host "Phase 5: Azure Bastion skipped (use -DebugMode to enable).`n" -ForegroundColor Gray
+    Write-Host "Phase 5: Azure Bastion skipped (use -EnableDebug to enable).`n" -ForegroundColor Gray
 }
 
 
@@ -1151,20 +1153,20 @@ Write-Host "      fabrikam     → Fabrikam + Woodgrove identities (via KV acces
 Write-Host "      woodgrove    → Woodgrove identity only" -ForegroundColor Gray
 Write-Host "    MAA Endpoint:           $maaEndpoint" -ForegroundColor White
 Write-Host "    WAF:                    OWASP 3.2 (Detection mode)" -ForegroundColor White
-if ($DebugMode) {
+if ($EnableDebug) {
     Write-Host "    NSG:                    HTTP 80 + HTTPS 443 + SSH 22 (DEBUG)" -ForegroundColor Yellow
 }
 else {
-    Write-Host "    NSG:                    HTTP 80 + HTTPS 443 only (SSH blocked)" -ForegroundColor White
+    Write-Host "    NSG:                    HTTP 80 + HTTPS 443 only (SSH disabled)" -ForegroundColor White
 }
 Write-Host ""
 
-if ($DebugMode) {
+if ($EnableDebug) {
     Write-Host "================================================================" -ForegroundColor Yellow
     Write-Host " DEBUG: VM CREDENTIALS" -ForegroundColor Yellow
     Write-Host "================================================================" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  These credentials are ONLY shown because -DebugMode was specified." -ForegroundColor Yellow
+    Write-Host "  These credentials are ONLY shown because -EnableDebug was specified." -ForegroundColor Yellow
     Write-Host "  In production, credentials would be stored in Key Vault." -ForegroundColor Yellow
     Write-Host ""
     foreach ($company in $companies) {
@@ -1179,8 +1181,8 @@ if ($DebugMode) {
     Write-Host "================================================================" -ForegroundColor Yellow
 }
 else {
-    Write-Host "  VM credentials are hidden. Use -DebugMode to display them." -ForegroundColor Gray
-    Write-Host "  Azure Bastion is NOT deployed. Use -DebugMode to enable remote access." -ForegroundColor Gray
+    Write-Host "  VM credentials are hidden. Use -EnableDebug to display them." -ForegroundColor Gray
+    Write-Host "  Azure Bastion is NOT deployed. Use -EnableDebug to enable remote access." -ForegroundColor Gray
 }
 
 Write-Host ""

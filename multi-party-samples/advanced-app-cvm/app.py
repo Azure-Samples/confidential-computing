@@ -13,23 +13,23 @@ import time
 import logging
 
 # ---------------------------------------------------------------------------
-# Inter-container HTTPS session (self-signed certs within trusted TEE)
+# Inter-VM HTTPS session (self-signed certs within trusted TEE)
 # ---------------------------------------------------------------------------
-# Containers use self-signed TLS certificates generated at build time.
-# Cross-container calls (Woodgrove→Contoso, Woodgrove→Fabrikam) go over HTTPS
+# VMs use self-signed TLS certificates generated at build time.
+# Cross-VM calls (Woodgrove→Contoso, Woodgrove→Fabrikam) go over HTTPS
 # but we must skip certificate verification since they are self-signed.
-# This is acceptable because: (1) all containers run in AMD SEV-SNP TEEs with
+# This is acceptable because: (1) all VMs run in AMD SEV-SNP TEEs with
 # attested identities, (2) payloads are additionally RSA-encrypted, (3) the
 # self-signed cert still provides encryption in transit.
-_inter_container_session = requests.Session()
-_inter_container_session.verify = False
+_inter_vm_session = requests.Session()
+_inter_vm_session.verify = False
 
-# Suppress InsecureRequestWarning for inter-container self-signed TLS calls
+# Suppress InsecureRequestWarning for inter-VM self-signed TLS calls
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
-# Generate a cryptographically random secret key on each container start
+# Generate a cryptographically random secret key on each VM start
 app.config['SECRET_KEY'] = secrets.token_hex(32)
 
 # Limit maximum request payload size (16 KB)
@@ -194,7 +194,7 @@ def check_sev_guest_device():
             'Hardware-based attestation is not possible. '
             'To enable attestation, deploy with Confidential SKU on AMD SEV-SNP capable hardware.'
         )
-        # Check if we're in a container and list available devices
+        # Check if we're in a confidential VM and list available devices
         try:
             dev_contents = os.listdir('/dev')
             result['dev_listing'] = [d for d in dev_contents if 'sev' in d.lower() or 'tpm' in d.lower() or 'sgx' in d.lower()]
@@ -232,8 +232,8 @@ def index():
 @rate_limit(max_calls=20, period=60)
 def attest_maa():
     """
-    Request attestation from Microsoft Azure Attestation (MAA) via sidecar
-    This endpoint forwards the request to the attestation sidecar container
+    Request attestation from Microsoft Azure Attestation (MAA) via SKR shim
+    This endpoint forwards the request to the SKR shim
     """
     try:
         data = request.get_json()
@@ -254,14 +254,14 @@ def attest_maa():
         if not maa_endpoint.endswith('.attest.azure.net'):
             return jsonify({'status': 'error', 'message': 'maa_endpoint must be an Azure Attestation endpoint (*.attest.azure.net)'}), 400
 
-        # Forward request to attestation sidecar (running on localhost:8080)
+        # Forward request to SKR shim (running on localhost:8080)
         response = requests.post(
             "http://localhost:8080/attest/maa",
             json={"maa_endpoint": maa_endpoint, "runtime_data": runtime_data},
             timeout=30
         )
 
-        # Check if sidecar returned an error
+        # Check if SKR shim returned an error
         if response.status_code != 200:
             # Parse common error scenarios
             error_detail = _safe_error_detail(response.text)
@@ -269,7 +269,7 @@ def attest_maa():
             # Detect specific failure modes
             failure_reason = "Unknown attestation failure"
             if "SNP" in error_detail.upper() or "SEV" in error_detail.upper():
-                failure_reason = "AMD SEV-SNP hardware not available - container is running on standard (non-confidential) hardware"
+                failure_reason = "AMD SEV-SNP hardware not available - VM is running on standard (non-confidential) hardware"
             elif "VMPL" in error_detail.upper():
                 failure_reason = "VMPL (Virtual Machine Privilege Level) not accessible - not running in a TEE"
             elif response.status_code == 400:
@@ -277,7 +277,7 @@ def attest_maa():
             elif response.status_code == 401 or response.status_code == 403:
                 failure_reason = "Authentication/authorization failed with MAA endpoint"
             elif response.status_code == 500:
-                failure_reason = "Internal error in attestation sidecar - likely no TEE hardware available"
+                failure_reason = "Internal error in SKR shim - likely no TEE hardware available"
             
             return jsonify({
                 'status': 'error',
@@ -287,11 +287,11 @@ def attest_maa():
                 'sidecar_status_code': response.status_code,
                 'maa_endpoint': maa_endpoint,
                 'diagnosis': {
-                    'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
+                    'likely_cause': 'VM is deployed with Standard SKU (no AMD SEV-SNP TEE)',
                     'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
-                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
+                    'command': '.\\Deploy-MultiPartyCVM.ps1 -Build -Deploy'
                 },
-                'note': 'Attestation requires AMD SEV-SNP hardware (Confidential SKU). Standard SKU containers cannot generate valid attestation evidence.',
+                'note': 'Attestation requires AMD SEV-SNP hardware (Confidential SKU). Standard SKU VMs cannot generate valid attestation evidence.',
                 'logs': read_log_files()
             }), response.status_code
 
@@ -303,19 +303,19 @@ def attest_maa():
     except requests.exceptions.ConnectionError:
         return jsonify({
             'status': 'error',
-            'message': 'Attestation sidecar not available. Connection refused.',
+            'message': 'SKR shim not available. Connection refused.',
             'diagnosis': {
-                'likely_cause': 'Sidecar container not running or not yet started',
-                'solution': 'Wait for container group to fully start, or check container logs'
+                'likely_cause': 'SKR shim not running or not yet started',
+                'solution': 'Wait for VM to fully start, or check service logs'
             },
-            'note': 'The sidecar container may not be running. Check container logs with: az container logs -g <rg> -n <container> --container-name attestation-sidecar',
+            'note': 'The SKR shim may not be running. Check logs with: journalctl -u skr-shim or /var/log/supervisor/skr_error.log',
             'logs': read_log_files()
         }), 503
     except requests.exceptions.Timeout:
         return jsonify({
             'status': 'error',
             'message': 'Attestation request timed out after 30 seconds.',
-            'note': 'The sidecar may be unresponsive or the attestation service is slow.'
+            'note': 'The SKR shim may be unresponsive or the attestation service is slow.'
         }), 504
     except Exception as e:
         return jsonify({
@@ -328,20 +328,20 @@ def attest_maa():
 @rate_limit(max_calls=20, period=60)
 def attest_raw():
     """
-    Get raw attestation report from the sidecar
+    Get raw attestation report from the SKR shim
     """
     try:
         data = request.get_json()
         runtime_data = data.get('runtime_data', '')
 
-        # Forward request to attestation sidecar
+        # Forward request to SKR shim
         response = requests.post(
             "http://localhost:8080/attest/raw",
             json={"runtime_data": runtime_data},
             timeout=30
         )
 
-        # Check if sidecar returned an error
+        # Check if SKR shim returned an error
         if response.status_code != 200:
             error_detail = _safe_error_detail(response.text)
             
@@ -352,7 +352,7 @@ def attest_raw():
             elif "open /dev/sev" in error_detail.lower() or "sev-guest" in error_detail.lower():
                 failure_reason = "Cannot access /dev/sev-guest device - not running on AMD SEV-SNP hardware"
             elif response.status_code == 500:
-                failure_reason = "Internal sidecar error - TEE hardware likely not available"
+                failure_reason = "Internal SKR shim error - TEE hardware likely not available"
             
             return jsonify({
                 'status': 'error',
@@ -361,7 +361,7 @@ def attest_raw():
                 'sidecar_response': error_detail,
                 'sidecar_status_code': response.status_code,
                 'diagnosis': {
-                    'likely_cause': 'Container deployed with Standard SKU - no AMD SEV-SNP TEE hardware',
+                    'likely_cause': 'VM deployed with Standard SKU - no AMD SEV-SNP TEE hardware',
                     'detail': 'Raw attestation requires direct access to AMD SEV-SNP hardware (/dev/sev-guest)',
                     'solution': 'Redeploy with Confidential SKU'
                 },
@@ -375,10 +375,10 @@ def attest_raw():
     except requests.exceptions.ConnectionError:
         return jsonify({
             'status': 'error',
-            'message': 'Attestation sidecar not available. Connection refused.',
+            'message': 'SKR shim not available. Connection refused.',
             'diagnosis': {
-                'likely_cause': 'Sidecar container not running',
-                'solution': 'Check container logs: az container logs -g <rg> -n <container> --container-name attestation-sidecar'
+                'likely_cause': 'SKR shim not running',
+                'solution': 'Check service logs: journalctl -u skr-shim or /var/log/supervisor/skr_error.log'
             }
         }), 503
     except requests.exceptions.Timeout:
@@ -396,7 +396,7 @@ def attest_raw():
 @app.route('/sidecar/status', methods=['GET'])
 def sidecar_status():
     """
-    Check if the attestation sidecar is reachable and get its status
+    Check if the SKR shim is reachable and get its status
     """
     try:
         response = requests.get("http://localhost:8080/status", timeout=5)
@@ -408,7 +408,7 @@ def sidecar_status():
     except requests.exceptions.ConnectionError:
         return jsonify({
             'status': 'unavailable',
-            'message': 'Sidecar not reachable (connection refused)'
+            'message': 'SKR shim not reachable (connection refused)'
         }), 503
     except Exception as e:
         return jsonify({
@@ -422,9 +422,9 @@ def skr_release():
     """
     Attempt to release a key from Azure Key Vault using Secure Key Release (SKR).
     This requires:
-    1. The container to be running on AMD SEV-SNP hardware (Confidential SKU)
+    1. The VM to be running on AMD SEV-SNP hardware (Confidential SKU)
     2. A key in Azure Key Vault with a release policy that trusts the MAA endpoint
-    3. The container's attestation to match the key's release policy
+    3. The VM's attestation to match the key's release policy
     """
     try:
         # Get SKR configuration from environment variables (set by ARM template)
@@ -460,7 +460,7 @@ def skr_release():
                 'key_name': kid or '(not configured)'
             }), 400
 
-        # Forward request to SKR sidecar's key/release endpoint
+        # Forward request to SKR shim's key/release endpoint
         response = requests.post(
             "http://localhost:8080/key/release",
             json={
@@ -471,7 +471,7 @@ def skr_release():
             timeout=60  # SKR can take longer
         )
 
-        # Check if sidecar returned an error
+        # Check if SKR shim returned an error
         if response.status_code != 200:
             error_detail = _safe_error_detail(response.text, 1000)
             
@@ -503,9 +503,9 @@ def skr_release():
             elif "404" in error_detail:
                 failure_reason = f"Key not found: {kid}"
             elif response.status_code == 500:
-                failure_reason = "Internal error in SKR sidecar - likely no TEE hardware available"
+                failure_reason = "Internal error in SKR shim - likely no TEE hardware available"
             
-            # Extract diagnostics from the sidecar response (JWT claim inspection)
+            # Extract diagnostics from the SKR shim response (JWT claim inspection)
             sidecar_diagnostics = {}
             if error_json and 'diagnostics' in error_json:
                 sidecar_diagnostics = error_json['diagnostics']
@@ -599,10 +599,10 @@ def skr_release():
     except requests.exceptions.ConnectionError:
         return jsonify({
             'status': 'error',
-            'message': 'SKR sidecar not available. Connection refused.',
+            'message': 'SKR shim not available. Connection refused.',
             'diagnosis': {
-                'likely_cause': 'Sidecar container not running or not yet started',
-                'solution': 'Wait for container group to fully start, or check container logs'
+                'likely_cause': 'SKR shim not running or not yet started',
+                'solution': 'Wait for VM to fully start, or check service logs'
             },
             'logs': read_log_files()
         }), 503
@@ -702,9 +702,8 @@ def skr_config():
         'release_policy': {
             'version': '1.0.0',
             'required_attestation': 'AMD SEV-SNP (sevsnpvm)',
-            'required_policy_hash': security_policy_hash if security_policy_hash else 'Not configured',
-            'description': 'Key can only be released to containers with matching policy hash'
-        } if security_policy_hash else None,
+            'description': 'Key can only be released to VMs that pass MAA attestation with azure-compliant-cvm status'
+        },
         'other_company': {
             'name': other_company_name,
             'key_name': other_key_name,
@@ -713,26 +712,174 @@ def skr_config():
         'partner_configs': partner_configs
     })
 
+
+@app.route('/skr/release-policy', methods=['GET'])
+def skr_release_policy():
+    """
+    Fetch and display the key release policy from Azure Key Vault.
+    This shows the actual policy that AKV evaluates when deciding whether
+    to release a key, including which attestation claims are required.
+    Also reads the VM's unique ID to explain how it links to the policy.
+    """
+    import base64 as b64mod
+
+    akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+    key_name = os.environ.get('SKR_KEY_NAME', '')
+    identity_client_id = os.environ.get('MANAGED_IDENTITY_CLIENT_ID', '')
+
+    if not akv_endpoint or not key_name:
+        return jsonify({
+            'status': 'error',
+            'message': 'SKR not configured (no AKV endpoint or key name)'
+        }), 400
+
+    # Read VM unique ID from SMBIOS
+    vm_id = None
+    try:
+        with open('/sys/class/dmi/id/product_uuid', 'r') as f:
+            vm_id = f.read().strip()
+    except Exception:
+        vm_id = 'Unable to determine'
+
+    # Get Azure access token for Key Vault
+    try:
+        token_url = (
+            "http://169.254.169.254/metadata/identity/oauth2/token"
+            "?api-version=2018-02-01"
+            "&resource=https://vault.azure.net"
+        )
+        if identity_client_id:
+            token_url += f"&client_id={identity_client_id}"
+
+        token_resp = requests.get(
+            token_url,
+            headers={"Metadata": "true"},
+            timeout=10
+        )
+        if token_resp.status_code != 200:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to get AKV token: HTTP {token_resp.status_code}',
+                'vm_id': vm_id
+            }), 500
+
+        akv_token = token_resp.json().get('access_token', '')
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Token acquisition failed: {str(e)}',
+            'vm_id': vm_id
+        }), 500
+
+    # Fetch key metadata from AKV (includes the release policy)
+    akv_host = akv_endpoint.replace('https://', '').replace('http://', '').rstrip('/')
+    key_url = f"https://{akv_host}/keys/{key_name}?api-version=7.4"
+
+    try:
+        key_resp = requests.get(
+            key_url,
+            headers={"Authorization": f"Bearer {akv_token}"},
+            timeout=15
+        )
+        if key_resp.status_code != 200:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to fetch key metadata: HTTP {key_resp.status_code}',
+                'vm_id': vm_id
+            }), 500
+
+        key_info = key_resp.json()
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Key metadata fetch failed: {str(e)}',
+            'vm_id': vm_id
+        }), 500
+
+    # Decode the release policy
+    release_policy_decoded = None
+    rp = key_info.get('release_policy', {})
+    if rp:
+        rp_data = rp.get('data', '')
+        if rp_data:
+            try:
+                padded = rp_data + '=' * (4 - len(rp_data) % 4)
+                rp_bytes = b64mod.urlsafe_b64decode(padded)
+                release_policy_decoded = json.loads(rp_bytes.decode('utf-8'))
+            except Exception as rp_err:
+                release_policy_decoded = {'decode_error': str(rp_err), 'raw_data': rp_data[:200]}
+
+    # Extract key attributes
+    key_attrs = key_info.get('attributes', {})
+    key_kid = key_info.get('key', {}).get('kid', '')
+
+    return jsonify({
+        'status': 'success',
+        'vm_id': vm_id,
+        'key_name': key_name,
+        'key_vault': akv_host,
+        'key_id': key_kid,
+        'key_type': key_info.get('key', {}).get('kty', 'Unknown'),
+        'exportable': key_attrs.get('exportable', False),
+        'release_policy': release_policy_decoded,
+        'release_policy_content_type': rp.get('contentType', ''),
+        'explanation': {
+            'how_it_works': (
+                'When this CVM requests Secure Key Release, Azure Key Vault asks Microsoft '
+                'Azure Attestation (MAA) to verify the VM\'s identity. MAA returns a signed '
+                'token containing claims about the VM\'s hardware and software state. AKV then '
+                'evaluates the release policy against these claims. The key is released ONLY if '
+                'ALL policy conditions are met.'
+            ),
+            'vm_binding': (
+                f'This VM\'s unique ID is {vm_id}. During deployment, the release policy was '
+                'configured to require that the attestation token proves the request comes from '
+                'an azure-compliant-cvm running on AMD SEV-SNP hardware. Azure Key Vault access '
+                'policies provide an additional layer: only the managed identity assigned to this '
+                'VM has permission to release the key.'
+            ),
+            'policy_claims': [
+                {
+                    'claim': 'x-ms-isolation-tee.x-ms-compliance-status',
+                    'required': 'azure-compliant-cvm',
+                    'meaning': 'The VM must be a verified Azure Confidential VM'
+                },
+                {
+                    'claim': 'x-ms-isolation-tee.x-ms-attestation-type',
+                    'required': 'sevsnpvm',
+                    'meaning': 'The VM must be running on AMD SEV-SNP hardware'
+                }
+            ]
+        }
+    })
+
+
 @app.route('/security/policy', methods=['GET'])
 def get_security_policy():
     """
-    Return detailed security policy information for this container.
-    Shows the cryptographic binding between the container code and key release.
+    Return detailed security policy information for this CVM.
+    Shows the key release policy requirements and VM identity binding.
     """
-    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
     maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
     key_name = os.environ.get('SKR_KEY_NAME', '')
     akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
     
     # Check TEE status
     sev_status = check_sev_guest_device()
+
+    # Read VM unique ID
+    vm_id = None
+    try:
+        with open('/sys/class/dmi/id/product_uuid', 'r') as f:
+            vm_id = f.read().strip()
+    except Exception:
+        vm_id = 'Unable to determine'
     
     return jsonify({
-        'container_identity': {
-            'security_policy_hash': security_policy_hash,
-            'hash_algorithm': 'SHA256',
-            'description': 'This hash uniquely identifies the approved container code. Any modification to the container would change this hash.',
-            'claim_name': 'x-ms-sevsnpvm-hostdata'
+        'vm_identity': {
+            'vm_unique_id': vm_id,
+            'description': 'This VM\'s unique identifier (from SMBIOS). The key release policy can bind keys to specific VM instances using this value.',
+            'claim_name': 'x-ms-azurevm-vmid'
         },
         'attestation': {
             'maa_endpoint': f'https://{maa_endpoint}',
@@ -746,29 +893,28 @@ def get_security_policy():
             'key_vault': akv_endpoint,
             'required_claims': [
                 {
-                    'claim': 'x-ms-attestation-type',
+                    'claim': 'x-ms-isolation-tee.x-ms-attestation-type',
                     'required_value': 'sevsnpvm',
                     'purpose': 'Ensures the request comes from AMD SEV-SNP hardware'
                 },
                 {
-                    'claim': 'x-ms-sevsnpvm-hostdata',
-                    'required_value': security_policy_hash if security_policy_hash else '(any)',
-                    'purpose': 'Ensures the request comes from this specific container code'
+                    'claim': 'x-ms-isolation-tee.x-ms-compliance-status',
+                    'required_value': 'azure-compliant-cvm',
+                    'purpose': 'Ensures the VM is a verified Azure Confidential VM'
                 }
             ],
-            'security_level': 'HIGH' if security_policy_hash else 'MEDIUM',
-            'binding_description': 'Key is cryptographically bound to this container\'s policy hash' if security_policy_hash else 'Key is bound to AMD SEV-SNP attestation only'
+            'binding_description': 'Key is bound to Azure Confidential VMs that pass MAA guest attestation'
         },
         'trust_model': {
             'what_is_trusted': [
                 'AMD SEV-SNP hardware (memory encryption, isolation)',
                 'Microsoft Azure Attestation service (MAA)',
-                'The specific container code identified by policy hash'
+                'The specific CVM instance identified by vmUniqueId'
             ],
             'what_is_not_trusted': [
                 'Cloud provider operators (cannot access encrypted memory)',
                 'Hypervisor (cannot read TEE contents)',
-                'Other containers (isolated by hardware)'
+                'Other VMs (isolated by hardware)'
             ]
         }
     })
@@ -786,7 +932,7 @@ def debug_attestation_claims():
     security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
     
     try:
-        # Request attestation token from MAA via sidecar
+        # Request attestation token from MAA via SKR shim
         response = requests.post(
             "http://localhost:8080/attest/maa",
             json={"maa_endpoint": maa_endpoint},
@@ -848,7 +994,7 @@ def debug_attestation_claims():
     except requests.exceptions.ConnectionError:
         return jsonify({
             'status': 'error',
-            'message': 'Cannot connect to attestation sidecar'
+            'message': 'Cannot connect to SKR shim'
         }), 503
     except Exception as e:
         return jsonify({
@@ -1132,7 +1278,7 @@ def skr_release_partner_key():
         if partner_akv_endpoint.startswith('http://'):
             partner_akv_endpoint = partner_akv_endpoint.replace('http://', '')
         
-        # Call the SKR sidecar to release the partner's key (same port as regular SKR release)
+        # Call the SKR shim to release the partner's key (same port as regular SKR release)
         skr_url = 'http://localhost:8080/key/release'
         skr_payload = {
             'maa_endpoint': maa_endpoint,
@@ -1185,8 +1331,8 @@ def skr_release_partner_key():
     except requests.exceptions.ConnectionError:
         return jsonify({
             'status': 'error',
-            'message': 'SKR sidecar not available',
-            'hint': 'This container may not have the SKR sidecar running.'
+            'message': 'SKR shim not available',
+            'hint': 'This VM may not have the SKR shim running.'
         }), 503
     except Exception as e:
         return jsonify({
@@ -1534,7 +1680,7 @@ def _ensure_partner_data_ready(partner_name, partner_url, max_retries=2):
     """
     for attempt in range(max_retries + 1):
         try:
-            response = _inter_container_session.get(f'{partner_url}/company/list', timeout=30)
+            response = _inter_vm_session.get(f'{partner_url}/company/list', timeout=30)
             if response.status_code == 200:
                 data = response.json()
                 records = data.get('records', [])
@@ -1545,7 +1691,7 @@ def _ensure_partner_data_ready(partner_name, partner_url, max_retries=2):
                     app.logger.info(f"[AUTO-INIT] {partner_name}: 0 records found, triggering remote initialization (attempt {attempt + 1}/{max_retries})")
                     # Step 1: Release the partner's own key
                     try:
-                        skr_resp = _inter_container_session.post(f'{partner_url}/skr/release', timeout=60)
+                        skr_resp = _inter_vm_session.post(f'{partner_url}/skr/release', timeout=60)
                         if skr_resp.status_code == 200:
                             app.logger.info(f"[AUTO-INIT] {partner_name}: Key released successfully")
                         else:
@@ -1555,7 +1701,7 @@ def _ensure_partner_data_ready(partner_name, partner_url, max_retries=2):
                         continue
                     # Step 2: Populate (encrypt CSV data)
                     try:
-                        pop_resp = _inter_container_session.post(f'{partner_url}/company/populate', timeout=60)
+                        pop_resp = _inter_vm_session.post(f'{partner_url}/company/populate', timeout=60)
                         if pop_resp.status_code == 200:
                             app.logger.info(f"[AUTO-INIT] {partner_name}: Data populated successfully")
                         else:
@@ -1894,10 +2040,10 @@ def partner_demographics_analysis():
                 print(f"[ANALYTICS]   - Has private key for decryption: {has_private_key}")
                 sys.stdout.flush()
                 
-                # Step 2: Fetch encrypted data from partner container
+                # Step 2: Fetch encrypted data from partner VM
                 print(f"[ANALYTICS] Step 2: Fetching encrypted data from {partner_name}...")
                 sys.stdout.flush()
-                encrypted_response = _inter_container_session.get(f'{partner_url}/company/list', timeout=30)
+                encrypted_response = _inter_vm_session.get(f'{partner_url}/company/list', timeout=30)
                 
                 if encrypted_response.status_code != 200:
                     results['partners'][partner_name] = {
@@ -2214,15 +2360,15 @@ def skr_release_other_company():
                 'http_status': response.status_code,
                 'error_detail': error_detail,
                 'explanation': 'This failure is EXPECTED. Each company has its own Key Vault and Managed Identity. '
-                              'Even though both containers are confidential, the key release policy restricts access '
+                              'Even though both VMs are confidential, the key release policy restricts access '
                               'to the specific managed identity assigned to each company.'
             })
             
     except requests.exceptions.ConnectionError:
         return jsonify({
             'status': 'error',
-            'message': 'SKR sidecar not available',
-            'hint': 'This container may not have the SKR sidecar running.'
+            'message': 'SKR shim not available',
+            'hint': 'This VM may not have the SKR shim running.'
         }), 503
     except Exception as e:
         return jsonify({
@@ -2518,17 +2664,17 @@ def info():
     sidecar_error = None
     raw_sidecar_response = None
     
-    # Step 1: Check if sidecar is available
+    # Step 1: Check if SKR shim is available
     try:
         status_response = requests.get("http://localhost:8080/status", timeout=5)
         sidecar_available = status_response.status_code == 200
         raw_sidecar_response = status_response.text
     except requests.exceptions.ConnectionError as e:
-        sidecar_error = f"Sidecar connection refused: {str(e)}"
+        sidecar_error = f"SKR shim connection refused: {str(e)}"
     except Exception as e:
-        sidecar_error = f"Sidecar check failed: {type(e).__name__}: {str(e)}"
+        sidecar_error = f"SKR shim check failed: {type(e).__name__}: {str(e)}"
     
-    # Step 2: Try attestation if sidecar is available
+    # Step 2: Try attestation if SKR shim is available
     if sidecar_available:
         try:
             attest_response = requests.post(
@@ -2550,19 +2696,19 @@ def info():
         platform_status = "running_in_tee"
     elif sidecar_available:
         actual_sku = "Standard (or Confidential without TEE access)"
-        actual_hardware = "No hardware security - Attestation sidecar present but attestation failed"
+        actual_hardware = "No hardware security - SKR shim present but attestation failed"
         platform_status = "sidecar_present_attestation_failed"
     else:
         actual_sku = "Unknown"
-        actual_hardware = "Unable to determine - Sidecar not available"
+        actual_hardware = "Unable to determine - SKR shim not available"
         platform_status = "sidecar_unavailable"
     
     return jsonify({
-        'platform': 'Azure Container Instances',
+        'platform': 'Azure Confidential Virtual Machine',
         'sku': actual_sku,
         'attestation_service': 'Microsoft Azure Attestation (MAA)',
         'hardware': actual_hardware,
-        'demo': 'Confidential containers on ACI with remote attestation',
+        'demo': 'Confidential VMs on Azure with remote attestation',
         'status': {
             'platform_status': platform_status,
             'sidecar_available': sidecar_available,
@@ -2579,23 +2725,21 @@ def info():
             'Security policy enforcement' if attestation_works else 'SECURITY POLICY NOT ENFORCED'
         ],
         'diagnostics': {
-            'note': 'If attestation_works is false, the container is NOT running in a confidential environment.',
-            'recommendation': 'Deploy with Confidential SKU to enable hardware-based security.' if not attestation_works else 'Container is properly secured with AMD SEV-SNP.',
+            'note': 'If attestation_works is false, the VM is NOT running in a confidential environment.',
+            'recommendation': 'Deploy with Confidential SKU to enable hardware-based security.' if not attestation_works else 'VM is properly secured with AMD SEV-SNP.',
             'maa_endpoint': 'sharedeus.eus.attest.azure.net'
         }
     })
 
-@app.route('/container/info', methods=['GET'])
-def container_info():
+@app.route('/vm/info', methods=['GET'])
+def vm_info():
     """
-    Get container image metadata including image name, digest, and file checksums.
+    Get VM metadata including hostname, VM unique ID, and file checksums.
     """
     import subprocess
     
     info = {
-        'image': None,
-        'image_digest': None,
-        'container_id': None,
+        'vm_id': None,
         'hostname': None,
         'app_checksums': {},
         'skr_binary_info': {},
@@ -2603,28 +2747,18 @@ def container_info():
         'skr_status': {}
     }
     
-    # Get hostname (container ID in ACI)
+    # Get hostname
     try:
         info['hostname'] = os.environ.get('HOSTNAME', 'unknown')
     except:
         pass
     
-    # Check for image info from environment (set by ACI)
-    info['image'] = os.environ.get('CONTAINER_IMAGE', 'Not available from environment')
-    
-    # Try to get container ID from cgroup
+    # Try to get VM unique ID from SMBIOS / DMI
     try:
-        with open('/proc/1/cgroup', 'r') as f:
-            cgroup_content = f.read()
-            # Look for container ID pattern
-            for line in cgroup_content.split('\n'):
-                if 'docker' in line or 'containerd' in line or 'cri' in line:
-                    parts = line.split('/')
-                    if parts:
-                        info['container_id'] = parts[-1][:12] if len(parts[-1]) > 12 else parts[-1]
-                        break
+        with open('/sys/class/dmi/id/product_uuid', 'r') as f:
+            info['vm_id'] = f.read().strip()
     except:
-        info['container_id'] = 'Unable to determine'
+        info['vm_id'] = 'Unable to determine'
     
     # Calculate checksums for key application files
     app_files = [
@@ -2690,13 +2824,13 @@ def container_info():
         if not sev_device.get('available', False):
             info['skr_status'] = {
                 'running': False,
-                'reason': 'SKR sidecar cannot start without AMD SEV-SNP hardware',
+                'reason': 'SKR shim cannot start without AMD SEV-SNP hardware',
                 'explanation': (
                     'The SKR (Secure Key Release) service requires /dev/sev-guest device to generate hardware attestation reports. '
                     'This device is only available when running on AMD SEV-SNP hardware with Confidential SKU. '
                     'Without TEE hardware, the SKR binary may start but cannot perform any attestation operations.'
                 ),
-                'solution': 'Deploy with Confidential SKU: .\\Deploy-MultiParty.ps1 -Build -Deploy (without -NoAcc)',
+                'solution': 'Deploy with Confidential SKU: .\\Deploy-MultiPartyCVM.ps1 -Build -Deploy (without -NoAcc)',
                 'technical_detail': 'The SKR binary uses the SNP_GET_REPORT ioctl on /dev/sev-guest to request attestation reports from the AMD PSP.'
             }
         else:
@@ -2736,121 +2870,143 @@ def container_info():
     return jsonify(info)
 
 
-@app.route('/container/access-test', methods=['POST'])
-def container_access_test():
+@app.route('/vm/security-test', methods=['POST'])
+def vm_security_test():
     """
-    Attempt various methods to access the container OS (SSH, exec, shell).
-    All should fail on a Confidential Container due to ccePolicy enforcement:
-    - exec_processes: [] prevents spawning any new process
-    - allow_stdio_access: false blocks interactive I/O from the host
-    - No SSH daemon is installed, and the policy prevents adding one
+    Run security tests on the Confidential VM to verify its security posture.
+    Tests check: SSH status, memory encryption, and hypervisor debug access.
     """
     import subprocess
     import socket
 
     tests = []
 
-    # ---- Test 1: SSH connection attempt ----
+    # ---- Test 1: SSH Status ----
     ssh_test = {
-        'name': 'SSH Connection (port 22)',
-        'method': 'Attempting TCP connection to localhost:22 (SSH)',
+        'name': 'SSH Service Status',
+        'method': 'Checking if SSH service is running (systemctl is-active ssh)',
     }
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex(('127.0.0.1', 22))
-        sock.close()
-        if result == 0:
-            ssh_test['result'] = 'unexpected'
-            ssh_test['detail'] = 'Port 22 is open — this is unexpected for a confidential container.'
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'ssh'],
+            capture_output=True, text=True, timeout=5
+        )
+        ssh_status = result.stdout.strip()
+        if ssh_status == 'active':
+            ssh_test['result'] = 'active'
+            ssh_test['detail'] = (
+                'SSH service is currently running. In production Confidential VMs, SSH should '
+                'be disabled to reduce the attack surface. Consider disabling it after initial setup.'
+            )
+            ssh_test['policy_rule'] = 'SSH should be disabled in production CVM deployments'
         else:
             ssh_test['result'] = 'blocked'
             ssh_test['detail'] = (
-                'Connection refused. No SSH daemon is running and the ccePolicy prevents '
-                'installing or starting one — the "exec_processes" list is empty, so no '
-                'additional processes (including sshd) can be spawned inside the TEE.'
+                f'SSH service is {ssh_status}. This is the expected state for a production '
+                'Confidential VM — no remote shell access reduces the attack surface.'
             )
-            ssh_test['policy_rule'] = '"exec_processes": []  // No process can be exec\'d into the container'
+            ssh_test['policy_rule'] = 'SSH disabled — remote shell access is not available'
     except Exception as e:
-        ssh_test['result'] = 'blocked'
-        ssh_test['detail'] = f'SSH connection failed: {str(e)}'
-        ssh_test['policy_rule'] = '"exec_processes": []'
+        ssh_test['result'] = 'unavailable'
+        ssh_test['detail'] = f'Unable to check SSH status: {str(e)}'
     tests.append(ssh_test)
 
-    # ---- Test 2: az container exec / docker exec simulation ----
-    exec_test = {
-        'name': 'Container Exec (az container exec / docker exec)',
-        'method': 'Attempting to spawn /bin/bash via subprocess',
+    # ---- Test 2: Memory Encryption (SEV-SNP) ----
+    mem_test = {
+        'name': 'Memory Encryption (AMD SEV-SNP)',
+        'method': 'Checking for /dev/sev-guest device and SEV-SNP activation',
     }
     try:
-        proc = subprocess.run(
-            ['/bin/bash', '-c', 'echo ACCESS_TEST_PROBE'],
-            capture_output=True, text=True, timeout=3
-        )
-        # Inside the container this subprocess call will succeed because
-        # we're already running as PID 1's child. The KEY point is that
-        # the ACI control plane cannot exec INTO the container from outside.
-        exec_test['result'] = 'blocked'
-        exec_test['detail'] = (
-            'While processes inside the TEE can fork (they are already approved by policy), '
-            'the ACI host cannot inject a new process via "az container exec" or "docker exec". '
-            'The ccePolicy\'s empty "exec_processes" list means the container runtime will '
-            'reject any external exec request — the AMD SEV-SNP hardware enforces this.'
-        )
-        exec_test['policy_rule'] = '"exec_processes": []  // Empty list = no external exec allowed'
-    except subprocess.TimeoutExpired:
-        exec_test['result'] = 'blocked'
-        exec_test['detail'] = 'Process spawn timed out — execution prevented.'
-        exec_test['policy_rule'] = '"exec_processes": []'
+        sev_device_exists = os.path.exists('/dev/sev-guest')
+        # Also check dmesg or cpuinfo for SEV-SNP indication
+        sev_active = False
+        try:
+            with open('/proc/cpuinfo', 'r') as f:
+                cpuinfo = f.read()
+                sev_active = 'sev_snp' in cpuinfo.lower() or 'sev' in cpuinfo.lower()
+        except:
+            pass
+        
+        if sev_device_exists:
+            mem_test['result'] = 'blocked'
+            mem_test['detail'] = (
+                '/dev/sev-guest device is present — AMD SEV-SNP memory encryption is active. '
+                'All VM memory is encrypted with a per-VM key managed by the AMD Secure Processor. '
+                'The hypervisor cannot read or tamper with VM memory contents.'
+            )
+            mem_test['policy_rule'] = 'AMD SEV-SNP provides hardware-enforced memory encryption and integrity'
+        else:
+            mem_test['result'] = 'unavailable'
+            mem_test['detail'] = (
+                '/dev/sev-guest device NOT found — AMD SEV-SNP is not active. '
+                'This VM is NOT running with hardware memory encryption. '
+                'Deploy as a Confidential VM to enable SEV-SNP protection.'
+            )
+            mem_test['policy_rule'] = 'SEV-SNP not available on this hardware'
     except Exception as e:
-        exec_test['result'] = 'blocked'
-        exec_test['detail'] = f'Process execution failed: {str(e)}'
-        exec_test['policy_rule'] = '"exec_processes": []'
-    tests.append(exec_test)
+        mem_test['result'] = 'unavailable'
+        mem_test['detail'] = f'Memory encryption check failed: {str(e)}'
+    tests.append(mem_test)
 
-    # ---- Test 3: stdio access (interactive shell) ----
-    stdio_test = {
-        'name': 'Interactive Shell (stdin/stdout attach)',
-        'method': 'Checking allow_stdio_access policy flag',
+    # ---- Test 3: Hypervisor Debug Access ----
+    debug_test = {
+        'name': 'Hypervisor Debug Access (x-ms-sevsnpvm-is-debuggable)',
+        'method': 'Verifying debug mode is disabled via attestation claims',
     }
-    # Check if /dev/console is accessible (it won't be with stdio blocked)
     try:
-        console_accessible = os.path.exists('/dev/console')
-        # Even if the device node exists, the policy blocks host-side attach
-        stdio_test['result'] = 'blocked'
-        stdio_test['detail'] = (
-            'The ccePolicy sets "allow_stdio_access": false, which prevents the ACI host '
-            'from attaching to the container\'s stdin/stdout streams. Even if an operator '
-            'could somehow exec a shell, they would have no way to interact with it — '
-            'the hardware-enforced policy blocks all I/O channels from the host.'
+        # Try to get attestation to check debug status
+        attest_response = requests.post(
+            "http://localhost:8080/attest/maa",
+            json={"maa_endpoint": os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net'), "runtime_data": ""},
+            timeout=30
         )
-        stdio_test['policy_rule'] = '"allow_stdio_access": false  // No stdin/stdout from host'
+        if attest_response.status_code == 200:
+            import base64
+            token = attest_response.text.strip()
+            parts = token.split('.')
+            if len(parts) == 3:
+                payload_b64 = parts[1]
+                padding = 4 - len(payload_b64) % 4
+                if padding != 4:
+                    payload_b64 += '=' * padding
+                payload_json = base64.urlsafe_b64decode(payload_b64)
+                claims = json.loads(payload_json)
+                is_debuggable = claims.get('x-ms-sevsnpvm-is-debuggable', None)
+                if is_debuggable is False or str(is_debuggable).lower() == 'false':
+                    debug_test['result'] = 'blocked'
+                    debug_test['detail'] = (
+                        'x-ms-sevsnpvm-is-debuggable = false — Debug mode is disabled. '
+                        'The hypervisor cannot attach a debugger or inspect VM state. '
+                        'This is the expected secure configuration for production CVMs.'
+                    )
+                    debug_test['policy_rule'] = 'x-ms-sevsnpvm-is-debuggable: false — hypervisor debugging is blocked'
+                elif is_debuggable is True or str(is_debuggable).lower() == 'true':
+                    debug_test['result'] = 'active'
+                    debug_test['detail'] = (
+                        'WARNING: x-ms-sevsnpvm-is-debuggable = true — Debug mode is ENABLED. '
+                        'The hypervisor can potentially inspect VM state. This should be disabled '
+                        'in production deployments.'
+                    )
+                    debug_test['policy_rule'] = 'x-ms-sevsnpvm-is-debuggable should be false in production'
+                else:
+                    debug_test['result'] = 'unavailable'
+                    debug_test['detail'] = f'x-ms-sevsnpvm-is-debuggable claim not found in attestation token'
+            else:
+                debug_test['result'] = 'unavailable'
+                debug_test['detail'] = 'Invalid attestation token format'
+        else:
+            debug_test['result'] = 'unavailable'
+            debug_test['detail'] = f'Attestation failed with status {attest_response.status_code} — cannot verify debug status'
     except Exception as e:
-        stdio_test['result'] = 'blocked'
-        stdio_test['detail'] = f'stdio access check failed: {str(e)}'
-        stdio_test['policy_rule'] = '"allow_stdio_access": false'
-    tests.append(stdio_test)
-
-    # ---- Test 4: Privilege escalation ----
-    priv_test = {
-        'name': 'Privilege Escalation (become root)',
-        'method': 'Checking allow_elevated policy flag',
-    }
-    priv_test['result'] = 'blocked'
-    priv_test['detail'] = (
-        'The ccePolicy sets "allow_elevated": false, preventing any container process '
-        'from gaining additional privileges. Combined with "no_new_privileges" and a '
-        'restricted Linux capabilities list (no CAP_SYS_ADMIN, no CAP_SYS_PTRACE), '
-        'even code running inside the TEE cannot escalate beyond its defined permissions.'
-    )
-    priv_test['policy_rule'] = '"allow_elevated": false  // No privilege escalation allowed'
-    tests.append(priv_test)
+        debug_test['result'] = 'unavailable'
+        debug_test['detail'] = f'Unable to verify debug status: {str(e)}'
+    tests.append(debug_test)
 
     return jsonify({
         'status': 'complete',
-        'summary': 'All access methods are blocked by the Confidential Computing Enforcement Policy (ccePolicy)',
+        'summary': 'Security tests for Confidential VM environment',
         'tests': tests,
-        'policy_reference': 'See SECURITY-POLICY.md for the full annotated ccePolicy'
+        'policy_reference': 'See AMD SEV-SNP documentation for hardware security details'
     })
 
 
@@ -3491,8 +3647,8 @@ def encrypted_data_status():
 
 def auto_initialize_woodgrove(key_name, maa_endpoint, akv_endpoint):
     """
-    Auto-initialize Woodgrove Bank container:
-    1. Wait for SKR sidecar
+    Auto-initialize Woodgrove Bank VM:
+    1. Wait for SKR shim
     2. Release Woodgrove's own key
     3. Release partner keys from Contoso and Fabrikam Key Vaults
     """
@@ -3502,8 +3658,8 @@ def auto_initialize_woodgrove(key_name, maa_endpoint, akv_endpoint):
     
     print(f"\n[WOODGROVE] Starting Woodgrove Bank auto-initialization...")
     
-    # Step 1: Wait for SKR sidecar to be ready
-    print(f"\n[STEP 1/4] Waiting for SKR sidecar to be ready...")
+    # Step 1: Wait for SKR shim to be ready
+    print(f"\n[STEP 1/4] Waiting for SKR shim to be ready...")
     max_retries = 30
     sidecar_ready = False
     
@@ -3511,14 +3667,14 @@ def auto_initialize_woodgrove(key_name, maa_endpoint, akv_endpoint):
         try:
             response = requests.get("http://localhost:8080/", timeout=2)
             sidecar_ready = True
-            print(f"           SKR sidecar is ready (attempt {i+1}/{max_retries})")
+            print(f"           SKR shim is ready (attempt {i+1}/{max_retries})")
             break
         except:
             if i < max_retries - 1:
                 time.sleep(2)
     
     if not sidecar_ready:
-        print(f"\n[ERROR] Woodgrove auto-init FAILED: SKR sidecar not available")
+        print(f"\n[ERROR] Woodgrove auto-init FAILED: SKR shim not available")
         print(f"{'='*60}\n")
         return
     
@@ -3697,8 +3853,8 @@ def auto_initialize_container():
         print(f"{'='*60}\n")
         return
     
-    # Wait for SKR sidecar to be ready
-    print(f"\n[STEP 1/4] Waiting for SKR sidecar to be ready...")
+    # Wait for SKR shim to be ready
+    print(f"\n[STEP 1/4] Waiting for SKR shim to be ready...")
     max_retries = 30
     sidecar_ready = False
     
@@ -3706,16 +3862,16 @@ def auto_initialize_container():
         try:
             response = requests.get("http://localhost:8080/", timeout=2)
             sidecar_ready = True
-            print(f"           SKR sidecar is ready (attempt {i+1}/{max_retries})")
+            print(f"           SKR shim is ready (attempt {i+1}/{max_retries})")
             break
         except:
             if i < max_retries - 1:
                 time.sleep(2)
             else:
-                print(f"           [FAILED] SKR sidecar not available after {max_retries} attempts")
+                print(f"           [FAILED] SKR shim not available after {max_retries} attempts")
     
     if not sidecar_ready:
-        print(f"\n[ERROR] Auto-initialization FAILED: SKR sidecar not available")
+        print(f"\n[ERROR] Auto-initialization FAILED: SKR shim not available")
         print(f"{'='*60}\n")
         return
     
@@ -3727,7 +3883,7 @@ def auto_initialize_container():
         # Clean up endpoint
         maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
         
-        # Encode runtime_data as base64 JSON to satisfy the sidecar's expected format
+        # Encode runtime_data as base64 JSON to satisfy the SKR shim's expected format
         import base64
         runtime_payload = base64.b64encode(json.dumps({"source": "auto-init"}).encode()).decode()
         
@@ -3749,7 +3905,7 @@ def auto_initialize_container():
         print(f"           [WARNING] MAA attestation error: {str(e)}")
         print(f"           Continuing to key release (it performs its own attestation)...")
     
-    # Step 3: Perform Secure Key Release (with retry for sidecar timing)
+    # Step 3: Perform Secure Key Release (with retry for SKR shim timing)
     print(f"\n[STEP 3/4] Performing Secure Key Release...")
     global _released_key
     global _released_key_name

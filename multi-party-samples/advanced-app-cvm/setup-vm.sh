@@ -17,6 +17,7 @@
 #   $7  PARTNER_FABRIKAM_URL       (https://10.0.1.5 or NONE)
 #   $8  PARTNER_CONTOSO_AKV_ENDPOINT  (https://vault.vault.azure.net or NONE)
 #   $9  PARTNER_FABRIKAM_AKV_ENDPOINT (https://vault.vault.azure.net or NONE)
+#   $10 ENABLE_DEBUG                  (true|false — when false, SSH is disabled)
 # ============================================================================
 
 set -euo pipefail
@@ -30,6 +31,7 @@ PARTNER_CONTOSO_URL="${6:-}"
 PARTNER_FABRIKAM_URL="${7:-}"
 PARTNER_CONTOSO_AKV_ENDPOINT="${8:-}"
 PARTNER_FABRIKAM_AKV_ENDPOINT="${9:-}"
+ENABLE_DEBUG="${10:-false}"
 
 # Treat "NONE" sentinel as empty string (used for companies without partners)
 [[ "$PARTNER_CONTOSO_URL" == "NONE" ]] && PARTNER_CONTOSO_URL=""
@@ -49,6 +51,7 @@ echo " Key:        $SKR_KEY_NAME"
 echo " AKV:        $SKR_AKV_ENDPOINT"
 echo " MAA:        $SKR_MAA_ENDPOINT"
 echo " Identity:   $MANAGED_IDENTITY_CLIENT_ID"
+echo " Debug:      $ENABLE_DEBUG"
 echo " Started:    $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo "================================================================"
 echo ""
@@ -67,6 +70,16 @@ apt-get install -y -qq \
     openssl tpm2-tools \
     jq 2>&1 | tail -3
 echo "  System packages installed"
+
+# ---- Disable SSH when not in debug mode ----
+if [[ "$ENABLE_DEBUG" != "true" ]]; then
+    echo "  Disabling SSH (EnableDebug not set)..."
+    systemctl stop ssh 2>/dev/null || systemctl stop sshd 2>/dev/null || true
+    systemctl disable ssh 2>/dev/null || systemctl disable sshd 2>/dev/null || true
+    echo "  [OK] SSH service stopped and disabled"
+else
+    echo "  SSH remains enabled (EnableDebug mode)"
+fi
 
 # ============================================================================
 # Phase 2: CVM attestation tools (Python-based vTPM attestation)
