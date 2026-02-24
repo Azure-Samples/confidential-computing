@@ -782,8 +782,11 @@
                         
                         if (sevAvailable) {
                             html += '<p style="color: #155724;"><strong>Device:</strong> ' + escapeHtml(data.sev_device.device_path) + '</p>';
+                            if (data.sev_device.vtpm_available) {
+                                html += '<p style="color: #155724; font-size: 0.9em;"><strong>vTPM:</strong> ' + escapeHtml(data.sev_device.vtpm_path) + ' (HCL report with embedded SNP evidence)</p>';
+                            }
                         } else {
-                            html += '<p style="color: #721c24;"><strong>Device:</strong> Not found (no /dev/sev-guest)</p>';
+                            html += '<p style="color: #721c24;"><strong>Device:</strong> Not found (no /dev/sev-guest or /dev/tpmrm0)</p>';
                             html += '<p style="color: #721c24; font-size: 0.9em; margin-top: 5px;"><em>This VM is NOT running on confidential computing hardware.</em></p>';
                         }
                         html += '</div>';
@@ -1093,8 +1096,8 @@
                     title: 'Host Data (Security Policy Hash)',
                     icon: '🔒',
                     category: 'VM Identity',
-                    description: 'Data set by the hypervisor at VM launch time. For confidential VMs this reflects platform configuration. Key release policies use other claims (like vmUniqueId and compliance-status) to bind keys to specific VM instances.',
-                    detail: '🔑 In CVM deployments, key release policies bind to VM identity via vmUniqueId rather than hostdata'
+                    description: 'Data set by the hypervisor at VM launch time. For ACI confidential containers this is the ccePolicy hash used in release policies. For CVMs this reflects platform configuration — CVM key release policies use compliance-status and attestation-type claims instead, with per-VM scoping via Key Vault access policies.',
+                    detail: '🔑 In CVM deployments, release policies prove CVM hardware attestation; per-VM scoping uses KV access policies (managed identity)'
                 },
                 'x-ms-sevsnpvm-idkeydigest': {
                     title: 'ID Key Digest',
@@ -1351,7 +1354,7 @@
                     title: 'Azure VM Unique ID',
                     icon: '🆔',
                     category: 'Guest VM Security',
-                    description: 'The unique identifier (GUID) of this Azure Virtual Machine, as reported by the guest OS from SMBIOS. This value matches the ARM VM ID and can be used in release policies for per-VM key binding — ensuring a specific key can only be released to a specific VM instance.'
+                    description: 'The unique identifier (GUID) of this Azure Virtual Machine, as reported by the guest OS from SMBIOS. This value matches the ARM VM ID. Note: this is a top-level claim — AKV release policies can only match top-level and x-ms-isolation-tee.* claims. Per-VM key scoping uses Key Vault access policies (managed identity) instead.'
                 },
                 'x-ms-azurevm-os-provisioning': {
                     title: 'OS Provisioning Claims',
@@ -1465,7 +1468,7 @@
                             hint += 'Guest operating system identification. Reports the OS type, distribution, version, and build string as measured during boot. Release policies can use these values to restrict key access to specific OS versions or patch levels, ensuring workloads run on supported, up-to-date software.';
                             hintIcon = '🐧';
                         } else if (fieldName.includes('vmid')) {
-                            hint += 'The unique Azure VM identifier (GUID) from SMBIOS. This value, present in both the Azure Resource Manager (ARM) API and the guest attestation token, enables per-VM key binding — release policies can limit key access to a specific VM instance for maximum isolation.';
+                            hint += 'The unique Azure VM identifier (GUID) from SMBIOS. This value is present in both the Azure Resource Manager (ARM) API and the MAA guest attestation token (at x-ms-runtime.vm-configuration.vmUniqueId). Note: AKV does not support x-ms-runtime.* claims in release policies — per-VM key scoping uses Key Vault access policies (managed identity) instead.';
                             hintIcon = '🆔';
                         } else if (fieldName.includes('provisioning')) {
                             hint += 'OS provisioning metadata collected during VM first boot. Includes the provisioning agent used, configuration status, and related security settings applied during initial setup of the guest OS.';
@@ -1948,13 +1951,14 @@
                 });
                 
                 // Check specific claims from the attestation payload
+                const debugSafe = payload['x-ms-azurevm-debuggersdisabled'] === true || payload['x-ms-sevsnpvm-is-debuggable'] === false;
                 const claims = {
-                    tee: payload['x-ms-isolation-tee'] || payload['x-ms-sevsnpvm-is-debuggable'] === false,
+                    tee: payload['x-ms-isolation-tee'] || debugSafe,
                     memory: payload['x-ms-sevsnpvm-vmpl'] !== undefined || payload['x-ms-isolation-tee'],
                     confidentiality: payload['x-ms-compliance-status'] === 'azure-compliant-cvm' || payload['x-ms-isolation-tee'],
                     policy: payload['x-ms-sevsnpvm-hostdata'] !== undefined,
                     attestation: true, // We got a valid token
-                    protection: payload['x-ms-sevsnpvm-is-debuggable'] === false || payload['x-ms-isolation-tee']
+                    protection: debugSafe || payload['x-ms-isolation-tee']
                 };
                 
                 features.forEach(li => {

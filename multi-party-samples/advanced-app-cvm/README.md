@@ -5,7 +5,7 @@ This sample deploys the multi-party confidential computing demo on **Ubuntu 24.0
 Three companies — **Contoso**, **Fabrikam**, and **Woodgrove** — each get their own Confidential VM with:
 
 - **AMD SEV-SNP** hardware-based attestation via vTPM
-- **Per-VM key binding** — each key's release policy includes the target VM's `vmUniqueId`
+- **Two-layer key isolation** — hardware attestation release policy + per-VM Key Vault access policies (managed identity)
 - **Confidential OS disk encryption** (DiskWithVMGuestState) with customer-managed keys
 - **No public IP** — VMs are only accessible via a shared private VNet
 - **Network Security Group** blocking all inbound except HTTP 80 (AppGw), HTTPS 443 (inter-VM), and SSH 22 (only with `-DEBUG`)
@@ -133,8 +133,8 @@ These seven layers collectively ensure that **no operator or external party can 
 |--------|----------------------|--------------------------|
 | **TEE** | ACI confidential containers | Ubuntu 24.04 CVM (DCas_v5) |
 | **Attestation** | ACI SKR sidecar binary (`/usr/local/bin/skr`) | CVM SKR shim (`skr_shim.py`) using vTPM + guest attestation client |
-| **Key Release Claim** | `x-ms-sevsnpvm-hostdata` (per-container policy hash) | `vmUniqueId` (per-VM) + `azure-compliant-cvm` |
-| **Multi-Party Isolation** | ccePolicy hash binds keys to specific container images | Per-VM `vmUniqueId` in release policy + KV access policies |
+| **Key Release Claims** | `x-ms-sevsnpvm-hostdata` (per-container policy hash) | `azure-compliant-cvm` + `sevsnpvm` attestation type (hardware attestation; per-VM scoping via KV access policies) |
+| **Multi-Party Isolation** | ccePolicy hash binds keys to specific container images | KV access policies bind keys to specific managed identities + hardware attestation proves CVM |
 | **Interactive Access Prevention** | ccePolicy blocks `exec`, SSH, shell at hardware level | SSH disabled + NSG deny-all + no Bastion + hidden credentials (see [Compensating Controls](#compensating-controls-for-removing-interactive-access)) |
 | **Disk Encryption** | N/A (ephemeral containers) | ConfidentialVmEncryptedWithCustomerKey (CMK via DES) |
 | **Networking** | Per-container public FQDN | Private VNet + Application Gateway WAF |
@@ -147,30 +147,38 @@ These seven layers collectively ensure that **no operator or external party can 
 
 In the ACI version, each container's security policy (`ccePolicy`) is hashed to produce a unique `x-ms-sevsnpvm-hostdata` value. Key release policies bind keys to these specific hashes, ensuring only the exact container code can access the key.
 
-In the CVM version, each key's release policy binds to the **specific VM instance** that is authorised to release it, using the `vmUniqueId` claim from the MAA attestation token. The deployment script:
+In the CVM version, key isolation uses a **two-layer trust model**:
 
-1. Creates all three CVMs first
-2. Retrieves each VM's unique identifier (`Get-AzVM ... .VmId`)
-3. Creates application keys with release policies that require **both**:
-   - `x-ms-isolation-tee.x-ms-compliance-status` = `azure-compliant-cvm` (proves the VM is an Azure CVM running on SEV-SNP hardware)
-   - `x-ms-isolation-tee.x-ms-runtime.vm-configuration.vmUniqueId` = `<specific-vm-guid>` (proves the request comes from a specific VM)
+**Layer 1 — Release Policy (hardware attestation)**
 
-The key access matrix defines which VMs can release which keys:
+Each key's release policy requires two claims from the MAA guest attestation token:
+- `x-ms-isolation-tee.x-ms-compliance-status` = `azure-compliant-cvm` (proves the VM is an Azure CVM running on SEV-SNP hardware)
+- `x-ms-isolation-tee.x-ms-attestation-type` = `sevsnpvm` (proves AMD SEV-SNP attestation)
 
-| Key | Authorised VMs | Reason |
-|-----|---------------|--------|
-| `contoso-secret-key` | Contoso VM + Woodgrove VM | Contoso owns the data; Woodgrove aggregates |
-| `fabrikam-secret-key` | Fabrikam VM + Woodgrove VM | Fabrikam owns the data; Woodgrove aggregates |
-| `woodgrove-secret-key` | Woodgrove VM only | Woodgrove's own data is private |
+This ensures keys can only be released to genuine Azure Confidential VMs that pass MAA guest attestation. The release policy is shared across all keys — it proves the *class* of environment (CVM on SEV-SNP) but does not identify a specific VM instance.
 
-This provides **three layers of isolation**:
-- **Hardware attestation + per-VM binding**: The AKV release policy ensures only the specific CVM instance (by `vmUniqueId`) running on attested AMD SEV-SNP hardware can release the key
+> **Note:** AKV Secure Key Release does not support `x-ms-runtime.*` claims (including `vm-configuration.vmUniqueId`) in release policies. Although the MAA token contains `vmUniqueId` under `x-ms-runtime.vm-configuration`, AKV only evaluates top-level and `x-ms-isolation-tee.*` claims during release policy matching. Per-VM scoping must therefore use Key Vault access policies.
+
+**Layer 2 — Key Vault Access Policies (identity-based)**
+
+Per-VM managed identities restrict which VMs can call the release API at all:
+
+| Key | Authorised Managed Identities | Reason |
+|-----|-------------------------------|--------|
+| `contoso-secret-key` | Contoso MI + Woodgrove MI | Contoso owns the data; Woodgrove aggregates |
+| `fabrikam-secret-key` | Fabrikam MI + Woodgrove MI | Fabrikam owns the data; Woodgrove aggregates |
+| `woodgrove-secret-key` | Woodgrove MI only | Woodgrove's own data is private |
+
+This provides per-VM scoping: even though any CVM could satisfy the release policy claims, only the managed identity assigned to a specific VM has permission to call the release API on a given Key Vault.
+
+**Combined isolation:**
+- **Hardware attestation**: The AKV release policy ensures the caller is a genuine Azure CVM (not an arbitrary VM or local machine)
 - **Identity-based access**: Key Vault access policies restrict which managed identities can call the release API at all
 - **No interactive access**: Compensating controls (SSH disabled, NSG deny-all, no Bastion, hidden credentials, confidential OS disk encryption) prevent any operator from gaining shell access to the running VM — see [Compensating Controls](#compensating-controls-for-removing-interactive-access) above
 
 Compared to ACI:
-- **ACI**: Cryptographic binding of code to keys (code identity via ccePolicy hash) + ccePolicy blocks interactive access at the hardware level
-- **CVM**: Cryptographic binding of VM instance to keys (`vmUniqueId`) + hardware attestation (proves CVM) + identity-based access (managed identity) + defence-in-depth compensating controls to prevent interactive access
+- **ACI**: Single-layer cryptographic binding of code to keys (code identity via ccePolicy hash) + ccePolicy blocks interactive access at the hardware level
+- **CVM**: Two-layer model — hardware attestation (proves CVM class) + identity-based access (proves specific VM) + defence-in-depth compensating controls to prevent interactive access
 
 ## Prerequisites
 

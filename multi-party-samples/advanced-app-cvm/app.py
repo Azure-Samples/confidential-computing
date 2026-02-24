@@ -295,9 +295,17 @@ def attest_maa():
                 'logs': read_log_files()
             }), response.status_code
 
+        # SKR shim returns JSON: {"token": "<JWT>"}
+        # Extract the raw JWT so the client receives a plain token string.
+        try:
+            shim_data = response.json()
+            token = shim_data.get('token', response.text)
+        except Exception:
+            token = response.text
+
         return jsonify({
             'status': 'success',
-            'attestation_token': response.text,
+            'attestation_token': token,
             'maa_endpoint': maa_endpoint
         })
     except requests.exceptions.ConnectionError:
@@ -878,8 +886,9 @@ def get_security_policy():
     return jsonify({
         'vm_identity': {
             'vm_unique_id': vm_id,
-            'description': 'This VM\'s unique identifier (from SMBIOS). The key release policy can bind keys to specific VM instances using this value.',
-            'claim_name': 'x-ms-azurevm-vmid'
+            'description': 'This VM\'s unique identifier (from SMBIOS). Present in MAA tokens at x-ms-runtime.vm-configuration.vmUniqueId but NOT usable in AKV release policies. Per-VM scoping uses Key Vault access policies (managed identity) instead.',
+            'maa_claim_path': 'x-ms-runtime.vm-configuration.vmUniqueId',
+            'note': 'AKV does not support x-ms-runtime.* claims in release policies'
         },
         'attestation': {
             'maa_endpoint': f'https://{maa_endpoint}',
@@ -903,13 +912,14 @@ def get_security_policy():
                     'purpose': 'Ensures the VM is a verified Azure Confidential VM'
                 }
             ],
-            'binding_description': 'Key is bound to Azure Confidential VMs that pass MAA guest attestation'
+            'per_vm_scoping': 'Key Vault access policies (managed identity per VM) — AKV does not support x-ms-runtime.* claims in release policies',
+            'binding_description': 'Key is bound to Azure CVMs via hardware attestation + per-VM KV access policies (managed identity)'
         },
         'trust_model': {
             'what_is_trusted': [
                 'AMD SEV-SNP hardware (memory encryption, isolation)',
                 'Microsoft Azure Attestation service (MAA)',
-                'The specific CVM instance identified by vmUniqueId'
+                'Key Vault access policies (managed identity per VM)'
             ],
             'what_is_not_trusted': [
                 'Cloud provider operators (cannot access encrypted memory)',
@@ -946,8 +956,12 @@ def debug_attestation_claims():
                 'detail': response.text[:1000]
             }), response.status_code
         
-        # The response is a JWT token
-        token = response.text.strip()
+        # SKR shim returns JSON: {"token": "<JWT>"}
+        try:
+            shim_data = response.json()
+            token = shim_data.get('token', response.text).strip()
+        except Exception:
+            token = response.text.strip()
         
         # Decode JWT payload (without verification - just for inspection)
         parts = token.split('.')
@@ -2914,33 +2928,39 @@ def vm_security_test():
     # ---- Test 2: Memory Encryption (SEV-SNP) ----
     mem_test = {
         'name': 'Memory Encryption (AMD SEV-SNP)',
-        'method': 'Checking for /dev/sev-guest device and SEV-SNP activation',
+        'method': 'Checking for vTPM/SEV-SNP device and hardware attestation path',
     }
     try:
-        sev_device_exists = os.path.exists('/dev/sev-guest')
-        # Also check dmesg or cpuinfo for SEV-SNP indication
-        sev_active = False
-        try:
-            with open('/proc/cpuinfo', 'r') as f:
-                cpuinfo = f.read()
-                sev_active = 'sev_snp' in cpuinfo.lower() or 'sev' in cpuinfo.lower()
-        except:
-            pass
-        
-        if sev_device_exists:
+        # On Azure CVMs (Ubuntu 24.04+), attestation goes through the vTPM which
+        # contains the HCL report (SNP evidence embedded in the vTPM NV index).
+        # The /dev/sev-guest character device may NOT be exposed even though
+        # AMD SEV-SNP memory encryption is fully active.
+        sev_status = check_sev_guest_device()
+
+        if sev_status['available']:
+            detected_path = sev_status.get('device_path', 'unknown')
+            via_vtpm = sev_status.get('vtpm_available', False)
             mem_test['result'] = 'blocked'
-            mem_test['detail'] = (
-                '/dev/sev-guest device is present — AMD SEV-SNP memory encryption is active. '
-                'All VM memory is encrypted with a per-VM key managed by the AMD Secure Processor. '
-                'The hypervisor cannot read or tamper with VM memory contents.'
-            )
+            if via_vtpm:
+                mem_test['detail'] = (
+                    f'vTPM device found at {sev_status["vtpm_path"]} — AMD SEV-SNP memory encryption is active. '
+                    'The vTPM contains the HCL (Host Compatibility Layer) report with embedded SNP evidence. '
+                    'All VM memory is encrypted with a per-VM key managed by the AMD Secure Processor. '
+                    'The hypervisor cannot read or tamper with VM memory contents.'
+                )
+            else:
+                mem_test['detail'] = (
+                    f'AMD SEV-SNP device found at {detected_path} — hardware memory encryption is active. '
+                    'All VM memory is encrypted with a per-VM key managed by the AMD Secure Processor. '
+                    'The hypervisor cannot read or tamper with VM memory contents.'
+                )
             mem_test['policy_rule'] = 'AMD SEV-SNP provides hardware-enforced memory encryption and integrity'
         else:
             mem_test['result'] = 'unavailable'
             mem_test['detail'] = (
-                '/dev/sev-guest device NOT found — AMD SEV-SNP is not active. '
+                'No AMD SEV-SNP device or vTPM found (/dev/sev-guest, /dev/tpmrm0). '
                 'This VM is NOT running with hardware memory encryption. '
-                'Deploy as a Confidential VM to enable SEV-SNP protection.'
+                'Deploy as a Confidential VM (DCas_v5) to enable SEV-SNP protection.'
             )
             mem_test['policy_rule'] = 'SEV-SNP not available on this hardware'
     except Exception as e:
@@ -2950,8 +2970,8 @@ def vm_security_test():
 
     # ---- Test 3: Hypervisor Debug Access ----
     debug_test = {
-        'name': 'Hypervisor Debug Access (x-ms-sevsnpvm-is-debuggable)',
-        'method': 'Verifying debug mode is disabled via attestation claims',
+        'name': 'Hypervisor Debug Access',
+        'method': 'Verifying debug mode is disabled via attestation claims (x-ms-azurevm-debuggersdisabled / x-ms-sevsnpvm-is-debuggable)',
     }
     try:
         # Try to get attestation to check debug status
@@ -2962,7 +2982,9 @@ def vm_security_test():
         )
         if attest_response.status_code == 200:
             import base64
-            token = attest_response.text.strip()
+            # SKR shim returns JSON: {"token": "<JWT>"}
+            resp_data = attest_response.json()
+            token = resp_data.get('token', attest_response.text).strip()
             parts = token.split('.')
             if len(parts) == 3:
                 payload_b64 = parts[1]
@@ -2971,26 +2993,46 @@ def vm_security_test():
                     payload_b64 += '=' * padding
                 payload_json = base64.urlsafe_b64decode(payload_b64)
                 claims = json.loads(payload_json)
+
+                # Azure CVM tokens use x-ms-azurevm-debuggersdisabled (true = secure).
+                # Older/container tokens may use x-ms-sevsnpvm-is-debuggable (false = secure).
+                debuggers_disabled = claims.get('x-ms-azurevm-debuggersdisabled', None)
                 is_debuggable = claims.get('x-ms-sevsnpvm-is-debuggable', None)
-                if is_debuggable is False or str(is_debuggable).lower() == 'false':
+
+                if debuggers_disabled is True or str(debuggers_disabled).lower() == 'true':
+                    debug_test['result'] = 'blocked'
+                    debug_test['detail'] = (
+                        'x-ms-azurevm-debuggersdisabled = true — All debuggers are disabled. '
+                        'Boot, kernel, and hypervisor debuggers cannot attach to this VM. '
+                        'This is the expected secure configuration for production CVMs.'
+                    )
+                    debug_test['policy_rule'] = 'x-ms-azurevm-debuggersdisabled: true — all debug interfaces blocked'
+                elif debuggers_disabled is False or str(debuggers_disabled).lower() == 'false':
+                    debug_test['result'] = 'active'
+                    debug_test['detail'] = (
+                        'WARNING: x-ms-azurevm-debuggersdisabled = false — Debuggers are ENABLED. '
+                        'An attacker with host access could potentially inspect VM state. '
+                        'This should be true in production deployments.'
+                    )
+                    debug_test['policy_rule'] = 'x-ms-azurevm-debuggersdisabled should be true in production'
+                elif is_debuggable is False or str(is_debuggable).lower() == 'false':
+                    # Fallback to legacy claim
                     debug_test['result'] = 'blocked'
                     debug_test['detail'] = (
                         'x-ms-sevsnpvm-is-debuggable = false — Debug mode is disabled. '
-                        'The hypervisor cannot attach a debugger or inspect VM state. '
-                        'This is the expected secure configuration for production CVMs.'
+                        'The hypervisor cannot attach a debugger or inspect VM state.'
                     )
                     debug_test['policy_rule'] = 'x-ms-sevsnpvm-is-debuggable: false — hypervisor debugging is blocked'
                 elif is_debuggable is True or str(is_debuggable).lower() == 'true':
                     debug_test['result'] = 'active'
                     debug_test['detail'] = (
                         'WARNING: x-ms-sevsnpvm-is-debuggable = true — Debug mode is ENABLED. '
-                        'The hypervisor can potentially inspect VM state. This should be disabled '
-                        'in production deployments.'
+                        'The hypervisor can potentially inspect VM state.'
                     )
                     debug_test['policy_rule'] = 'x-ms-sevsnpvm-is-debuggable should be false in production'
                 else:
                     debug_test['result'] = 'unavailable'
-                    debug_test['detail'] = f'x-ms-sevsnpvm-is-debuggable claim not found in attestation token'
+                    debug_test['detail'] = 'Neither x-ms-azurevm-debuggersdisabled nor x-ms-sevsnpvm-is-debuggable found in attestation token'
             else:
                 debug_test['result'] = 'unavailable'
                 debug_test['detail'] = 'Invalid attestation token format'

@@ -118,7 +118,7 @@ The same 3-company multi-party demo deployed on **Ubuntu 24.04 Confidential Virt
 |--------|----------------------|--------------------------|
 | **TEE** | ACI confidential containers | Ubuntu 24.04 CVM (DCas_v5) |
 | **Attestation** | ACI SKR sidecar binary | CVM SKR shim via vTPM + guest attestation |
-| **Key Binding** | Per-container ccePolicy hash | Per-VM `vmUniqueId` + `azure-compliant-cvm` |
+| **Key Binding** | Per-container ccePolicy hash | Hardware attestation (`azure-compliant-cvm` + `sevsnpvm`) + KV access policies (managed identity per VM) |
 | **Interactive Access** | Blocked by ccePolicy at hardware level | [Compensating controls](advanced-app-cvm/README.md#compensating-controls-for-removing-interactive-access): SSH disabled, NSG deny-all, no Bastion, hidden credentials |
 | **Networking** | Per-container public FQDN | Private VNet + Application Gateway WAF_v2 |
 | **Disk Encryption** | N/A (ephemeral containers) | Confidential OS disk with customer-managed keys |

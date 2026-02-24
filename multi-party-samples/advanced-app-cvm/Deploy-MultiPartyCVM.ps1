@@ -21,14 +21,25 @@
     Trust Model (CVM vs ACI):
     Unlike ACI confidential containers which use per-container ccePolicy hashes
     (x-ms-sevsnpvm-hostdata) to bind keys to specific container images, CVM keys
-    are bound to specific VM instances using the vmUniqueId claim from the MAA
-    attestation token. Each key's release policy requires BOTH platform attestation
-    (azure-compliant-cvm) AND a matching vmUniqueId, ensuring keys can only be
-    released to their authorised VMs:
-      - Contoso key  → Contoso VM + Woodgrove VM
-      - Fabrikam key → Fabrikam VM + Woodgrove VM
-      - Woodgrove key → Woodgrove VM only
-    Key Vault access policies provide an additional layer of identity-based access.
+    use a two-layer trust model:
+    
+    Layer 1 — Release Policy (hardware attestation):
+    Each key's release policy requires TWO claims from the MAA attestation token:
+      1. x-ms-isolation-tee.x-ms-compliance-status = azure-compliant-cvm
+      2. x-ms-isolation-tee.x-ms-attestation-type  = sevsnpvm
+    This ensures keys can ONLY be released to genuine Azure Confidential VMs
+    running on AMD SEV-SNP hardware that pass MAA guest attestation.
+    
+    NOTE: AKV Secure Key Release does NOT support x-ms-runtime.* claims
+    (including vm-configuration.vmUniqueId) in release policies. The release
+    policy can only match claims at the top level or under x-ms-isolation-tee.
+    
+    Layer 2 — Key Vault Access Policies (identity-based):
+    Per-VM managed identities restrict which VMs can call the release API:
+      - Contoso key  → Contoso MI + Woodgrove MI
+      - Fabrikam key → Fabrikam MI + Woodgrove MI
+      - Woodgrove key → Woodgrove MI only
+    This provides the per-VM scoping that the release policy cannot.
 
 .PARAMETER Prefix
     3-8 character lowercase alphanumeric prefix for resource naming.
@@ -595,16 +606,34 @@ foreach ($company in $companies) {
     }
 
     # ---- CMK for confidential OS disk encryption ----
+    # HSM key creation can fail transiently while the vault data plane warms up,
+    # so retry with back-off (mirrors Set-KVAccessPolicyWithRetry pattern).
     Write-Host "  Creating CMK: $cmkName (RSA-HSM 3072-bit)"
-    Add-AzKeyVaultKey `
-        -VaultName $kvName `
-        -Name $cmkName `
-        -Size 3072 `
-        -KeyOps wrapKey, unwrapKey `
-        -KeyType RSA `
-        -Destination HSM `
-        -Exportable `
-        -UseDefaultCVMPolicy | Out-Null
+    $cmkMaxRetries = 6
+    $cmkDelay = 15
+    for ($cmkAttempt = 1; $cmkAttempt -le $cmkMaxRetries; $cmkAttempt++) {
+        try {
+            Add-AzKeyVaultKey `
+                -VaultName $kvName `
+                -Name $cmkName `
+                -Size 3072 `
+                -KeyOps wrapKey, unwrapKey `
+                -KeyType RSA `
+                -Destination HSM `
+                -Exportable `
+                -UseDefaultCVMPolicy | Out-Null
+            break   # success
+        }
+        catch {
+            if ($cmkAttempt -lt $cmkMaxRetries) {
+                Write-Host "    CMK creation not ready (attempt $cmkAttempt/$cmkMaxRetries), retrying in ${cmkDelay}s..." -ForegroundColor Yellow
+                Start-Sleep -Seconds $cmkDelay
+            }
+            else {
+                throw
+            }
+        }
+    }
 
     $encryptionKeyVaultId = (Get-AzKeyVault -VaultName $kvName -ResourceGroupName $resgrp).ResourceId
     $encryptionKeyURL = (Get-AzKeyVaultKey -VaultName $kvName -KeyName $cmkName).Key.Kid
@@ -718,8 +747,8 @@ foreach ($company in $companies) {
     Write-Host "  VM created: $vmName" -ForegroundColor Green
 }
 
-# ---- Retrieve VmId for each CVM (used for per-VM key binding) ----
-Write-Host "`n  Retrieving VM unique identifiers for key binding..." -ForegroundColor Cyan
+# ---- Retrieve VmId for each CVM (logged for diagnostics/reference) ----
+Write-Host "`n  Retrieving VM unique identifiers..." -ForegroundColor Cyan
 $vmIds = @{}
 foreach ($company in $companies) {
     $vmName = "$basename-$company"
@@ -740,7 +769,11 @@ foreach ($company in $companies) {
 #   1. x-ms-isolation-tee.x-ms-attestation-type    = sevsnpvm
 #   2. x-ms-isolation-tee.x-ms-compliance-status    = azure-compliant-cvm
 #
-# Key access matrix (via KV access policies):
+# NOTE: AKV Secure Key Release does NOT support x-ms-runtime.* claims in
+# release policies (e.g. vm-configuration.vmUniqueId). Per-VM scoping is
+# enforced via Key Vault access policies (managed identity per VM) instead.
+#
+# Key access matrix (via KV access policies on managed identities):
 #   Contoso key  → Contoso identity + Woodgrove identity
 #   Fabrikam key → Fabrikam identity + Woodgrove identity
 #   Woodgrove key → Woodgrove identity only
@@ -781,6 +814,7 @@ $releasePolicyBase64Url = [Convert]::ToBase64String(
 Write-Host "  Release policy authority: $maaAuthority" -ForegroundColor Gray
 Write-Host "    x-ms-isolation-tee.x-ms-compliance-status = azure-compliant-cvm" -ForegroundColor Gray
 Write-Host "    x-ms-isolation-tee.x-ms-attestation-type  = sevsnpvm" -ForegroundColor Gray
+Write-Host "    Per-VM scoping: via Key Vault access policies (managed identity)" -ForegroundColor Gray
 
 # Get AKV access token for REST API calls
 $akvToken = (Get-AzAccessToken -ResourceUrl "https://vault.azure.net").Token

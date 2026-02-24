@@ -130,7 +130,9 @@ def get_maa_token(maa_endpoint, nonce=None):
       2. OS info, AIK cert, PCR quotes, TCG logs, and isolation evidence are collected
       3. Guest attestation evidence is POSTed to the MAA AzureGuest endpoint
       4. MAA returns an encrypted response; client decrypts via TPM ephemeral key
-      5. The decrypted JWT includes x-ms-isolation-tee claims with vmUniqueId
+      5. The decrypted JWT includes x-ms-isolation-tee claims (compliance-status,
+         attestation-type) used by AKV release policies, plus vm-configuration.vmUniqueId
+         (informational — not usable in release policies, per-VM scoping uses KV access policies)
 
     Guest attestation (not platform) is required because AKV key release policies
     check claims under x-ms-isolation-tee.*, which only guest attestation provides.
@@ -147,8 +149,10 @@ def get_maa_token(maa_endpoint, nonce=None):
     maa_clean = maa_endpoint.replace('https://', '').replace('http://', '').rstrip('/')
 
     # Use the AzureGuest endpoint — guest attestation produces tokens with
-    # x-ms-isolation-tee.x-ms-compliance-status and vmUniqueId claims
+    # x-ms-isolation-tee.x-ms-compliance-status and x-ms-attestation-type claims
     # that AKV key release policies require.
+    # Note: vmUniqueId is at x-ms-runtime.vm-configuration.vmUniqueId but AKV
+    # does not support x-ms-runtime.* claims in release policies.
     attest_url = f"https://{maa_clean}/attest/AzureGuest?api-version=2020-10-01"
 
     # Build user claims if nonce was provided
@@ -206,6 +210,8 @@ def get_maa_token(maa_endpoint, nonce=None):
                                 "AKV default CVM policy requires GUEST attestation")
 
             # Log runtime keys (needed for AKV to wrap the released key)
+            # and vm-configuration.vmUniqueId (informational — AKV does not
+            # support x-ms-runtime.* claims in release policies)
             runtime = token_claims.get('x-ms-runtime', {})
             if isinstance(runtime, dict):
                 keys = runtime.get('keys', [])
@@ -214,6 +220,14 @@ def get_maa_token(maa_endpoint, nonce=None):
                     log.info(f"    key[{i}]: kty={k.get('kty')}, "
                              f"key_ops={k.get('key_ops')}, "
                              f"kid={k.get('kid', 'n/a')}")
+                # Log vmUniqueId (informational — AKV does not support
+                # x-ms-runtime.* claims in release policies)
+                vm_config = runtime.get('vm-configuration', {})
+                if isinstance(vm_config, dict):
+                    vm_unique_id = vm_config.get('vmUniqueId', '(missing)')
+                    log.info(f"  x-ms-runtime.vm-configuration.vmUniqueId: {vm_unique_id}")
+                else:
+                    log.warning("  WARNING: x-ms-runtime.vm-configuration missing")
             else:
                 log.warning("  WARNING: x-ms-runtime claim missing or not an object")
 
@@ -797,6 +811,9 @@ def key_release():
                     runtime = token_claims.get('x-ms-runtime', {})
                     if isinstance(runtime, dict):
                         diagnostics['x-ms-runtime.keys_count'] = len(runtime.get('keys', []))
+                        vm_config = runtime.get('vm-configuration', {})
+                        if isinstance(vm_config, dict):
+                            diagnostics['x-ms-runtime.vm-configuration.vmUniqueId'] = vm_config.get('vmUniqueId', '(missing)')
                     # Include all top-level claim keys for debugging
                     diagnostics['all_claim_keys'] = sorted(token_claims.keys())
                 else:
