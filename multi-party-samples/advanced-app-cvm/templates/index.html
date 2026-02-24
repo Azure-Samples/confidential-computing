@@ -927,18 +927,20 @@
                 if (data.tests) {
                     data.tests.forEach(function(test) {
                         const isBlocked = test.result === 'blocked';
-                        const icon = isBlocked ? '🛡️' : (test.result === 'unavailable' ? '⚫' : '⚠️');
-                        const borderColor = isBlocked ? '#dc3545' : '#6c757d';
-                        const bgColor = isBlocked ? '#f8d7da' : '#f8f9fa';
+                        const isActive = test.result === 'active';
+                        const icon = isBlocked ? '🛡️' : (isActive ? '⚠️' : '⚫');
+                        const borderColor = isBlocked ? '#28a745' : (isActive ? '#ffc107' : '#6c757d');
+                        const bgColor = isBlocked ? '#d4edda' : (isActive ? '#fff3cd' : '#f8f9fa');
+                        const statusColor = isBlocked ? '#155724' : (isActive ? '#856404' : '#6c757d');
+                        const statusLabel = isBlocked ? 'BLOCKED' : escapeHtml(test.result.toUpperCase());
                         
                         html += '<div style="margin: 12px 0; padding: 15px; background: ' + bgColor + '; border-radius: 8px; border-left: 4px solid ' + borderColor + ';">';
-                        html += '<h4 style="margin: 0 0 8px 0; color: #333;">' + icon + ' ' + escapeHtml(test.name) + '</h4>';
-                        html += '<p style="margin: 0 0 8px 0;"><span class="status-badge ' + (isBlocked ? 'status-error' : 'status-warning') + '">' + escapeHtml(test.result.toUpperCase()) + '</span></p>';
+                        html += '<h4 style="margin: 0 0 8px 0; color: #333;">' + icon + ' ' + escapeHtml(test.name) + ' — <span style="color: ' + statusColor + '; font-weight: bold;">' + statusLabel + '</span></h4>';
                         html += '<p style="margin: 0 0 6px 0; color: #555;">' + escapeHtml(test.detail) + '</p>';
                         
                         if (test.policy_rule) {
-                            html += '<div style="margin-top: 8px; padding: 10px; background: #1e1e1e; border-radius: 6px;">';
-                            html += '<code style="color: #d4d4d4; font-size: 0.85em; white-space: pre-wrap;">' + escapeHtml(test.policy_rule) + '</code>';
+                            html += '<div style="margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 6px; border: 1px solid rgba(0,0,0,0.1);">';
+                            html += '<p style="color: #333; font-size: 0.85em; margin: 0; line-height: 1.5;">' + escapeHtml(test.policy_rule) + '</p>';
                             html += '</div>';
                         }
                         html += '</div>';
