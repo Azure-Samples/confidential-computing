@@ -14,6 +14,12 @@
     - Application Gateway WAF_v2 with a single public IP (per-company port routing)
     - Random admin username + 40-char password per VM (hidden unless -EnableDebug)
     
+    Deployment is parallelized for speed:
+    - All 3 VMs are created simultaneously (New-AzVM -AsJob)
+    - All 3 bootstrap extensions run in parallel (Set-AzVMExtension -AsJob)
+    - Application Gateway creation overlaps with VM bootstrap
+    Typical deployment time: ~12-15 minutes (vs ~25-30 minutes sequential).
+    
     Woodgrove gets cross-company Key Vault access to Contoso and Fabrikam,
     enabling the multi-party analytics demo where Woodgrove can release partner
     keys and decrypt their data — all attested by AMD SEV-SNP via MAA.
@@ -681,37 +687,42 @@ Write-Host "`nPhase 2 complete.`n" -ForegroundColor Green
 
 
 # ============================================================================
-# PHASE 3: DEPLOY CONFIDENTIAL VMs
+# PHASE 3: DEPLOY CONFIDENTIAL VMs (parallel)
 # ============================================================================
-Write-Host "Phase 3: Deploying Confidential VMs..." -ForegroundColor White
+Write-Host "Phase 3: Deploying Confidential VMs (3 VMs in parallel)..." -ForegroundColor White
 
 $vnet = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $resgrp
 $vmSubnet = $vnet.Subnets | Where-Object { $_.Name -eq "VMSubnet" }
 
+# ---- 3a: Create NICs (fast, sequential) ----
+$nics = @{}
 foreach ($company in $companies) {
     $vmName = "$basename-$company"
     $nicName = "$vmName-nic"
-    $abbrev = $companyAbbrev[$company]
-    $desName = "$basename-des-$abbrev"
-    $cred = $credentials[$company]
 
-    Write-Host "`n  --- $($company.ToUpper()) VM: $vmName ---" -ForegroundColor Cyan
-
-    # ---- NIC with static private IP (no public IP) ----
     Write-Host "  Creating NIC: $nicName (IP: $($staticIPs[$company]))"
     $ipConfig = New-AzNetworkInterfaceIpConfig `
         -Name "ipconfig1" `
         -Subnet $vmSubnet `
         -PrivateIpAddress $staticIPs[$company]
 
-    $nic = New-AzNetworkInterface `
+    $nics[$company] = New-AzNetworkInterface `
         -Name $nicName `
         -ResourceGroupName $resgrp `
         -Location $Location `
         -IpConfiguration $ipConfig
-    
-    # ---- VM Configuration ----
-    Write-Host "  Configuring VM: $VMSize, Ubuntu 24.04 CVM, ConfidentialVM"
+}
+
+# ---- 3b: Configure and launch all 3 VMs in parallel (-AsJob) ----
+$vmJobs = @{}
+foreach ($company in $companies) {
+    $vmName = "$basename-$company"
+    $abbrev = $companyAbbrev[$company]
+    $desName = "$basename-des-$abbrev"
+    $cred = $credentials[$company]
+
+    Write-Host "  Launching VM: $vmName ($VMSize, Ubuntu 24.04 CVM)" -ForegroundColor Cyan
+
     $securePassword = ConvertTo-SecureString -String $cred.Password -AsPlainText -Force
     $vmCred = New-Object System.Management.Automation.PSCredential ($cred.Username, $securePassword)
 
@@ -726,7 +737,7 @@ foreach ($company in $companies) {
         -Skus 'cvm' `
         -Version "latest"
 
-    $vm = Add-AzVMNetworkInterface -VM $vm -Id $nic.Id
+    $vm = Add-AzVMNetworkInterface -VM $vm -Id $nics[$company].Id
 
     # Confidential OS disk with customer-managed key encryption
     $diskEncSet = Get-AzDiskEncryptionSet -ResourceGroupName $resgrp -Name $desName
@@ -741,10 +752,21 @@ foreach ($company in $companies) {
     $vm = Set-AzVmUefi -VM $vm -EnableVtpm $true -EnableSecureBoot $true
     $vm = Set-AzVMBootDiagnostic -VM $vm -Disable
 
-    # ---- Create VM ----
-    Write-Host "  Creating VM (this takes 2-5 minutes)..."
-    New-AzVM -ResourceGroupName $resgrp -Location $Location -VM $vm | Out-Null
-    Write-Host "  VM created: $vmName" -ForegroundColor Green
+    # Launch VM creation as background job (all 3 run in parallel)
+    $vmJobs[$company] = New-AzVM -ResourceGroupName $resgrp -Location $Location -VM $vm -AsJob
+}
+
+Write-Host "`n  All 3 VMs launching in parallel (typically 2-5 minutes)..." -ForegroundColor Gray
+$vmJobs.Values | Wait-Job | Out-Null
+
+foreach ($company in $companies) {
+    $job = $vmJobs[$company]
+    if ($job.State -eq 'Failed') {
+        $errMsg = ($job.ChildJobs | ForEach-Object { $_.JobStateInfo.Reason.Message }) -join '; '
+        throw "VM creation failed for $($company): $errMsg"
+    }
+    $job | Receive-Job | Out-Null
+    Write-Host "  VM created: $basename-$company" -ForegroundColor Green
 }
 
 # ---- Retrieve VmId for each CVM (logged for diagnostics/reference) ----
@@ -856,13 +878,14 @@ foreach ($company in $companies) {
 
 Write-Host "`n  All application keys created." -ForegroundColor Green
 
-Write-Host "`n  All VMs created. Running bootstrap scripts..." -ForegroundColor Cyan
+Write-Host "`n  All VMs created. Starting bootstrap scripts in parallel..." -ForegroundColor Cyan
 
-# ---- Run CustomScriptExtension on each VM to install the app ----
+# ---- Start CustomScriptExtension on all VMs in parallel (-AsJob) ----
+$bootstrapJobs = @{}
 foreach ($company in $companies) {
     $vmName = "$basename-$company"
 
-    Write-Host "`n  Bootstrapping $($company.ToUpper()) ($vmName)..." -ForegroundColor Cyan
+    Write-Host "  Starting bootstrap: $($company.ToUpper()) ($vmName)..." -ForegroundColor Cyan
 
     # Build list of file URIs to download
     $fileUris = @(
@@ -895,7 +918,7 @@ foreach ($company in $companies) {
         commandToExecute = $commandToExecute
     } | ConvertTo-Json -Depth 3
 
-    Set-AzVMExtension `
+    $bootstrapJobs[$company] = Set-AzVMExtension `
         -ResourceGroupName $resgrp `
         -VMName $vmName `
         -Name "setup-$company" `
@@ -903,18 +926,18 @@ foreach ($company in $companies) {
         -ExtensionType "CustomScript" `
         -TypeHandlerVersion "2.1" `
         -Location $Location `
-        -ProtectedSettingString $protectedSettings | Out-Null
-
-    Write-Host "  Bootstrap complete: $vmName" -ForegroundColor Green
+        -ProtectedSettingString $protectedSettings `
+        -AsJob
 }
 
-Write-Host "`nPhase 3 complete.`n" -ForegroundColor Green
+Write-Host "  Bootstrap running on all 3 VMs in parallel." -ForegroundColor Gray
+Write-Host "  Proceeding to Application Gateway (runs concurrently with bootstrap)..." -ForegroundColor Gray
 
 
 # ============================================================================
-# PHASE 4: APPLICATION GATEWAY WAF_v2
+# PHASE 4: APPLICATION GATEWAY WAF_v2 (overlaps with VM bootstrap)
 # ============================================================================
-Write-Host "Phase 4: Deploying Application Gateway WAF_v2..." -ForegroundColor White
+Write-Host "`nPhase 4: Deploying Application Gateway WAF_v2 (while bootstrap runs)..." -ForegroundColor White
 Write-Host "  (This typically takes 5-10 minutes)" -ForegroundColor Gray
 
 # ---- Public IP ----
@@ -1088,7 +1111,29 @@ Write-Host "  Public IP: $publicIP" -ForegroundColor Green
 if ($publicFqdn) {
     Write-Host "  FQDN: $publicFqdn" -ForegroundColor Green
 }
-Write-Host "`nPhase 4 complete.`n" -ForegroundColor Green
+
+# ---- Wait for VM bootstrap jobs to complete ----
+Write-Host "`n  Waiting for VM bootstrap to finish..." -ForegroundColor Gray
+$bootstrapJobs.Values | Wait-Job | Out-Null
+
+$bootstrapFailed = $false
+foreach ($company in $companies) {
+    $job = $bootstrapJobs[$company]
+    if ($job.State -eq 'Failed') {
+        $errMsg = ($job.ChildJobs | ForEach-Object { $_.JobStateInfo.Reason.Message }) -join '; '
+        Write-Host "  Bootstrap FAILED for $($company): $errMsg" -ForegroundColor Red
+        $bootstrapFailed = $true
+    }
+    else {
+        $job | Receive-Job | Out-Null
+        Write-Host "  Bootstrap complete: $basename-$company" -ForegroundColor Green
+    }
+}
+if ($bootstrapFailed) {
+    throw "One or more VM bootstrap extensions failed. Check the errors above."
+}
+
+Write-Host "`nPhases 3 + 4 complete (VMs bootstrapped, App Gateway ready).`n" -ForegroundColor Green
 
 
 # ============================================================================
