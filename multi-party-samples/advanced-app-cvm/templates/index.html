@@ -340,10 +340,11 @@
                 </ul>
             </details>
             
-            <details class="section">
+            <details class="section" open>
                 <summary style="cursor: pointer;"><h2 style="display: inline;">🔍 Remote Attestation</h2></summary>
                 <div class="attestation-box" style="margin-top: 15px;">
                     <p><strong>Remote attestation</strong> allows you to cryptographically verify that your workload is running in a genuine confidential computing environment with the expected security configuration.</p>
+                    <p id="attestPrompt" style="margin: 15px 0; padding: 12px 16px; background: linear-gradient(135deg, #e7f3ff 0%, #f0f7ff 100%); border-radius: 8px; border: 1px solid #b8daff; color: #004085;">👉 Click <strong>Request Attestation Token</strong> to verify the security protections of this application and inspect the AMD SEV-SNP attestation claims.</p>
                     
                     <div class="button-group">
                         <button id="attestBtn" onclick="requestAttestation()">
@@ -1731,6 +1732,10 @@
             const btn = document.getElementById('attestBtn');
             const resultDiv = document.getElementById('attestResult');
             
+            // Hide the prompt message once the user clicks
+            const prompt = document.getElementById('attestPrompt');
+            if (prompt) prompt.style.display = 'none';
+            
             btn.disabled = true;
             btn.innerHTML = 'Requesting Attestation<span class="loading"></span>';
             
@@ -1941,7 +1946,7 @@
             const features = featuresList.querySelectorAll('li');
             
             if (verified && payload) {
-                // Attestation successful - check specific claims
+                // Attestation successful with full claims - check specific claims
                 statusEl.innerHTML = '<span style="color: #28a745;">✓ Attestation verified successfully</span>';
                 statusEl.style.color = '#28a745';
                 
@@ -1967,6 +1972,15 @@
                         li.className = 'unverified';
                         li.querySelector('.status-icon').textContent = '✗';
                     }
+                });
+            } else if (verified) {
+                // Attestation confirmed by /info but no detailed claims yet
+                statusEl.innerHTML = '<span style="color: #28a745;">✓ Confidential VM detected</span> — <span style="color: #6c757d;">click <strong>Request Attestation Token</strong> below for full claim details</span>';
+                statusEl.style.color = '#28a745';
+                
+                features.forEach(li => {
+                    li.className = 'verified';
+                    li.querySelector('.status-icon').textContent = '✓';
                 });
             } else {
                 // Attestation failed
