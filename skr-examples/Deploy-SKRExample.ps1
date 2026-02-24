@@ -585,18 +585,21 @@ fi
 TOKEN_LEN=${#MAA_TOKEN}
 echo "  MAA token obtained ($TOKEN_LEN chars)"
 
-# Decode and display key claims from the JWT payload
+# Decode and display key claims from the JWT payload (informational only — don't fail on parse errors)
 echo ""
 echo "  ── MAA Token Claims (relevant to SKR policy) ──"
-PAYLOAD=$(echo "$MAA_TOKEN" | cut -d. -f2)
-# Add base64 padding
-MOD=$((${#PAYLOAD} % 4))
-if [ $MOD -eq 2 ]; then PAYLOAD="${PAYLOAD}=="; elif [ $MOD -eq 3 ]; then PAYLOAD="${PAYLOAD}="; fi
-CLAIMS=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq '.')
-echo "$CLAIMS" | jq -r '."x-ms-isolation-tee" // empty' | jq '{
-    "x-ms-compliance-status": ."x-ms-compliance-status",
-    "x-ms-attestation-type": ."x-ms-attestation-type"
-}'
+(
+    PAYLOAD=$(echo "$MAA_TOKEN" | cut -d. -f2)
+    # base64url → base64 standard + padding
+    PAYLOAD=$(echo "$PAYLOAD" | tr '-_' '+/')
+    MOD=$((${#PAYLOAD} % 4))
+    if [ $MOD -eq 2 ]; then PAYLOAD="${PAYLOAD}=="; elif [ $MOD -eq 3 ]; then PAYLOAD="${PAYLOAD}="; fi
+    CLAIMS=$(echo "$PAYLOAD" | base64 -d 2>/dev/null)
+    echo "$CLAIMS" | jq -r '."x-ms-isolation-tee" // empty' | jq '{
+        "x-ms-compliance-status": ."x-ms-compliance-status",
+        "x-ms-attestation-type": ."x-ms-attestation-type"
+    }'
+) || echo "  (Could not decode MAA token claims)"
 echo ""
 
 # ---- Phase 5: AKV Secure Key Release ----
@@ -682,6 +685,8 @@ echo ""
 # Decode the JWS to extract the JWK (the actual key material)
 echo " ── Decoded Key Material (JWK) ──"
 JWS_PAYLOAD=$(echo "$RELEASE_VALUE" | cut -d. -f2)
+# base64url → base64 standard + padding
+JWS_PAYLOAD=$(echo "$JWS_PAYLOAD" | tr '-_' '+/')
 MOD=$((${#JWS_PAYLOAD} % 4))
 if [ $MOD -eq 2 ]; then JWS_PAYLOAD="${JWS_PAYLOAD}=="; elif [ $MOD -eq 3 ]; then JWS_PAYLOAD="${JWS_PAYLOAD}="; fi
 echo "$JWS_PAYLOAD" | base64 -d 2>/dev/null | jq -r '.response.key.key' 2>/dev/null | jq '{
