@@ -112,7 +112,6 @@ Confidential Virtual Machine (CVM) deployment scripts:
   - Windows 11 Enterprise 24H2
   - Ubuntu 24.04 LTS
   - RHEL 9.5
-- **BuildCVMWithPrivateMAA.ps1** - CVM with private Azure Attestation provider *(experimental)*
 - **BuildRandomSQLCVM.ps1** - SQL Server 2022 on Confidential VM
 
 ### [AKS Samples](/aks-samples/README.md)
@@ -127,6 +126,13 @@ Microsoft Azure Attestation (MAA) provider management:
 Reusable PowerShell snippets for common confidential computing tasks:
 - `snippet-createDES.ps1` - Create Disk Encryption Set for Confidential VMs
 - `snippet-remoteCallAttest.ps1` - Remote attestation call examples
+
+### [SKR Examples](/skr-examples/README.md) 🆕
+Standalone Secure Key Release demonstration:
+- **Deploy-SKRExample.ps1** - End-to-end CVM deployment with AMD SEV-SNP attestation and AKV key release
+  - Deploys a Confidential VM, SSHs in, performs vTPM attestation via MAA, and releases an HSM key
+  - Auto-cleans up all resources after displaying the released key material
+  - NSG locks SSH access to deployer's IP; ephemeral SSH key pair (no password)
 
 ### [Container Samples](/containersamples/README.md) *(Intel SGX)*
 Enclave-aware container samples for AKS with Intel SGX:
@@ -149,7 +155,7 @@ While these samples are functional and demonstrate real Azure Confidential Compu
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a
 Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit <https://cla.opensource.microsoft.com.>
+the rights to use your contribution. For details, visit <https://cla.opensource.microsoft.com>.
 
 When you submit a pull request, a CLA bot will automatically determine whether you need to provide
 a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions

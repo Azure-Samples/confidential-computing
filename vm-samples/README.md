@@ -42,7 +42,6 @@ Deploy Confidential Virtual Machines (CVMs) with AMD SEV-SNP hardware protection
 | Script | Description | Status |
 |--------|-------------|--------|
 | `BuildRandomCVM.ps1` | Deploy CVM with CMK, Confidential Disk Encryption, and Bastion | **Stable** |
-| `BuildCVMWithPrivateMAA.ps1` | CVM with private Azure Attestation provider | **Experimental** |
 | `BuildRandomSQLCVM.ps1` | SQL Server 2022 on Confidential VM | **Stable** |
 
 ---
@@ -191,7 +190,7 @@ New-AzResourceGroupDeployment -Name DeployLocalTemplate -ResourceGroupName "<YOU
 [Attestation](https://learn.microsoft.com/en-us/azure/confidential-computing/attestation-solutions) is how you prove you are running on a confidential computing VM based on evidence provided and signed by the CPU and validated by an attestation service.
 
 ## Windows CVMs
-Once you've deployed a Windows CVM (Windows Server 2022 or Windows 11 Enterprise), you can install the [simple attestation client](https://github.com/Azure/confidential-computing-cvm-guest-attestation/blob/main/cvm-platform-checker-exe/README.md) install the VC runtime 1st!to see true/false if your VM is protected by Azure Confidential Computing
+Once you've deployed a Windows CVM (Windows Server 2022 or Windows 11 Enterprise), you can install the [simple attestation client](https://github.com/Azure/confidential-computing-cvm-guest-attestation/blob/main/cvm-platform-checker-exe/README.md). Install the VC runtime first! This tool shows true/false for whether your VM is protected by Azure Confidential Computing.
 
 The WindowsAttest.ps1 script can manually be invoked inside a Windows CVM to do an automated attestation check against the West Europe shared attestation endpoint. This script works with both Windows Server 2022 and Windows 11 Enterprise CVMs.
 
@@ -213,16 +212,16 @@ and libraries.
 You can download the script to a CVM or execute directly from GitHub >inside< your CVM by pasting the following single line Command in a PowerShell session that is running with Administrative permissions (review the script 1st to ensure you are happy with the binaries and packages it installs or download & customize)
 
 ```powershell
-$ScriptFromGitHub = Invoke-WebRequest -uri https://raw.githubusercontent.com/vinfnet/simple-cvm-cmk-demo/refs/heads/main/WindowsAttest.ps1 ; Invoke-Expression $($ScriptFromGitHub.Content)
+$ScriptFromGitHub = Invoke-WebRequest -uri https://raw.githubusercontent.com/Azure-Samples/confidential-computing/refs/heads/main/vm-samples/WindowsAttest.ps1 ; Invoke-Expression $($ScriptFromGitHub.Content)
 ```
 
 If you want to run this command against your CVM >from< your own workstation over the Internet you can use the following 1-line command, edit the <VARIABLES> to match the VM you're targetting and paste it into a PowerShell session that is authenticated to your Azure subscription (in this case output will not be colour-coded)
 
 ```powershell
-$ScriptContent = Invoke-WebRequest -Uri https://raw.githubusercontent.com/vinfnet/simple-cvm-cmk-demo/main/WindowsAttest.ps1 -UseBasicParsing | Select-Object -ExpandProperty Content ; Invoke-AzVMRunCommand -ResourceGroupName <YOUR_RESOURCE_GROUP> -VMName <YOUR_VM_NAME> -CommandId "RunPowerShellScript" -ScriptString $ScriptContent
+$ScriptContent = Invoke-WebRequest -Uri https://raw.githubusercontent.com/Azure-Samples/confidential-computing/main/vm-samples/WindowsAttest.ps1 -UseBasicParsing | Select-Object -ExpandProperty Content ; Invoke-AzVMRunCommand -ResourceGroupName <YOUR_RESOURCE_GROUP> -VMName <YOUR_VM_NAME> -CommandId "RunPowerShellScript" -ScriptString $ScriptContent
 ```
 
-For more information on Azure confidential Computing see the [public docs](https//aka.ms/accdocs)
+For more information on Azure confidential Computing see the [public docs](https://aka.ms/accdocs)
 
 
 # TURBO Charged Versions

@@ -26,14 +26,13 @@ What kind of change does this Pull Request introduce?
 *  Get the code
 
 ```
-git clone [repo-address]
-cd [repo-name]
+git clone https://github.com/Azure-Samples/confidential-computing.git
+cd confidential-computing
 git checkout [branch-name]
-npm install
 ```
 
 * Test the code
-<!-- Add steps to run the tests suite and/or manually test -->
+<!-- Deploy the relevant sample and verify expected behavior -->
 ```
 ```
 

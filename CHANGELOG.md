@@ -1,5 +1,15 @@
 ## Azure Confidential Computing Samples Changelog
 
+<a name="2.3.0"></a>
+# 2.3.0 (2025-06-19)
+
+*Documentation*
+* **Repo-wide documentation refresh** - Fixed broken URLs, removed references to non-existent scripts, updated GitHub repository URLs from legacy forks to Azure-Samples
+* **SKR version alignment** - Updated SKR sidecar references from `2.7` to `2.13` in all ATTESTATION.md files to match Dockerfiles
+* **CONTRIBUTING.md** - Replaced placeholder project name and repository URLs with actual values
+* **GitHub templates** - Updated PR template with correct clone instructions, modernised OS examples in issue template
+* **SKR Examples** - Added new section in root README for the SKR Examples project
+
 <a name="2.2.0"></a>
 # 2.2.0 (2026-02-17)
 

@@ -156,7 +156,7 @@ This:
 
 ## SKR Service (Secure Key Release)
 
-The SKR binary is extracted from `mcr.microsoft.com/aci/skr:2.7` during the Docker multi-stage build and runs alongside Flask via supervisord. It provides the following endpoints on port 8080:
+The SKR binary is extracted from `mcr.microsoft.com/aci/skr:2.13` during the Docker multi-stage build and runs alongside Flask via supervisord. It provides the following endpoints on port 8080:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
