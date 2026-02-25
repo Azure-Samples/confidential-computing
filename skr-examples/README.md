@@ -11,25 +11,33 @@ Key Vault and receive an encryption key that cannot be accessed any other way.
 │                     Deployment Overview                             │
 │                                                                     │
 │  1. Resource Group with random suffix                               │
-│  2. Private VNet (no public IPs)                                    │
+│  2. VNet + Public IP + NSG (SSH locked to deployer's IP)            │
 │  3. Azure Key Vault Premium (HSM-backed)                            │
 │       └─ Key: "fabrikam-totally-top-secret-key"                     │
 │            └─ Release policy: AMD SEV-SNP CVM only                  │
 │  4. User-Assigned Managed Identity → KV get + release               │
 │  5. DiskEncryptionSet → confidential OS disk (CMK)                  │
 │  6. Ubuntu 24.04 Confidential VM (DCas_v5)                          │
-│       └─ Bootstrap: attest via vTPM → MAA token → key release       │
-│  7. Result returned to your console via CustomScriptExtension       │
+│       └─ SSH key auth (ephemeral key pair, no password)             │
+│  7. SSH into CVM: attest via vTPM → MAA token → key release         │
+│  8. Result streamed directly to your console                        │
+│  9. Auto-cleanup: resource group deleted, SSH keys removed          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Quick Start
 
 ```powershell
-# Deploy everything (takes ~10 minutes)
+# Deploy, run SKR, display result, and auto-clean up (~10 minutes)
 .\Deploy-SKRExample.ps1 -Prefix "skrdemo"
+```
 
-# Clean up when done
+The script deploys all resources, SSHs into the CVM to perform secure key release,
+displays the result, then automatically deletes the resource group and SSH keys.
+
+To clean up a previous deployment manually (e.g. if the script was interrupted):
+
+```powershell
 .\Deploy-SKRExample.ps1 -Cleanup
 ```
 
@@ -117,7 +125,7 @@ the top-level path `x-ms-attestation-type`. This is important because:
 │     └─ AMD CPU generates attestation report (SNP_REPORT)                 │
 │        └─ Signed by VCEK (chip-unique key from AMD KDS)                  │
 │                                                                          │
-│  2. Bootstrap script runs inside the VM                                  │
+│  2. Script SSHs into the VM and runs the bootstrap                       │
 │     └─ Reads SNP report from vTPM (/dev/tpmrm0)                         │
 │        └─ cvm-attestation-tools sends evidence to MAA                    │
 │                                                                          │
@@ -140,11 +148,9 @@ the top-level path `x-ms-attestation-type`. This is important because:
 │     └─ If all pass → wraps key material in JWS and returns it            │
 │                                                                          │
 │  6. Bootstrap decodes the JWS to extract the JWK (key material)          │
-│     └─ Prints result to stdout                                           │
+│     └─ Output streams directly to your console via SSH                   │
 │                                                                          │
-│  7. CustomScriptExtension captures stdout                                │
-│     └─ PowerShell retrieves it via Get-AzVMExtension -Status             │
-│        └─ Displayed in your console                                      │
+│  7. Script auto-cleans up (deletes resource group + SSH keys)            │
 │                                                                          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -171,17 +177,22 @@ Both layers must pass for key release to succeed.
 |----------|-------------|---------|
 | Resource Group | `{prefix}{suffix}-skr-rg` | Contains all resources |
 | Virtual Network | `{prefix}{suffix}-vnet` | Private network (10.0.0.0/16) |
-| VM NIC | `{prefix}{suffix}-cvm-nic` | Private IP only (10.0.1.4) |
-| Confidential VM | `{prefix}{suffix}-cvm` | Ubuntu 24.04, DCas_v5 |
+| Public IP | `{prefix}{suffix}-pip` | SSH access to VM |
+| NSG | `{prefix}{suffix}-nsg` | SSH locked to deployer's IP |
+| VM NIC | `{prefix}{suffix}-cvm-nic` | Public + private IP (10.0.1.4) |
+| Confidential VM | `{prefix}{suffix}-cvm` | Ubuntu 24.04, DCas_v5, SSH key auth |
 | Key Vault | `{prefix}{suffix}kv` | Premium (HSM), soft-delete |
 | User Identity | `{prefix}{suffix}-id` | VM identity for KV access |
 | Disk Encryption Set | `{prefix}{suffix}-des` | Confidential OS disk CMK |
 | KV Key: `disk-cmk` | — | RSA-HSM 3072, disk encryption |
 | KV Key: `fabrikam-totally-top-secret-key` | — | RSA-HSM 2048, exportable, SKR |
 
+All resources are automatically deleted after the SKR result is displayed.
+
 ## Prerequisites
 
 - **Azure PowerShell** (`Az` module) — `Install-Module -Name Az -Force`
+- **SSH client** — pre-installed on macOS/Linux; on Windows use OpenSSH or Git Bash
 - **Azure subscription** with Confidential VM quota for `DCas_v5` series
 - **Logged in** — `Connect-AzAccount`
 
@@ -194,3 +205,6 @@ Both layers must pass for key release to succeed.
 | Bootstrap shows "No vTPM device" | VM not running as CVM | Check VM SKU is DCas_v5 or similar |
 | Key release returns 403 | Identity doesn't have KV permissions | Check access policy includes `get` + `release` |
 | Key release returns policy error | MAA token claims don't match policy | Verify VM is SEV-SNP (not TDX), check claim paths |
+| SSH connection times out | NSG or VM not ready | Script waits up to 5 min; check NSG allows your IP |
+| "Enter passphrase for key" | SSH key generated with passphrase | Delete `.ssh/` folder and re-run; uses `-P ""` for no passphrase |
+| Resources left after interruption | Script was killed before auto-cleanup | Run `.\Deploy-SKRExample.ps1 -Cleanup` |

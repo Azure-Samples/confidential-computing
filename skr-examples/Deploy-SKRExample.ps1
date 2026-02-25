@@ -7,20 +7,19 @@
     AMD SEV-SNP Secure Key Release from Azure Key Vault:
 
     1. Resource Group with random suffix (from -Prefix)
-    2. Private VNet (no public IPs on the VM)
+    2. VNet with public IP + NSG (SSH locked to deployer's IP)
     3. Azure Key Vault Premium with HSM-backed exportable RSA key
        ("fabrikam-totally-top-secret-key") bound to a CVM release policy
     4. User-assigned managed identity for Key Vault access
     5. Ubuntu 24.04 Confidential VM (DCas_v5) with DiskWithVMGuestState encryption
-    6. CustomScriptExtension that:
+    6. SSH session into the CVM that:
        a. Installs cvm-attestation-tools (Python vTPM attestation)
        b. Gets an MAA token via the vTPM (proves AMD SEV-SNP hardware)
        c. Calls AKV key release API with the MAA token
-       d. Prints the released key material to the VM bootstrap log
+       d. Prints the released key material directly to the console
 
-    After the VM boots and runs the bootstrap script, this PowerShell script
-    retrieves the CustomScriptExtension output (which contains the SKR result)
-    and displays it in the console.
+    After the VM boots, the script SSHs in using an ephemeral key pair,
+    runs the bootstrap, and streams the SKR result directly to the console.
 
     SKR Release Policy (explained):
     ┌──────────────────────────────────────────────────────────────────────┐
@@ -184,9 +183,19 @@ if ($Cleanup) {
     if (Test-Path $configFile) {
         $config = Get-Content -Path $configFile -Raw | ConvertFrom-Json
         $rg = $config.resourceGroup
+        $bn = $config.basename
         Write-Host "Removing resource group: $rg ..." -ForegroundColor Yellow
         Remove-AzResourceGroup -Name $rg -Force -AsJob | Out-Null
         Remove-Item $configFile -Force -ErrorAction SilentlyContinue
+        # Clean up ephemeral SSH keys
+        $cleanSshDir = Join-Path $scriptDir ".ssh"
+        if (Test-Path $cleanSshDir) {
+            Remove-Item "$cleanSshDir/$bn*" -Force -ErrorAction SilentlyContinue
+            # Remove .ssh dir if empty
+            if (-not (Get-ChildItem $cleanSshDir -ErrorAction SilentlyContinue)) {
+                Remove-Item $cleanSshDir -Force -ErrorAction SilentlyContinue
+            }
+        }
         Write-Host "Cleanup job submitted. Deletion continues in background." -ForegroundColor Green
         Write-Host "Check status: Get-Job | Where-Object Command -like '*Remove-AzResourceGroup*'" -ForegroundColor Gray
     }
@@ -234,10 +243,14 @@ $suffix = -join ((97..122) | Get-Random -Count 5 | ForEach-Object { [char]$_ })
 $basename = $Prefix + $suffix
 $resgrp = "$basename-skr-rg"
 $vnetName = "$basename-vnet"
+$pipName = "$basename-pip"
+$nsgName = "$basename-nsg"
 $vmName = "$basename-cvm"
 $kvName = "$($basename)kv"
 $identityName = "$basename-id"
 $desName = "$basename-des"
+$sshKeyDir = Join-Path $scriptDir ".ssh"
+$sshKeyPath = Join-Path $sshKeyDir "$basename"
 $cmkName = "disk-cmk"
 $appKeyName = "fabrikam-totally-top-secret-key"
 $cred = New-RandomCredential
@@ -273,7 +286,7 @@ $tags = @{
 New-AzResourceGroup -Name $resgrp -Location $Location -Tag $tags -Force | Out-Null
 Write-Host "  Resource group: $resgrp" -ForegroundColor Green
 
-# Private VNet — single subnet, no public IPs
+# Private VNet — single subnet for the CVM
 $subnetConfig = New-AzVirtualNetworkSubnetConfig -Name "VMSubnet" -AddressPrefix "10.0.1.0/24"
 $vnet = New-AzVirtualNetwork `
     -Name $vnetName `
@@ -281,7 +294,43 @@ $vnet = New-AzVirtualNetwork `
     -Location $Location `
     -AddressPrefix "10.0.0.0/16" `
     -Subnet $subnetConfig
-Write-Host "  VNet: $vnetName (10.0.0.0/16, no public IPs)" -ForegroundColor Green
+Write-Host "  VNet: $vnetName (10.0.0.0/16)" -ForegroundColor Green
+
+# Public IP for SSH access
+$pip = New-AzPublicIpAddress `
+    -Name $pipName `
+    -ResourceGroupName $resgrp `
+    -Location $Location `
+    -AllocationMethod Static `
+    -Sku Standard
+Write-Host "  Public IP: $pipName ($($pip.IpAddress))" -ForegroundColor Green
+
+# NSG — allow SSH only from deployer's IP
+$myIp = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10).Trim()
+$sshRule = New-AzNetworkSecurityRuleConfig `
+    -Name "AllowSSH" `
+    -Protocol Tcp `
+    -Direction Inbound `
+    -Priority 1000 `
+    -SourceAddressPrefix $myIp `
+    -SourcePortRange * `
+    -DestinationAddressPrefix * `
+    -DestinationPortRange 22 `
+    -Access Allow
+$nsg = New-AzNetworkSecurityGroup `
+    -Name $nsgName `
+    -ResourceGroupName $resgrp `
+    -Location $Location `
+    -SecurityRules $sshRule
+Write-Host "  NSG: $nsgName (SSH allowed from $myIp only)" -ForegroundColor Green
+
+# Generate ephemeral SSH key pair for this deployment
+if (-not (Test-Path $sshKeyDir)) { New-Item -ItemType Directory -Path $sshKeyDir -Force | Out-Null }
+if (Test-Path $sshKeyPath) { Remove-Item "$sshKeyPath*" -Force }
+# Use -P (PEM passphrase) with empty string — avoids quoting issues across shells
+ssh-keygen -t rsa -b 4096 -f $sshKeyPath -P "" -q 2>$null
+$sshPubKey = Get-Content "$sshKeyPath.pub" -Raw
+Write-Host "  SSH key pair generated (ephemeral, in .ssh/)" -ForegroundColor Green
 
 Write-Host "Phase 1 complete.`n" -ForegroundColor Green
 
@@ -455,19 +504,23 @@ Write-Host "Phase 3: Deploying Confidential VM..." -ForegroundColor White
 $vnet = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $resgrp
 $vmSubnet = $vnet.Subnets | Where-Object { $_.Name -eq "VMSubnet" }
 
-# NIC (private IP only — no public IP)
+# NIC with public IP and NSG
 $nicName = "$vmName-nic"
-$ipConfig = New-AzNetworkInterfaceIpConfig -Name "ipconfig1" -Subnet $vmSubnet -PrivateIpAddress "10.0.1.4"
-$nic = New-AzNetworkInterface -Name $nicName -ResourceGroupName $resgrp -Location $Location -IpConfiguration $ipConfig
-Write-Host "  NIC: $nicName (private IP 10.0.1.4, no public IP)" -ForegroundColor Green
+$pip = Get-AzPublicIpAddress -Name $pipName -ResourceGroupName $resgrp
+$nsg = Get-AzNetworkSecurityGroup -Name $nsgName -ResourceGroupName $resgrp
+$ipConfig = New-AzNetworkInterfaceIpConfig -Name "ipconfig1" -Subnet $vmSubnet -PrivateIpAddress "10.0.1.4" -PublicIpAddress $pip
+$nic = New-AzNetworkInterface -Name $nicName -ResourceGroupName $resgrp -Location $Location `
+    -IpConfiguration $ipConfig -NetworkSecurityGroup $nsg
+Write-Host "  NIC: $nicName (public IP $($pip.IpAddress), SSH locked to deployer)" -ForegroundColor Green
 
-# VM configuration
+# VM configuration (SSH key auth — no password)
 $securePassword = ConvertTo-SecureString -String $cred.Password -AsPlainText -Force
 $vmCred = New-Object System.Management.Automation.PSCredential ($cred.Username, $securePassword)
 
 $vm = New-AzVMConfig -VMName $vmName -VMSize $VMSize `
     -IdentityType UserAssigned -IdentityId $identity.Id
-$vm = Set-AzVMOperatingSystem -VM $vm -Linux -ComputerName $vmName -Credential $vmCred
+$vm = Set-AzVMOperatingSystem -VM $vm -Linux -ComputerName $vmName -Credential $vmCred -DisablePasswordAuthentication
+$vm = Add-AzVMSshPublicKey -VM $vm -KeyData $sshPubKey -Path "/home/$($cred.Username)/.ssh/authorized_keys"
 $vm = Set-AzVMSourceImage -VM $vm `
     -PublisherName 'Canonical' -Offer 'ubuntu-24_04-lts' -Skus 'cvm' -Version "latest"
 $vm = Add-AzVMNetworkInterface -VM $vm -Id $nic.Id
@@ -498,13 +551,13 @@ Write-Host "Phase 3 complete.`n" -ForegroundColor Green
 # ============================================================================
 # PHASE 4: BOOTSTRAP — INSTALL TOOLS + RUN SKR
 # ============================================================================
-Write-Host "Phase 4: Running bootstrap script (installs tools + performs SKR)..." -ForegroundColor White
-Write-Host "  This installs cvm-attestation-tools, gets an MAA token from the vTPM," -ForegroundColor Gray
-Write-Host "  and calls AKV key release. Output will appear below when complete." -ForegroundColor Gray
+Write-Host "Phase 4: Running bootstrap script via SSH (installs tools + performs SKR)..." -ForegroundColor White
+Write-Host "  SSHing into the CVM to install cvm-attestation-tools, get an MAA token" -ForegroundColor Gray
+Write-Host "  from the vTPM, and call AKV key release. Output streams live below." -ForegroundColor Gray
 Write-Host ""
 
-# The bootstrap script is embedded as a here-string and passed directly
-# to CustomScriptExtension. No blob storage needed for this simple example.
+# The bootstrap script is embedded as a here-string, SCPed to the VM,
+# and run via SSH. Output streams directly to the console.
 $bootstrapScript = @'
 #!/bin/bash
 set -euo pipefail
@@ -524,12 +577,12 @@ echo ""
 export DEBIAN_FRONTEND=noninteractive
 
 # ---- Phase 1: System packages ----
-echo "[1/5] Installing system packages..."
+echo "[1/4] Installing system packages..."
 apt-get update -qq
-apt-get install -y -qq python3 python3-pip python3-venv git curl jq tpm2-tools 2>&1 | tail -3
+apt-get install -y -qq python3 python3-pip python3-venv git curl tpm2-tools 2>&1 | tail -3
 
 # ---- Phase 2: cvm-attestation-tools (Python vTPM attestation) ----
-echo "[2/5] Installing cvm-attestation-tools..."
+echo "[2/4] Installing cvm-attestation-tools..."
 CVM_ATTEST_DIR="/opt/cvm-attestation-tools"
 git clone --depth 1 https://github.com/Azure/cvm-attestation-tools.git "$CVM_ATTEST_DIR" 2>&1 | tail -2
 git clone --depth 1 https://github.com/microsoft/TSS.MSR.git "$CVM_ATTEST_DIR/cvm-attestation/TSS_MSR" 2>&1 | tail -2
@@ -543,26 +596,57 @@ else
 fi
 
 # ---- Phase 3: Python environment ----
-echo "[3/5] Setting up Python environment..."
+echo "[3/4] Setting up Python environment..."
 python3 -m venv /opt/skr-venv
 source /opt/skr-venv/bin/activate
 pip install --no-cache-dir --upgrade pip 2>&1 | tail -1
-pip install --no-cache-dir flask requests pyjwt cryptography 2>&1 | tail -3
+pip install --no-cache-dir requests cryptography 2>&1 | tail -3
 pip install --no-cache-dir -r "$CVM_ATTEST_DIR/cvm-attestation/requirements.txt" 2>&1 | tail -3
 
-# ---- Phase 4: MAA attestation via vTPM ----
-echo "[4/5] Getting MAA attestation token from vTPM..."
-echo "  This proves the VM is running on AMD SEV-SNP hardware."
+# ---- Phase 4: MAA attestation + AKV key release (Python — matches skr_shim.py) ----
+echo "[4/4] Running Secure Key Release..."
+echo "  MAA attestation via vTPM → AKV key release"
+echo ""
 
-cat > /tmp/get_maa_token.py << 'PYEOF'
-import sys, json, os
+cat > /tmp/skr_release.py << 'PYEOF'
+"""
+Secure Key Release — get MAA token from vTPM, then release key from AKV.
+Uses the same libraries and flow as skr_shim.py (proven working).
+"""
+import sys, os, json, base64, time
 sys.path.insert(0, '/opt/cvm-attestation-tools/cvm-attestation')
+import requests as http_requests
 from src.attestation_client import AttestationClient, AttestationClientParameters, Verifier
 from src.isolation import IsolationType
 from src.logger import Logger
 
-maa_endpoint = sys.argv[1]
-attest_url = f"https://{maa_endpoint}/attest/AzureGuest?api-version=2020-10-01"
+MAA_ENDPOINT = sys.argv[1]
+AKV_ENDPOINT = sys.argv[2]
+KEY_NAME     = sys.argv[3]
+CLIENT_ID    = sys.argv[4]
+
+
+def decode_jwt_payload(token):
+    """Decode a JWT payload (no signature verification)."""
+    try:
+        payload = token.split('.')[1]
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += '=' * padding
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return None
+
+
+# =========================================================================
+#  Step 1: MAA attestation token via vTPM
+# =========================================================================
+print("  Step 1/3: Getting MAA attestation token from vTPM...")
+print("  This proves the VM is running on AMD SEV-SNP hardware.")
+
+maa_clean = MAA_ENDPOINT.replace('https://', '').replace('http://', '').rstrip('/')
+attest_url = f"https://{maa_clean}/attest/AzureGuest?api-version=2020-10-01"
+
 logger = Logger("skr").get_logger()
 params = AttestationClientParameters(
     endpoint=attest_url,
@@ -571,135 +655,191 @@ params = AttestationClientParameters(
     claims=None,
 )
 client = AttestationClient(logger, params)
-token = client.attest_guest()
-if isinstance(token, bytes):
-    token = token.decode('utf-8').strip()
-print(token)
+result = client.attest_guest()
+
+if not result:
+    print("  ERROR: attest_guest() returned empty result")
+    sys.exit(1)
+
+maa_token = result.decode('utf-8').strip() if isinstance(result, bytes) else str(result).strip()
+print(f"  MAA token obtained ({len(maa_token)} chars)")
+
+# Decode and display claims (diagnostic)
+claims = decode_jwt_payload(maa_token)
+if claims:
+    print()
+    print("  ── MAA Token Claims (relevant to SKR policy) ──")
+    print(f"  Issuer (iss):          {claims.get('iss', '(missing)')}")
+    iso_tee = claims.get('x-ms-isolation-tee')
+    if isinstance(iso_tee, dict):
+        print(f"  compliance-status:     {iso_tee.get('x-ms-compliance-status', '(missing)')}")
+        print(f"  attestation-type:      {iso_tee.get('x-ms-attestation-type', '(missing)')}")
+    else:
+        print("  WARNING: x-ms-isolation-tee claim MISSING from token")
+        if 'x-ms-attestation-type' in claims:
+            print(f"  top-level x-ms-attestation-type: {claims['x-ms-attestation-type']}")
+            print("  This suggests PLATFORM attestation — AKV CVM policy requires GUEST attestation")
+    runtime = claims.get('x-ms-runtime', {})
+    if isinstance(runtime, dict):
+        keys = runtime.get('keys', [])
+        print(f"  runtime keys:          {len(keys)} key(s)")
+        for k in keys:
+            print(f"    {k.get('kid', 'n/a')}: kty={k.get('kty')}, key_ops={k.get('key_ops')}")
+    print()
+else:
+    print("  WARNING: Could not decode MAA token for diagnostics")
+
+
+# =========================================================================
+#  Step 2: Managed identity token + key metadata
+# =========================================================================
+print("  Step 2/3: Getting managed identity token and key metadata...")
+
+# MI token via IMDS (same pattern as skr_shim.py)
+imds_resp = http_requests.get(
+    "http://169.254.169.254/metadata/identity/oauth2/token",
+    params={
+        "api-version": "2018-02-01",
+        "resource": "https://vault.azure.net",
+        "client_id": CLIENT_ID,
+    },
+    headers={"Metadata": "true"},
+    timeout=10,
+)
+imds_resp.raise_for_status()
+akv_token = imds_resp.json()["access_token"]
+print("  AKV access token obtained")
+
+# Key metadata (to get version)
+akv_host = AKV_ENDPOINT.replace('https://', '').replace('http://', '').rstrip('/')
+key_resp = http_requests.get(
+    f"https://{akv_host}/keys/{KEY_NAME}?api-version=7.4",
+    headers={"Authorization": f"Bearer {akv_token}"},
+    timeout=30,
+)
+key_resp.raise_for_status()
+key_info = key_resp.json()
+key_kid = key_info.get('key', {}).get('kid', '')
+key_version = key_kid.rstrip('/').split('/')[-1] if key_kid else ''
+print(f"  Key version: {key_version}")
+
+# Display release policy
+rp = key_info.get('release_policy', {})
+if rp and rp.get('data'):
+    rp_data = rp['data']
+    rp_padded = rp_data + '=' * (4 - len(rp_data) % 4)
+    rp_decoded = json.loads(base64.urlsafe_b64decode(rp_padded).decode('utf-8'))
+    print()
+    print("  ── Release Policy on Key ──")
+    print(json.dumps(rp_decoded, indent=2))
+    print()
+
+
+# =========================================================================
+#  Step 3: AKV key release (same as skr_shim.py — requests.post with json=)
+# =========================================================================
+release_url = f"https://{akv_host}/keys/{KEY_NAME}/{key_version}/release?api-version=7.4"
+print(f"  Step 3/3: Calling AKV key release API...")
+print(f"  URL: {release_url}")
+
+resp = http_requests.post(
+    release_url,
+    headers={
+        "Authorization": f"Bearer {akv_token}",
+        "Content-Type": "application/json",
+    },
+    json={"target": maa_token},
+    timeout=60,
+)
+
+if resp.status_code != 200:
+    print(f"\n  ERROR: Key release failed! HTTP {resp.status_code}")
+    try:
+        print(json.dumps(resp.json(), indent=2))
+    except Exception:
+        print(resp.text[:1000])
+
+    # Diagnostic: check authority vs issuer match
+    if claims:
+        print()
+        print("  ── Diagnostics ──")
+        iss = claims.get('iss', '(missing)')
+        print(f"  Token issuer (iss): {iss}")
+        print(f"  Token exp:          {claims.get('exp', '(missing)')}")
+        print(f"  Token nbf:          {claims.get('nbf', '(missing)')}")
+        iso_tee = claims.get('x-ms-isolation-tee', {})
+        if isinstance(iso_tee, dict):
+            print(f"  compliance-status:  {iso_tee.get('x-ms-compliance-status', '(missing)')}")
+            print(f"  attestation-type:   {iso_tee.get('x-ms-attestation-type', '(missing)')}")
+        runtime_keys = claims.get('x-ms-runtime', {}).get('keys', [])
+        print(f"  runtime keys:       {len(runtime_keys)}")
+
+        if rp and rp.get('data'):
+            for rule in rp_decoded.get('anyOf', []):
+                auth = rule.get('authority', '')
+                print(f"  Policy authority:   {auth}")
+                if auth == iss:
+                    print(f"  Authority/iss:      MATCH ✓")
+                else:
+                    print(f"  Authority/iss:      MISMATCH ✗")
+                    print(f"    policy: {auth}")
+                    print(f"    token:  {iss}")
+    sys.exit(1)
+
+
+# =========================================================================
+#  Success — display the released key
+# =========================================================================
+release_data = resp.json()
+jws_value = release_data.get('value', '')
+
+print()
+print("================================================================")
+print(" ✅ SECURE KEY RELEASE SUCCESSFUL")
+print("================================================================")
+print()
+print(f" Key Name:    {KEY_NAME}")
+print(f" Key Vault:   {AKV_ENDPOINT}")
+print(f" Key Version: {key_version}")
+print()
+print(" The key was released because this VM satisfied BOTH conditions")
+print(" in the release policy:")
+print("   1. x-ms-isolation-tee.x-ms-compliance-status = azure-compliant-cvm")
+print("   2. x-ms-isolation-tee.x-ms-attestation-type  = sevsnpvm")
+print()
+print(f" Released JWS token (first 200 chars):")
+print(f" {jws_value[:200]}...")
+print()
+
+# Decode the JWS to extract the JWK
+try:
+    jws_payload = jws_value.split('.')[1]
+    padding = 4 - len(jws_payload) % 4
+    if padding != 4:
+        jws_payload += '=' * padding
+    jws_decoded = json.loads(base64.urlsafe_b64decode(jws_payload))
+    key_data = jws_decoded.get('response', {}).get('key', {}).get('key', {})
+    print(" ── Decoded Key Material (JWK) ──")
+    display = {
+        'kty': key_data.get('kty'),
+        'key_ops': key_data.get('key_ops'),
+        'e': key_data.get('e'),
+    }
+    n = key_data.get('n', '')
+    if n:
+        display['n'] = n[:40] + '...[truncated]'
+    print(json.dumps({k: v for k, v in display.items() if v is not None}, indent=2))
+except Exception as e:
+    print(f" (Could not decode JWK: {e} — raw JWS returned successfully)")
+
+print()
+print("================================================================")
+print(f" Done: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}")
+print("================================================================")
 PYEOF
 
-MAA_TOKEN=$(python3 /tmp/get_maa_token.py "__MAA_ENDPOINT__")
-if [ -z "$MAA_TOKEN" ]; then
-    echo "  ERROR: Failed to get MAA token"
-    exit 1
-fi
-TOKEN_LEN=${#MAA_TOKEN}
-echo "  MAA token obtained ($TOKEN_LEN chars)"
-
-# Decode and display key claims from the JWT payload (informational only — don't fail on parse errors)
-echo ""
-echo "  ── MAA Token Claims (relevant to SKR policy) ──"
-(
-    PAYLOAD=$(echo "$MAA_TOKEN" | cut -d. -f2)
-    # base64url → base64 standard + padding
-    PAYLOAD=$(echo "$PAYLOAD" | tr '-_' '+/')
-    MOD=$((${#PAYLOAD} % 4))
-    if [ $MOD -eq 2 ]; then PAYLOAD="${PAYLOAD}=="; elif [ $MOD -eq 3 ]; then PAYLOAD="${PAYLOAD}="; fi
-    CLAIMS=$(echo "$PAYLOAD" | base64 -d 2>/dev/null)
-    echo "$CLAIMS" | jq -r '."x-ms-isolation-tee" // empty' | jq '{
-        "x-ms-compliance-status": ."x-ms-compliance-status",
-        "x-ms-attestation-type": ."x-ms-attestation-type"
-    }'
-) || echo "  (Could not decode MAA token claims)"
-echo ""
-
-# ---- Phase 5: AKV Secure Key Release ----
-echo "[5/5] Releasing key from Azure Key Vault..."
-echo "  Key:   __KEY_NAME__"
-echo "  Vault: __AKV_ENDPOINT__"
-echo ""
-
-# Get managed identity token for AKV
-echo "  Getting managed identity token..."
-AKV_TOKEN=$(curl -s -H "Metadata:true" \
-    "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://vault.azure.net&client_id=__CLIENT_ID__" \
-    | jq -r '.access_token')
-
-if [ -z "$AKV_TOKEN" ] || [ "$AKV_TOKEN" = "null" ]; then
-    echo "  ERROR: Failed to get managed identity token for AKV"
-    exit 1
-fi
-echo "  AKV access token obtained"
-
-# Get key version
-echo "  Fetching key metadata..."
-KEY_INFO=$(curl -s -H "Authorization: Bearer $AKV_TOKEN" \
-    "https://__AKV_ENDPOINT__/keys/__KEY_NAME__?api-version=7.4")
-KEY_KID=$(echo "$KEY_INFO" | jq -r '.key.kid')
-KEY_VERSION=$(echo "$KEY_KID" | rev | cut -d/ -f1 | rev)
-echo "  Key version: $KEY_VERSION"
-
-# Show release policy
-echo ""
-echo "  ── Release Policy on Key ──"
-echo "$KEY_INFO" | jq -r '.release_policy.data' | python3 -c "
-import sys, base64, json
-data = sys.stdin.read().strip()
-padded = data + '=' * (4 - len(data) % 4)
-decoded = base64.urlsafe_b64decode(padded).decode('utf-8')
-policy = json.loads(decoded)
-print(json.dumps(policy, indent=2))
-"
-echo ""
-
-# Call key release API
-echo "  Calling AKV key release API..."
-RELEASE_RESPONSE=$(curl -s -X POST \
-    "https://__AKV_ENDPOINT__/keys/__KEY_NAME__/$KEY_VERSION/release?api-version=7.4" \
-    -H "Authorization: Bearer $AKV_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"target\": \"$MAA_TOKEN\"}")
-
-# Check for errors
-if echo "$RELEASE_RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
-    echo "  ERROR: Key release failed!"
-    echo "$RELEASE_RESPONSE" | jq '.error'
-    exit 1
-fi
-
-# Extract the JWS value — this is the released key material
-RELEASE_VALUE=$(echo "$RELEASE_RESPONSE" | jq -r '.value')
-if [ -z "$RELEASE_VALUE" ] || [ "$RELEASE_VALUE" = "null" ]; then
-    echo "  ERROR: No value in release response"
-    echo "$RELEASE_RESPONSE" | head -c 500
-    exit 1
-fi
-
-echo ""
-echo "================================================================"
-echo " ✅ SECURE KEY RELEASE SUCCESSFUL"
-echo "================================================================"
-echo ""
-echo " Key Name:    __KEY_NAME__"
-echo " Key Vault:   __AKV_ENDPOINT__"
-echo " Key Version: $KEY_VERSION"
-echo ""
-echo " The key was released because this VM satisfied BOTH conditions"
-echo " in the release policy:"
-echo "   1. x-ms-isolation-tee.x-ms-compliance-status = azure-compliant-cvm"
-echo "   2. x-ms-isolation-tee.x-ms-attestation-type  = sevsnpvm"
-echo ""
-echo " Released JWS token (first 200 chars):"
-echo " ${RELEASE_VALUE:0:200}..."
-echo ""
-
-# Decode the JWS to extract the JWK (the actual key material)
-echo " ── Decoded Key Material (JWK) ──"
-JWS_PAYLOAD=$(echo "$RELEASE_VALUE" | cut -d. -f2)
-# base64url → base64 standard + padding
-JWS_PAYLOAD=$(echo "$JWS_PAYLOAD" | tr '-_' '+/')
-MOD=$((${#JWS_PAYLOAD} % 4))
-if [ $MOD -eq 2 ]; then JWS_PAYLOAD="${JWS_PAYLOAD}=="; elif [ $MOD -eq 3 ]; then JWS_PAYLOAD="${JWS_PAYLOAD}="; fi
-echo "$JWS_PAYLOAD" | base64 -d 2>/dev/null | jq -r '.response.key.key' 2>/dev/null | jq '{
-    kty: .kty,
-    n: (.n[:40] + "...[truncated]"),
-    e: .e,
-    key_ops: .key_ops
-}' 2>/dev/null || echo " (Could not decode JWK — raw JWS returned successfully)"
-
-echo ""
-echo "================================================================"
-echo " Done: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-echo "================================================================"
+source /opt/skr-venv/bin/activate
+python3 /tmp/skr_release.py "__MAA_ENDPOINT__" "__AKV_ENDPOINT__" "__KEY_NAME__" "__CLIENT_ID__"
 '@
 
 # Substitute placeholders in the bootstrap script
@@ -709,69 +849,47 @@ $bootstrapScript = $bootstrapScript `
     -replace '__MAA_ENDPOINT__', $maaEndpoint `
     -replace '__CLIENT_ID__', $identity.ClientId
 
-# Base64 encode the script for CustomScriptExtension
-$scriptBytes = [System.Text.Encoding]::UTF8.GetBytes($bootstrapScript)
-$scriptBase64 = [Convert]::ToBase64String($scriptBytes)
+# Write the bootstrap script to a local temp file for SCP
+$tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "skr-bootstrap-$basename.sh"
+[System.IO.File]::WriteAllText($tempScript, $bootstrapScript)
 
-# Run via CustomScriptExtension (commandToExecute receives the base64-encoded script)
-$publicSettings = @{
-    commandToExecute = "echo $scriptBase64 | base64 -d > /tmp/skr-bootstrap.sh && bash /tmp/skr-bootstrap.sh"
-} | ConvertTo-Json
+$vmIp = (Get-AzPublicIpAddress -Name $pipName -ResourceGroupName $resgrp).IpAddress
+$sshUser = $cred.Username
+$sshOpts = @("-i", $sshKeyPath, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR")
 
-Write-Host "  Running bootstrap on $vmName (installs tools + performs SKR)..." -ForegroundColor Cyan
+# Wait for SSH to become available (VM just booted)
+Write-Host "  Waiting for SSH on $vmIp..." -ForegroundColor Gray
+$sshReady = $false
+for ($i = 0; $i -lt 30; $i++) {
+    $testResult = ssh @sshOpts -o ConnectTimeout=5 "$sshUser@$vmIp" "echo ok" 2>&1
+    if ($testResult -match "ok") {
+        $sshReady = $true
+        break
+    }
+    Start-Sleep -Seconds 10
+}
+if (-not $sshReady) {
+    throw "SSH not available on $vmIp after 5 minutes. Check NSG rules and VM status."
+}
+Write-Host "  SSH connected to $vmIp" -ForegroundColor Green
+
+# Copy bootstrap script to VM and run it
+Write-Host "  Uploading bootstrap script to VM..." -ForegroundColor Cyan
+scp @sshOpts $tempScript "${sshUser}@${vmIp}:/tmp/skr-bootstrap.sh" 2>&1 | Out-Null
+Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
+
+Write-Host "  Running bootstrap on $vmName via SSH (installs tools + performs SKR)..." -ForegroundColor Cyan
 Write-Host "  This typically takes 3-5 minutes..." -ForegroundColor Gray
+Write-Host ""
 
-Set-AzVMExtension `
-    -ResourceGroupName $resgrp `
-    -VMName $vmName `
-    -Name "skr-bootstrap" `
-    -Publisher "Microsoft.Azure.Extensions" `
-    -ExtensionType "CustomScript" `
-    -TypeHandlerVersion "2.1" `
-    -Location $Location `
-    -SettingString $publicSettings | Out-Null
-
-Write-Host "`n  Bootstrap complete." -ForegroundColor Green
-
-
-# ============================================================================
-# PHASE 5: RETRIEVE AND DISPLAY SKR RESULT
-# ============================================================================
-Write-Host "`nPhase 5: Retrieving SKR result from VM..." -ForegroundColor White
-
-# Get the extension instance view which contains stdout/stderr
-$ext = Get-AzVMExtension `
-    -ResourceGroupName $resgrp `
-    -VMName $vmName `
-    -Name "skr-bootstrap" `
-    -Status
-
-# The instance view contains substatus messages with stdout and stderr
-$instanceView = $ext.Statuses + $ext.SubStatuses
-$stdout = ""
-$stderr = ""
-
-if ($ext.SubStatuses) {
-    foreach ($sub in $ext.SubStatuses) {
-        if ($sub.Code -match 'StdOut') { $stdout = $sub.Message }
-        if ($sub.Code -match 'StdErr') { $stderr = $sub.Message }
-    }
-}
-
-# Also try the newer property path
-if (-not $stdout -and $ext.PSObject.Properties['SubStatusesSerialized']) {
-    $subStatuses = $ext.SubStatusesSerialized | ConvertFrom-Json -ErrorAction SilentlyContinue
-    if ($subStatuses) {
-        foreach ($sub in $subStatuses) {
-            if ($sub.code -match 'StdOut') { $stdout = $sub.message }
-            if ($sub.code -match 'StdErr') { $stderr = $sub.message }
-        }
-    }
-}
+# Run the bootstrap via SSH — stdout streams directly to the console.
+# We also capture it for the config/summary.
+$sshOutput = ssh @sshOpts "$sshUser@$vmIp" "sudo bash /tmp/skr-bootstrap.sh" 2>&1
+$stdout = ($sshOutput | Out-String).Trim()
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Cyan
-Write-Host " VM Bootstrap Output (from CustomScriptExtension)" -ForegroundColor Cyan
+Write-Host " VM Bootstrap Output (via SSH)" -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -779,20 +897,7 @@ if ($stdout) {
     Write-Host $stdout
 }
 else {
-    Write-Host "  (No stdout captured — check stderr below)" -ForegroundColor Yellow
-}
-
-if ($stderr) {
-    Write-Host "`n── stderr ──" -ForegroundColor Yellow
-    # Only show last 30 lines of stderr (lots of apt noise)
-    $stderrLines = $stderr -split "`n"
-    if ($stderrLines.Count -gt 30) {
-        Write-Host "  ... ($($stderrLines.Count - 30) lines omitted)" -ForegroundColor Gray
-        $stderrLines[-30..-1] | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
-    }
-    else {
-        $stderrLines | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
-    }
+    Write-Host "  (No output captured from SSH session)" -ForegroundColor Yellow
 }
 
 Write-Host ""
@@ -809,6 +914,9 @@ $config = @{
     vmName        = $vmName
     vmSize        = $VMSize
     vmId          = $vmObj.VmId
+    vmIp          = $vmIp
+    sshUser       = $sshUser
+    sshKeyPath    = $sshKeyPath
     keyVault      = $kvName
     keyName       = $appKeyName
     identity      = $identityName
@@ -824,7 +932,7 @@ Write-Host " DEPLOYMENT COMPLETE" -ForegroundColor Green
 Write-Host "================================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Resource Group:  $resgrp"
-Write-Host "  VM:              $vmName (private IP 10.0.1.4)"
+Write-Host "  VM:              $vmName ($vmIp)"
 Write-Host "  Key Vault:       $kvName"
 Write-Host "  Key:             $appKeyName"
 Write-Host "  MAA Endpoint:    $maaEndpoint"
@@ -832,10 +940,22 @@ Write-Host ""
 Write-Host "  The key '$appKeyName' was released from the Key Vault" -ForegroundColor Cyan
 Write-Host "  to the Confidential VM using AMD SEV-SNP attestation." -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Cleanup: .\$scriptName -Cleanup" -ForegroundColor Gray
-Write-Host ""
 Write-Host ("  Deployment time: {0} minutes and {1} seconds" -f [int]$elapsed.TotalMinutes, $elapsed.Seconds) -ForegroundColor Gray
 Write-Host "================================================================" -ForegroundColor Green
+
+# Auto-cleanup: remove Azure resources + local SSH keys
+Write-Host ""
+Write-Host "Cleaning up resources..." -ForegroundColor Yellow
+Remove-AzResourceGroup -Name $resgrp -Force -AsJob | Out-Null
+Remove-Item $configFile -Force -ErrorAction SilentlyContinue
+if (Test-Path $sshKeyDir) {
+    Remove-Item "$sshKeyDir/$basename*" -Force -ErrorAction SilentlyContinue
+    if (-not (Get-ChildItem $sshKeyDir -ErrorAction SilentlyContinue)) {
+        Remove-Item $sshKeyDir -Force -ErrorAction SilentlyContinue
+    }
+}
+Write-Host "  Resource group '$resgrp' deletion started (runs in background)." -ForegroundColor Green
+Write-Host "  SSH keys removed." -ForegroundColor Green
 
 }
 catch {
@@ -853,6 +973,8 @@ catch {
             Write-Host "  Removing resource group (background)..." -ForegroundColor Yellow
             Remove-AzResourceGroup -Name $resgrp -Force -AsJob | Out-Null
             Remove-Item $configFile -Force -ErrorAction SilentlyContinue
+            # Clean up SSH keys on failure too
+            if (Test-Path $sshKeyDir) { Remove-Item "$sshKeyDir/$basename*" -Force -ErrorAction SilentlyContinue }
             Write-Host "  Cleanup job submitted." -ForegroundColor Green
         }
         else {
