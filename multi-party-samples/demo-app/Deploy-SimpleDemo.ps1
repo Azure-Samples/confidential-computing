@@ -1,0 +1,1248 @@
+<#
+.SYNOPSIS
+    Deploy multi-party confidential computing demonstration.
+
+.DESCRIPTION
+    Deploys three containers to demonstrate multi-party confidential computing:
+    - Contoso: Confidential container (AMD SEV-SNP) - Can attest and access secrets
+    - Fabrikam: Confidential container (AMD SEV-SNP) - Can attest and access secrets  
+    - snooper: Standard container (no TEE) - Cannot attest, cannot access secrets
+
+    This demonstrates how confidential computing protects data even from 
+    infrastructure operators, showing that only attested containers can 
+    release cryptographic keys.
+
+.PARAMETER Prefix
+    REQUIRED. A short, unique identifier (3-8 characters) to prefix all Azure resources.
+    Use something that identifies you or your team, like initials or team code.
+    Examples: "jd01", "dev", "team42", "acme"
+    This helps identify who owns the resources in shared subscriptions.
+
+.PARAMETER Build
+    Build and push the container image to Azure Container Registry.
+    Creates ACR and Key Vault if they don't exist.
+
+.PARAMETER Deploy
+    Deploy all three containers (Contoso, Fabrikam, snooper).
+    Requires a previous build (acr-config.json must exist).
+
+.PARAMETER Cleanup
+    Delete all Azure resources created by this script.
+
+.PARAMETER SkipBrowser
+    Skip opening the browser after deployment.
+
+.PARAMETER RegistryName
+    Custom name for the Azure Container Registry.
+    If not provided, a random name will be generated.
+
+.PARAMETER Location
+    Azure region to deploy resources into.
+    Defaults to "eastus" if not specified.
+    Example regions: eastus, westus2, northeurope, westeurope, uksouth
+
+.EXAMPLE
+    .\Deploy-SimpleDemo.ps1 -Prefix "jd01" -Build
+    Build and push the container image with prefix "jd01"
+
+.EXAMPLE
+    .\Deploy-SimpleDemo.ps1 -Prefix "dev" -Deploy
+    Deploy all three containers with prefix "dev"
+
+.EXAMPLE
+    .\Deploy-SimpleDemo.ps1 -Prefix "team42" -Build -Deploy
+    Build and deploy in one command with prefix "team42"
+
+.EXAMPLE
+    .\Deploy-SimpleDemo.ps1 -Prefix "acme" -Cleanup
+    Delete all Azure resources with prefix "acme"
+#>
+
+param(
+    [Parameter(Mandatory=$false)]
+    [ValidatePattern('^[a-z0-9]{3,8}$')]
+    [string]$Prefix,
+    [switch]$Build,
+    [switch]$Deploy,
+    [switch]$Cleanup,
+    [switch]$SkipBrowser,
+    [string]$RegistryName,
+    [string]$Location = "eastus"
+)
+
+$ErrorActionPreference = "Stop"
+$ImageName = "aci-attestation-demo"
+$ImageTag = "latest"
+
+# Set UTF-8 encoding to handle Unicode characters in Azure CLI output
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONIOENCODING = "utf-8"
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+function Write-Header {
+    param([string]$Title)
+    Write-Host ""
+    Write-Host "=== $Title ===" -ForegroundColor Cyan
+    Write-Host ""
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Green
+}
+
+function Write-Warning {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Yellow
+}
+
+function Write-Error {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Red
+}
+
+function Get-SharedMaaEndpoint {
+    <#
+    .SYNOPSIS
+        Resolve the shared Microsoft Azure Attestation (MAA) endpoint for a given Azure region.
+    
+    .DESCRIPTION
+        Returns the shared MAA endpoint URL for the specified Azure region.
+        Shared MAA endpoints follow the pattern: shared<code>.<code>.attest.azure.net
+        
+        These endpoints are required for Secure Key Release (SKR) policies in 
+        confidential container deployments, where the attestation authority in the
+        release policy must match the region where the container is deployed.
+        
+        Source: https://github.com/microsoft/confidential-sidecar-containers
+        Verify: Get-AzAttestationDefaultProvider -Location "<region>"
+        List:   (Get-AzAttestationDefaultProvider).Value | Sort-Object Location | Format-Table Location, AttestUri
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Location
+    )
+    
+    # Shared MAA endpoint mappings: region name → "shared<code>.<code>"
+    # Verified via: (Get-AzAttestationDefaultProvider).Value | Sort-Object Location | Format-Table Location, AttestUri
+    $maaEndpoints = @{
+        # US regions
+        "eastus"             = "sharedeus.eus"
+        "eastus2"            = "sharedeus2.eus2"
+        "westus"             = "sharedwus.wus"
+        "westus2"            = "sharedwus2.wus2"
+        "westus3"            = "sharedwus3.wus3"
+        "centralus"          = "sharedcus.cus"
+        "northcentralus"     = "sharedncus.ncus"
+        "southcentralus"     = "sharedscus.scus"
+        "westcentralus"      = "sharedwcus.wcus"
+        # Canada
+        "canadacentral"      = "sharedcac.cac"
+        "canadaeast"         = "sharedcae.cae"
+        # Europe
+        "northeurope"        = "sharedneu.neu"
+        "westeurope"         = "sharedweu.weu"
+        "uksouth"            = "shareduks.uks"
+        "ukwest"             = "sharedukw.ukw"
+        "francecentral"      = "sharedfrc.frc"
+        "francesouth"        = "sharedfrs.frs"
+        "germanywestcentral" = "shareddewc.dewc"
+        "germanynorth"       = "sharedden.den"
+        "switzerlandnorth"   = "sharedswn.swn"
+        "switzerlandwest"    = "sharedsww.sww"
+        "swedencentral"      = "sharedsec.sec"
+        "swedensouth"        = "sharedses.ses"
+        "norwayeast"         = "sharednoe.noe"
+        "norwaywest"         = "sharednow.now"
+        "polandcentral"      = "sharedplc.plc"
+        "italynorth"         = "shareditn.itn"
+        "spaincentral"       = "sharedesc.esc"
+        # Asia Pacific
+        "eastasia"           = "sharedeasia.easia"
+        "southeastasia"      = "sharedsasia.sasia"
+        "japaneast"          = "sharedjpe.jpe"
+        "japanwest"          = "sharedjpw.jpw"
+        "koreacentral"       = "sharedkrc.krc"
+        "koreasouth"         = "sharedkrs.krs"
+        "australiaeast"      = "sharedeau.eau"
+        "australiasoutheast" = "sharedsau.sau"
+        "australiacentral"   = "sharedcau.cau"
+        "centralindia"       = "sharedcin.cin"
+        "southindia"         = "sharedsin.sin"
+        "westindia"          = "sharedwin.win"
+        # Middle East & Africa
+        "uaenorth"           = "shareduaen.uaen"
+        "uaecentral"         = "shareduaec.uaec"
+        "israelcentral"      = "sharedilc.ilc"
+        "southafricanorth"   = "sharedsan.san"
+        "southafricawest"    = "sharedsaw.saw"
+        # South America
+        "brazilsouth"        = "sharedsbr.sbr"
+        "brazilsoutheast"    = "sharedsebr.sebr"
+    }
+    
+    $regionKey = $Location.ToLower()
+    $prefix = $maaEndpoints[$regionKey]
+    
+    if (-not $prefix) {
+        Write-Host ""
+        Write-Host "ERROR: No known shared MAA endpoint for region '$Location'" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Regions with known shared MAA endpoints:" -ForegroundColor Yellow
+        $maaEndpoints.Keys | Sort-Object | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+        Write-Host ""
+        Write-Host "To look up the MAA endpoint for your region, run:" -ForegroundColor Cyan
+        Write-Host "  Get-AzAttestationDefaultProvider -Location '$Location' | Format-Table AttestUri" -ForegroundColor White
+        Write-Host ""
+        throw "No shared MAA endpoint available for region '$Location'. Use -Location with a supported region."
+    }
+    
+    $endpoint = "$prefix.attest.azure.net"
+    Write-Host "MAA Endpoint for $($Location): $endpoint" -ForegroundColor Cyan
+    return $endpoint
+}
+
+function Get-Config {
+    if (Test-Path "acr-config.json") {
+        return Get-Content "acr-config.json" | ConvertFrom-Json
+    }
+    return $null
+}
+
+function Save-Config {
+    param($Config)
+    $Config | ConvertTo-Json | Out-File -FilePath "acr-config.json" -Encoding UTF8
+}
+
+function Test-Prerequisites {
+    <#
+    .SYNOPSIS
+        Validate that all required tools and dependencies are installed before running.
+    #>
+    Write-Header "Checking Prerequisites"
+    
+    $missing = @()
+    $warnings = @()
+    
+    # --- Azure CLI ---
+    $azCmd = Get-Command az -ErrorAction SilentlyContinue
+    if ($azCmd) {
+        $azVersion = (az version 2>$null | ConvertFrom-Json).'azure-cli'
+        Write-Success "  Azure CLI $azVersion"
+    } else {
+        $missing += @{
+            Name = "Azure CLI (az)"
+            Reason = "Required for all Azure resource operations"
+            Install = "winget install Microsoft.AzureCLI"
+            Link = "https://learn.microsoft.com/cli/azure/install-azure-cli"
+        }
+    }
+    
+    # --- Azure CLI confcom extension ---
+    if ($azCmd) {
+        $confcomInstalled = az extension list --query "[?name=='confcom'].name" -o tsv 2>$null
+        if ($confcomInstalled) {
+            $confcomVersion = az extension list --query "[?name=='confcom'].version" -o tsv 2>$null
+            Write-Success "  az confcom extension $confcomVersion"
+        } else {
+            $missing += @{
+                Name = "Azure CLI confcom extension"
+                Reason = "Required for generating confidential computing security policies (ccePolicy)"
+                Install = "az extension add --name confcom"
+                Link = "https://learn.microsoft.com/cli/azure/extension"
+            }
+        }
+    }
+    
+    # --- Azure CLI login ---
+    if ($azCmd) {
+        $account = az account show 2>$null | ConvertFrom-Json
+        if ($account) {
+            Write-Success "  Azure CLI logged in ($($account.user.name))"
+        } else {
+            $missing += @{
+                Name = "Azure CLI login"
+                Reason = "You must be logged in to your Azure subscription"
+                Install = "az login"
+                Link = "https://learn.microsoft.com/cli/azure/authenticate-azure-cli"
+            }
+        }
+    }
+    
+    # --- Docker ---
+    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+    if ($dockerCmd) {
+        $dockerVersion = docker --version 2>$null
+        if ($dockerVersion) {
+            Write-Success "  Docker ($dockerVersion)"
+        } else {
+            Write-Success "  Docker (installed)"
+        }
+    } else {
+        $missing += @{
+            Name = "Docker Desktop"
+            Reason = "Required by 'az confcom' for security policy generation"
+            Install = "winget install Docker.DockerDesktop"
+            Link = "https://docs.docker.com/desktop/install/windows-install/"
+        }
+    }
+    
+    # --- Microsoft Edge (optional) ---
+    $edgePath = "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+    $edgePathX86 = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+    if ((Test-Path $edgePath) -or (Test-Path $edgePathX86) -or (Get-Command msedge -ErrorAction SilentlyContinue)) {
+        Write-Success "  Microsoft Edge (found)"
+    } else {
+        $warnings += @{
+            Name = "Microsoft Edge"
+            Reason = "Used to open demo tabs after deployment (use -SkipBrowser to skip)"
+            Link = "https://www.microsoft.com/edge"
+        }
+    }
+    
+    # --- Report warnings ---
+    foreach ($warn in $warnings) {
+        Write-Host "  [WARN] $($warn.Name) - not found" -ForegroundColor Yellow
+        Write-Host "         $($warn.Reason)" -ForegroundColor Gray
+        Write-Host "         Download: $($warn.Link)" -ForegroundColor Gray
+    }
+    
+    # --- Report missing critical dependencies ---
+    if ($missing.Count -gt 0) {
+        Write-Host ""
+        Write-Host "ERROR: $($missing.Count) required dependency/dependencies not found." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "The following must be installed before running this script:" -ForegroundColor Yellow
+        Write-Host ""
+        foreach ($dep in $missing) {
+            Write-Host "  $($dep.Name)" -ForegroundColor Red
+            Write-Host "    Why:     $($dep.Reason)" -ForegroundColor Gray
+            Write-Host "    Install: $($dep.Install)" -ForegroundColor Cyan
+            Write-Host "    Docs:    $($dep.Link)" -ForegroundColor Gray
+            Write-Host ""
+        }
+        exit 1
+    }
+    
+    Write-Host ""
+    Write-Success "All prerequisites satisfied."
+    Write-Host ""
+}
+
+# ============================================================================
+# Build Phase
+# ============================================================================
+
+function Invoke-Build {
+    param([string]$RegistryName)
+    
+    Write-Header "Building Container Image"
+    
+    # Generate registry name if not provided
+    if (-not $RegistryName) {
+        $random = -join ((97..122) | Get-Random -Count 8 | ForEach-Object {[char]$_})
+        $RegistryName = "acr$random"
+        Write-Warning "No registry name provided. Using: $RegistryName"
+    }
+    
+    $ResourceGroup = "${Prefix}${RegistryName}-rg"
+    $KeyVaultName = "kv$RegistryName"
+    
+    Write-Host "Registry Name: $RegistryName"
+    Write-Host "Resource Group: $ResourceGroup"
+    Write-Host "Location: $Location"
+    Write-Host "Image: ${ImageName}:${ImageTag}"
+    Write-Host ""
+    
+    # Create resource group
+    Write-Host "Creating resource group..." -ForegroundColor Green
+    az group create --name $ResourceGroup --location $Location | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create resource group"
+    }
+    
+    # Create Azure Container Registry
+    Write-Host "Creating Azure Container Registry..." -ForegroundColor Green
+    az acr create `
+        --resource-group $ResourceGroup `
+        --name $RegistryName `
+        --sku Basic `
+        --admin-enabled true | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create ACR"
+    }
+    
+    $MaaEndpoint = Get-SharedMaaEndpoint -Location $Location
+    
+    # Create release policy JSON for confidential containers
+    $releasePolicy = @{
+        version = "1.0.0"
+        anyOf = @(
+            @{
+                authority = "https://$MaaEndpoint"
+                allOf = @(
+                    @{
+                        claim = "x-ms-attestation-type"
+                        equals = "sevsnpvm"
+                    }
+                )
+            }
+        )
+    }
+    $releasePolicyPath = Join-Path $PSScriptRoot "skr-release-policy.json"
+    $releasePolicy | ConvertTo-Json -Depth 10 | Out-File -FilePath $releasePolicyPath -Encoding UTF8
+    
+    # ========== Create All Key Vaults and Identities in Parallel ==========
+    Write-Header "Creating Resources for All Companies (Parallel)"
+    
+    $KeyVaultNameA = "kv${RegistryName}a"
+    $IdentityNameA = "id-${RegistryName}-contoso"
+    $SkrKeyNameA = "contoso-secret-key"
+    
+    $KeyVaultNameB = "kv${RegistryName}b"
+    $IdentityNameB = "id-${RegistryName}-fabrikam"
+    $SkrKeyNameB = "fabrikam-secret-key"
+    
+    Write-Host "Creating 2 Key Vaults and 2 Managed Identities in parallel..." -ForegroundColor Green
+    Write-Host "  Key Vaults: $KeyVaultNameA, $KeyVaultNameB" -ForegroundColor Gray
+    Write-Host "  Identities: $IdentityNameA, $IdentityNameB" -ForegroundColor Gray
+    Write-Host ""
+    
+    # Launch all 4 resource creations in parallel (2 KVs + 2 identities)
+    $kvJobA = Start-Job -ScriptBlock { az keyvault create --resource-group $using:ResourceGroup --name $using:KeyVaultNameA --location $using:Location --sku premium --enable-rbac-authorization false 2>&1 }
+    $kvJobB = Start-Job -ScriptBlock { az keyvault create --resource-group $using:ResourceGroup --name $using:KeyVaultNameB --location $using:Location --sku premium --enable-rbac-authorization false 2>&1 }
+    $idJobA = Start-Job -ScriptBlock { az identity create --resource-group $using:ResourceGroup --name $using:IdentityNameA 2>&1 }
+    $idJobB = Start-Job -ScriptBlock { az identity create --resource-group $using:ResourceGroup --name $using:IdentityNameB 2>&1 }
+    
+    # Wait for all to complete
+    $allJobs = @($kvJobA, $kvJobB, $idJobA, $idJobB)
+    $null = Wait-Job -Job $allJobs
+    
+    foreach ($j in @($kvJobA, $kvJobB)) {
+        $result = Receive-Job -Job $j
+        if ($j.State -eq 'Failed') { Write-Warning "Key Vault creation had issues: $result" }
+    }
+    Remove-Job -Job $allJobs -Force
+    Write-Success "All Key Vaults and Identities created"
+    
+    # Retrieve identity details (single call per identity using JSON output)
+    Write-Host "Retrieving identity details..." -ForegroundColor Green
+    $idInfoA = az identity show --resource-group $ResourceGroup --name $IdentityNameA -o json 2>$null | ConvertFrom-Json
+    $idInfoB = az identity show --resource-group $ResourceGroup --name $IdentityNameB -o json 2>$null | ConvertFrom-Json
+    
+    $IdentityClientIdA = $idInfoA.clientId
+    $IdentityResourceIdA = $idInfoA.id
+    $IdentityPrincipalIdA = $idInfoA.principalId
+    
+    $IdentityClientIdB = $idInfoB.clientId
+    $IdentityResourceIdB = $idInfoB.id
+    $IdentityPrincipalIdB = $idInfoB.principalId
+    
+    # Grant Key Vault access policies and create keys in parallel
+    Write-Host "Granting Key Vault access policies and creating SKR keys in parallel..." -ForegroundColor Green
+    
+    # Set policies first (fast), then create keys (these need the policies set)
+    $policyJobA = Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameA --object-id $using:IdentityPrincipalIdA --key-permissions get release 2>&1 }
+    $policyJobB = Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameB --object-id $using:IdentityPrincipalIdB --key-permissions get release 2>&1 }
+    $null = Wait-Job -Job @($policyJobA, $policyJobB)
+    Remove-Job -Job @($policyJobA, $policyJobB) -Force
+    
+    # Create both keys in parallel
+    $rpPath = $releasePolicyPath
+    $keyJobA = Start-Job -ScriptBlock { az keyvault key create --vault-name $using:KeyVaultNameA --name $using:SkrKeyNameA --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true --policy $using:rpPath 2>&1 }
+    $keyJobB = Start-Job -ScriptBlock { az keyvault key create --vault-name $using:KeyVaultNameB --name $using:SkrKeyNameB --kty RSA-HSM --size 2048 --ops wrapKey unwrapKey encrypt decrypt --exportable true --policy $using:rpPath 2>&1 }
+    $null = Wait-Job -Job @($keyJobA, $keyJobB)
+    Remove-Job -Job @($keyJobA, $keyJobB) -Force
+    
+    Write-Success "Contoso: Key Vault '$KeyVaultNameA' with key '$SkrKeyNameA' created"
+    Write-Success "Fabrikam: Key Vault '$KeyVaultNameB' with key '$SkrKeyNameB' created"
+    
+    # Clean up temporary policy file
+    if (Test-Path $releasePolicyPath) {
+        Remove-Item $releasePolicyPath -Force
+    }
+    
+    # Store ACR credentials in Contoso's Key Vault (for retrieval during deploy)
+    $KeyVaultName = $KeyVaultNameA
+    
+    # Build and push image
+    Write-Host "Building and pushing container image..." -ForegroundColor Green
+    Write-Host "This may take a few minutes..."
+    
+    $buildResult = az acr build `
+        --registry $RegistryName `
+        --image "${ImageName}:${ImageTag}" `
+        --file Dockerfile `
+        --no-logs `
+        . 2>&1
+    
+    if ($LASTEXITCODE -ne 0) {
+        $imageExists = az acr repository show --name $RegistryName --image "${ImageName}:${ImageTag}" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host $buildResult
+            throw "Failed to build and push image"
+        }
+    }
+    
+    Write-Success "Container image built and pushed successfully"
+    
+    # Get ACR credentials (single calls instead of multiple queries)
+    Write-Host "Retrieving ACR credentials..." -ForegroundColor Green
+    $acrCreds = az acr credential show --name $RegistryName -o json 2>$null | ConvertFrom-Json
+    $acrUsername = $acrCreds.username
+    $acrPassword = $acrCreds.passwords[0].value
+    $loginServer = az acr show --name $RegistryName --query loginServer -o tsv
+    
+    # Store credentials in Key Vault
+    Write-Host "Storing credentials in Key Vault..." -ForegroundColor Green
+    az keyvault secret set --vault-name $KeyVaultName --name "acr-username" --value $acrUsername --only-show-errors | Out-Null
+    az keyvault secret set --vault-name $KeyVaultName --name "acr-password" --value $acrPassword --only-show-errors | Out-Null
+    
+    # Save configuration with both companies
+    $config = @{
+        registryName = $RegistryName
+        resourceGroup = $ResourceGroup
+        loginServer = $loginServer
+        imageName = $ImageName
+        imageTag = $ImageTag
+        fullImage = "$loginServer/${ImageName}:${ImageTag}"
+        keyVaultName = $KeyVaultNameA
+        skrMaaEndpoint = $MaaEndpoint
+        # Contoso configuration
+        companyA = @{
+            keyVaultName = $KeyVaultNameA
+            skrKeyName = $SkrKeyNameA
+            skrAkvEndpoint = "$KeyVaultNameA.vault.azure.net"
+            identityName = $IdentityNameA
+            identityResourceId = $IdentityResourceIdA
+            identityClientId = $IdentityClientIdA
+        }
+        # Fabrikam configuration
+        companyB = @{
+            keyVaultName = $KeyVaultNameB
+            skrKeyName = $SkrKeyNameB
+            skrAkvEndpoint = "$KeyVaultNameB.vault.azure.net"
+            identityName = $IdentityNameB
+            identityResourceId = $IdentityResourceIdB
+            identityClientId = $IdentityClientIdB
+        }
+    }
+    Save-Config $config
+    
+    Write-Header "Build Complete"
+    Write-Host "Registry: $loginServer"
+    Write-Host "Image: $loginServer/${ImageName}:${ImageTag}"
+    Write-Host ""
+    Write-Host "Contoso Resources:" -ForegroundColor Green
+    Write-Host "  Key Vault: $KeyVaultNameA"
+    Write-Host "  SKR Key: $SkrKeyNameA"
+    Write-Host "  Identity: $IdentityNameA"
+    Write-Host ""
+    Write-Host "Fabrikam Resources:" -ForegroundColor Green
+    Write-Host "  Key Vault: $KeyVaultNameB"
+    Write-Host "  SKR Key: $SkrKeyNameB"
+    Write-Host "  Identity: $IdentityNameB"
+    Write-Host ""
+    Write-Host "MAA Endpoint: $MaaEndpoint"
+    Write-Host ""
+    Write-Success "Credentials stored securely in Azure Key Vault"
+    Write-Host "Configuration saved to acr-config.json"
+    
+    return $config
+}
+
+# ============================================================================
+# Deploy Phase - Multi-Party (Contoso, Fabrikam, snooper)
+# ============================================================================
+
+function Invoke-Deploy {
+    param([switch]$SkipBrowser)
+    
+    Write-Header "Deploying Multi-Party Demonstration"
+    Write-Host "This will deploy 3 containers:" -ForegroundColor Yellow
+    Write-Host "  - Contoso:   Confidential (AMD SEV-SNP TEE)" -ForegroundColor Green
+    Write-Host "  - Fabrikam:  Confidential (AMD SEV-SNP TEE)" -ForegroundColor Green
+    Write-Host "  - snooper:    Standard (No TEE - cannot attest)" -ForegroundColor Red
+    Write-Host ""
+    
+    $config = Get-Config
+    if (-not $config) {
+        throw "acr-config.json not found. Run with -Build first."
+    }
+    
+    $resource_group = $config.resourceGroup
+    $ACR_LOGIN_SERVER = $config.loginServer
+    $FULL_IMAGE = $config.fullImage
+    $KeyVaultName = $config.keyVaultName
+    
+    # Get ACR credentials from Key Vault
+    Write-Host "Retrieving ACR credentials from Key Vault..."
+    $ACR_USERNAME = az keyvault secret show --vault-name $KeyVaultName --name "acr-username" --query "value" -o tsv
+    $ACR_PASSWORD = az keyvault secret show --vault-name $KeyVaultName --name "acr-password" --query "value" -o tsv
+    
+    if (-not $ACR_USERNAME -or -not $ACR_PASSWORD) {
+        throw "Failed to retrieve ACR credentials from Key Vault"
+    }
+    Write-Success "Credentials retrieved successfully"
+    Write-Host ""
+    
+    # Use storage connection string validated at script startup
+    $StorageConnectionString = $script:StorageConnectionString
+    
+    # Generate unique names for all containers
+    $timestamp = Get-Date -Format "MMddHHmm"
+    $container_companyA = "aci-contoso-$timestamp"
+    $container_companyB = "aci-fabrikam-$timestamp"
+    $container_snooper = "aci-snooper-$timestamp"
+    $dns_companyA = "contoso-$timestamp"
+    $dns_companyB = "fabrikam-$timestamp"
+    $dns_snooper = "snooper-$timestamp"
+    
+    Write-Host "Container Names:"
+    Write-Host "  Contoso:   $container_companyA"
+    Write-Host "  Fabrikam:  $container_companyB"
+    Write-Host "  snooper:   $container_snooper"
+    Write-Host ""
+    
+    # Check Docker for confidential deployments
+    Write-Host "Checking if Docker is running (required for Confidential SKU)..."
+    $dockerInfo = docker info 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Docker is not running. Required for security policy generation. Start Docker Desktop."
+    }
+    Write-Success "Docker is running"
+    Write-Host ""
+    
+    # Login to ACR
+    Write-Host "Logging into Azure Container Registry..."
+    az acr login --name $ACR_LOGIN_SERVER --username $ACR_USERNAME --password $ACR_PASSWORD 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        docker login $ACR_LOGIN_SERVER -u $ACR_USERNAME -p $ACR_PASSWORD 2>&1 | Out-Null
+    }
+    Write-Success "ACR login complete"
+    Write-Host ""
+    
+    # ========== Deploy Contoso (Confidential) ==========
+    Write-Header "Generating Security Policies"
+    
+    # Use Contoso's specific SKR configuration
+    $companyAConfig = $config.companyA
+    Write-Host "Using Contoso's Key Vault: $($companyAConfig.keyVaultName)" -ForegroundColor Cyan
+    Write-Host "Using Contoso's SKR Key: $($companyAConfig.skrKeyName)" -ForegroundColor Cyan
+    
+    $params_companyA = @{
+        '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+        'contentVersion' = '1.0.0.0'
+        'parameters' = @{
+            'containerGroupName' = @{ 'value' = $container_companyA }
+            'location' = @{ 'value' = $Location }
+            'appImage' = @{ 'value' = $FULL_IMAGE }
+            'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
+            'registryUsername' = @{ 'value' = $ACR_USERNAME }
+            'registryPassword' = @{ 'value' = $ACR_PASSWORD }
+            'dnsNameLabel' = @{ 'value' = $dns_companyA }
+            'skrKeyName' = @{ 'value' = $companyAConfig.skrKeyName }
+            'skrMaaEndpoint' = @{ 'value' = $config.skrMaaEndpoint }
+            'skrAkvEndpoint' = @{ 'value' = $companyAConfig.skrAkvEndpoint }
+            'identityResourceId' = @{ 'value' = $companyAConfig.identityResourceId }
+            'storageConnectionString' = @{ 'value' = $StorageConnectionString }
+            'resourceGroupName' = @{ 'value' = $resource_group }
+        }
+    }
+    $params_companyA | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-contoso.json'
+    
+    Copy-Item -Path "deployment-template-original.json" -Destination "deployment-template-contoso.json" -Force
+    
+    Write-Host "Generating security policy for Contoso..." -ForegroundColor Green
+    az confcom acipolicygen -a deployment-template-contoso.json --parameters deployment-params-contoso.json --disable-stdio
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to generate security policy for Contoso"
+    }
+    Write-Success "Security policy generated for Contoso"
+    
+    # ========== Prepare Fabrikam (Confidential) ==========
+    
+    # Use Fabrikam's specific SKR configuration
+    $companyBConfig = $config.companyB
+    Write-Host "Using Fabrikam's Key Vault: $($companyBConfig.keyVaultName)" -ForegroundColor Cyan
+    Write-Host "Using Fabrikam's SKR Key: $($companyBConfig.skrKeyName)" -ForegroundColor Cyan
+    
+    $params_companyB = @{
+        '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+        'contentVersion' = '1.0.0.0'
+        'parameters' = @{
+            'containerGroupName' = @{ 'value' = $container_companyB }
+            'location' = @{ 'value' = $Location }
+            'appImage' = @{ 'value' = $FULL_IMAGE }
+            'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
+            'registryUsername' = @{ 'value' = $ACR_USERNAME }
+            'registryPassword' = @{ 'value' = $ACR_PASSWORD }
+            'dnsNameLabel' = @{ 'value' = $dns_companyB }
+            'skrKeyName' = @{ 'value' = $companyBConfig.skrKeyName }
+            'skrMaaEndpoint' = @{ 'value' = $config.skrMaaEndpoint }
+            'skrAkvEndpoint' = @{ 'value' = $companyBConfig.skrAkvEndpoint }
+            'identityResourceId' = @{ 'value' = $companyBConfig.identityResourceId }
+            'storageConnectionString' = @{ 'value' = $StorageConnectionString }
+            'resourceGroupName' = @{ 'value' = $resource_group }
+        }
+    }
+    $params_companyB | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-fabrikam.json'
+    
+    Copy-Item -Path "deployment-template-original.json" -Destination "deployment-template-fabrikam.json" -Force
+    
+    Write-Host "Generating security policy for Fabrikam..." -ForegroundColor Green
+    az confcom acipolicygen -a deployment-template-fabrikam.json --parameters deployment-params-fabrikam.json --disable-stdio
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to generate security policy for Fabrikam"
+    }
+    Write-Success "Security policy generated for Fabrikam"
+    
+    # ========== Prepare snooper (Standard - No TEE) ==========
+    
+    # Snooper uses Contoso's config but won't be able to release keys (no TEE)
+    Write-Host "Snooper will try to access Contoso's key but will FAIL (no TEE)" -ForegroundColor Yellow
+    
+    $params_snooper = @{
+        '`$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+        'contentVersion' = '1.0.0.0'
+        'parameters' = @{
+            'containerGroupName' = @{ 'value' = $container_snooper }
+            'location' = @{ 'value' = $Location }
+            'appImage' = @{ 'value' = $FULL_IMAGE }
+            'registryServer' = @{ 'value' = $ACR_LOGIN_SERVER }
+            'registryUsername' = @{ 'value' = $ACR_USERNAME }
+            'registryPassword' = @{ 'value' = $ACR_PASSWORD }
+            'dnsNameLabel' = @{ 'value' = $dns_snooper }
+            'skrKeyName' = @{ 'value' = $companyAConfig.skrKeyName }
+            'skrMaaEndpoint' = @{ 'value' = $config.skrMaaEndpoint }
+            'skrAkvEndpoint' = @{ 'value' = $companyAConfig.skrAkvEndpoint }
+            'identityResourceId' = @{ 'value' = $companyAConfig.identityResourceId }
+            'storageConnectionString' = @{ 'value' = $StorageConnectionString }
+            'resourceGroupName' = @{ 'value' = $resource_group }
+        }
+    }
+    $params_snooper | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-snooper.json'
+    
+    # Use standard template (no security policy, no confidential SKU)
+    Copy-Item -Path "deployment-template-standard.json" -Destination "deployment-template-snooper.json" -Force
+    
+    # ========== Deploy All 3 Containers in Parallel ==========
+    Write-Header "Deploying All 3 Containers in Parallel"
+    Write-Host "This saves several minutes compared to sequential deployment" -ForegroundColor Gray
+    Write-Host ""
+    
+    $scriptRoot = $PSScriptRoot
+    $deployJobA = Start-Job -ScriptBlock {
+        Set-Location $using:scriptRoot
+        az deployment group create --resource-group $using:resource_group --template-file deployment-template-contoso.json --parameters '@deployment-params-contoso.json' 2>&1
+    }
+    $deployJobB = Start-Job -ScriptBlock {
+        Set-Location $using:scriptRoot
+        az deployment group create --resource-group $using:resource_group --template-file deployment-template-fabrikam.json --parameters '@deployment-params-fabrikam.json' 2>&1
+    }
+    $deployJobS = Start-Job -ScriptBlock {
+        Set-Location $using:scriptRoot
+        az deployment group create --resource-group $using:resource_group --template-file deployment-template-snooper.json --parameters '@deployment-params-snooper.json' 2>&1
+    }
+    
+    # Wait for all deployments with progress updates
+    $deployJobs = @(
+        @{ Job = $deployJobA; Name = "Contoso" },
+        @{ Job = $deployJobB; Name = "Fabrikam" },
+        @{ Job = $deployJobS; Name = "snooper" }
+    )
+    
+    $allDone = $false
+    while (-not $allDone) {
+        $allDone = $true
+        foreach ($d in $deployJobs) {
+            if ($d.Job.State -eq 'Running') {
+                $allDone = $false
+            } elseif ($d.Job.State -eq 'Completed' -and -not $d.ContainsKey('Reported')) {
+                Write-Success "$($d.Name) container deployed!"
+                $d['Reported'] = $true
+            }
+        }
+        if (-not $allDone) { Start-Sleep -Seconds 3 }
+    }
+    
+    # Verify all succeeded
+    foreach ($d in $deployJobs) {
+        $result = Receive-Job -Job $d.Job
+        if ($d.Job.State -eq 'Failed') {
+            Write-Host $result -ForegroundColor Red
+            throw "Failed to deploy $($d.Name) container"
+        }
+    }
+    Remove-Job -Job @($deployJobA, $deployJobB, $deployJobS) -Force
+    Write-Success "All 3 containers deployed!"
+    
+    # ========== Wait for All Containers ==========
+    Write-Header "Waiting for All Containers to Start"
+    
+    $fqdn_companyA = az container show --resource-group $resource_group --name $container_companyA --query "ipAddress.fqdn" --output tsv
+    $fqdn_companyB = az container show --resource-group $resource_group --name $container_companyB --query "ipAddress.fqdn" --output tsv
+    $fqdn_snooper = az container show --resource-group $resource_group --name $container_snooper --query "ipAddress.fqdn" --output tsv
+    
+    Write-Host "FQDNs:"
+    Write-Host "  Contoso:   http://$fqdn_companyA" -ForegroundColor Green
+    Write-Host "  Fabrikam:  http://$fqdn_companyB" -ForegroundColor Green
+    Write-Host "  snooper:   http://$fqdn_snooper" -ForegroundColor Red
+    Write-Host ""
+    
+    $timeout_seconds = 240
+    $elapsed_seconds = 0
+    $companyA_ready = $false
+    $companyB_ready = $false
+    $snooper_ready = $false
+    
+    while ($elapsed_seconds -lt $timeout_seconds -and (-not $companyA_ready -or -not $companyB_ready -or -not $snooper_ready)) {
+        if (-not $companyA_ready) {
+            try {
+                $response = Invoke-WebRequest -Uri "http://$fqdn_companyA" -Method Head -TimeoutSec 5 -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) { 
+                    $companyA_ready = $true
+                    Write-Success "Contoso is ready!"
+                }
+            } catch { }
+        }
+        
+        if (-not $companyB_ready) {
+            try {
+                $response = Invoke-WebRequest -Uri "http://$fqdn_companyB" -Method Head -TimeoutSec 5 -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) { 
+                    $companyB_ready = $true
+                    Write-Success "Fabrikam is ready!"
+                }
+            } catch { }
+        }
+        
+        if (-not $snooper_ready) {
+            try {
+                $response = Invoke-WebRequest -Uri "http://$fqdn_snooper" -Method Head -TimeoutSec 5 -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) { 
+                    $snooper_ready = $true
+                    Write-Success "snooper is ready!"
+                }
+            } catch { }
+        }
+        
+        if (-not $companyA_ready -or -not $companyB_ready -or -not $snooper_ready) {
+            $status = "Waiting... ($elapsed_seconds/$timeout_seconds sec) - "
+            $status += "A: $(if ($companyA_ready) { 'Ready' } else { '...' }), "
+            $status += "B: $(if ($companyB_ready) { 'Ready' } else { '...' }), "
+            $status += "Snooper: $(if ($snooper_ready) { 'Ready' } else { '...' })"
+            Write-Host $status
+            Start-Sleep -Seconds 5
+            $elapsed_seconds += 5
+        }
+    }
+    
+    if (-not $companyA_ready -or -not $companyB_ready -or -not $snooper_ready) {
+        Write-Warning "Some containers did not start in time"
+        if (-not $companyA_ready) { Write-Warning "  - Contoso not ready" }
+        if (-not $companyB_ready) { Write-Warning "  - Fabrikam not ready" }
+        if (-not $snooper_ready) { Write-Warning "  - snooper not ready" }
+    }
+    
+    # ========== Open Edge with Multi-Party View ==========
+    Write-Header "Opening Multi-Party Comparison View"
+    
+    # Get key names for display
+    $keyNameA = $companyAConfig.skrKeyName
+    $keyNameB = $companyBConfig.skrKeyName
+    $kvNameA = $companyAConfig.keyVaultName
+    $kvNameB = $companyBConfig.keyVaultName
+    
+    # Create a local HTML file with iframes for multi-party view
+    $multiPartyHtml = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Multi-Party Confidential Computing Demo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { display: flex; flex-direction: column; height: 100vh; font-family: 'Segoe UI', sans-serif; background: #1a1a2e; }
+        .header { 
+            background: #1a1a2e; 
+            color: white; 
+            padding: 8px 20px;
+            text-align: center;
+            border-bottom: 2px solid #333;
+        }
+        .header h1 { font-size: 18px; font-weight: 500; margin-bottom: 4px; }
+        .header p { font-size: 12px; color: #888; }
+        .top-row { display: flex; flex: 1; }
+        .bottom-row { flex: 1; display: flex; flex-direction: column; }
+        .pane { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column;
+            border: 2px solid #333;
+        }
+        .label { 
+            padding: 8px 12px; 
+            font-weight: bold;
+            font-size: 13px;
+            text-align: center;
+        }
+        .label.confidential { background: #28a745; color: white; }
+        .label.standard { background: #dc3545; color: white; }
+        .label .subtitle { font-size: 10px; font-weight: normal; opacity: 0.9; }
+        .label .key-name { font-size: 11px; font-family: monospace; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 3px; margin-top: 4px; display: inline-block; }
+        iframe { flex: 1; width: 100%; border: none; background: white; }
+        .divider-v { width: 2px; background: #1a1a2e; }
+        .divider-h { height: 2px; background: #1a1a2e; }
+        .legend {
+            background: #252545;
+            padding: 8px 20px;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            font-size: 11px;
+            color: #ccc;
+        }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .legend-dot.green { background: #28a745; }
+        .legend-dot.red { background: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔐 Multi-Party Confidential Computing Demonstration</h1>
+        <p>Each company has their own Key Vault and SKR key - only their confidential container can release it</p>
+    </div>
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-dot green"></div>
+            <span>Confidential containers can attest and release their own cryptographic keys</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot red"></div>
+            <span>Standard containers cannot attest - key release will fail</span>
+        </div>
+    </div>
+    <div class="top-row">
+        <div class="pane">
+            <div class="label confidential">
+                ✅ CONTOSO (Confidential)
+                <div class="subtitle">AMD SEV-SNP TEE • Key Vault: $kvNameA</div>
+                <div class="key-name">🔑 $keyNameA</div>
+            </div>
+            <iframe src="http://$fqdn_companyA" title="Contoso - Confidential Container"></iframe>
+        </div>
+        <div class="divider-v"></div>
+        <div class="pane">
+            <div class="label confidential">
+                ✅ FABRIKAM (Confidential)
+                <div class="subtitle">AMD SEV-SNP TEE • Key Vault: $kvNameB</div>
+                <div class="key-name">🔑 $keyNameB</div>
+            </div>
+            <iframe src="http://$fqdn_companyB" title="Fabrikam - Confidential Container"></iframe>
+        </div>
+    </div>
+    <div class="divider-h"></div>
+    <div class="bottom-row">
+        <div class="pane">
+            <div class="label standard">
+                ❌ SNOOPER (Standard - No Hardware Protection)
+                <div class="subtitle">No TEE • Cannot attest • Tries to access: $kvNameA</div>
+                <div class="key-name" style="background: rgba(0,0,0,0.2);">🔒 $keyNameA (ACCESS DENIED)</div>
+            </div>
+            <iframe src="http://$fqdn_snooper" title="Snooper - Standard Container (No TEE)"></iframe>
+        </div>
+    </div>
+</body>
+</html>
+"@
+    
+    $multiPartyHtmlPath = Join-Path $PSScriptRoot "multiparty-view.html"
+    $multiPartyHtml | Out-File -FilePath $multiPartyHtmlPath -Encoding UTF8
+    
+    if (-not $SkipBrowser) {
+        # Open the multi-party view HTML in Edge
+        Start-Process "msedge" -ArgumentList "--new-window `"file:///$($multiPartyHtmlPath.Replace('\', '/'))`"" -Wait
+    } else {
+        Write-Host "Browser skipped. Open manually:"
+        Write-Host "  file:///$($multiPartyHtmlPath.Replace('\', '/'))"
+    }
+    
+    # Cleanup prompt
+    Write-Host ""
+    Write-Host "Press Enter when done viewing to cleanup containers..." -ForegroundColor Yellow
+    Read-Host
+    
+    Write-Header "Cleanup Multi-Party Containers"
+    
+    Write-Host "Deleting all containers..."
+    az container delete --resource-group $resource_group --name $container_companyA --yes 2>&1 | Out-Null
+    az container delete --resource-group $resource_group --name $container_companyB --yes 2>&1 | Out-Null
+    az container delete --resource-group $resource_group --name $container_snooper --yes 2>&1 | Out-Null
+    
+    # Cleanup temp files
+    Remove-Item -Path "deployment-params-contoso.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "deployment-params-fabrikam.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "deployment-params-snooper.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "deployment-template-contoso.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "deployment-template-fabrikam.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "deployment-template-snooper.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "multiparty-view.html" -Force -ErrorAction SilentlyContinue
+    
+    Write-Success "All containers deleted. ACR and Key Vault preserved."
+    Write-Host "Run -Cleanup to delete all resources including ACR and Key Vault."
+}
+
+# ============================================================================
+# Cleanup Phase
+# ============================================================================
+
+function Invoke-Cleanup {
+    param([switch]$Confirm)
+    
+    $config = Get-Config
+    if (-not $config) {
+        Write-Warning "No acr-config.json found. Nothing to clean up."
+        return
+    }
+    
+    $resource_group = $config.resourceGroup
+    
+    Write-Header "Cleanup Resources"
+    Write-Warning "This will delete the ENTIRE resource group: $resource_group"
+    Write-Host "Including:"
+    Write-Host "  - Azure Container Registry: $($config.registryName)"
+    if ($config.companyA) {
+        Write-Host "  - Contoso Key Vault: $($config.companyA.keyVaultName)"
+    }
+    if ($config.companyB) {
+        Write-Host "  - Fabrikam Key Vault: $($config.companyB.keyVaultName)"
+    }
+    Write-Host "  - All container instances and managed identities"
+    Write-Host "  - Consolidated records from blob storage"
+    Write-Host ""
+    
+    if (-not $Confirm) {
+        $response = Read-Host "Type 'yes' to confirm deletion"
+        if ($response -ne 'yes') {
+            Write-Warning "Cleanup cancelled."
+            return
+        }
+    }
+    
+    # Delete consolidated-records blob from blob storage (unique per resource group)
+    Write-Host ""
+    Write-Host "Cleaning up blob storage..."
+    
+    # Construct the blob name that matches the deployment
+    $blobName = "consolidated-records-$resource_group.json"
+    
+    # Use storage connection string validated at script startup
+    $connectionString = $script:StorageConnectionString
+    if ($connectionString) {
+        # Delete consolidated records blob from external storage
+        Write-Host "  Deleting $blobName..."
+        $deleteResult = az storage blob delete `
+            --name $blobName `
+            --container-name "privateappdata" `
+            --connection-string $connectionString `
+            --only-show-errors 2>&1
+        
+        # Any result is fine - either deleted or didn't exist
+        Write-Host "  Blob cleanup complete" -ForegroundColor Green
+    } else {
+        Write-Warning "No storage connection string available - skipping blob cleanup"
+    }
+    
+    Write-Host ""
+    Write-Host "Deleting resource group: $resource_group"
+    Write-Host "This may take a few minutes..."
+    az group delete --name $resource_group --yes --no-wait
+    
+    # Remove local config
+    if (Test-Path "acr-config.json") {
+        Remove-Item "acr-config.json" -Force
+        Write-Host "Removed acr-config.json"
+    }
+    
+    Write-Host ""
+    Write-Success "Resource group deletion initiated."
+    Write-Host "Deletion is running in the background."
+    Write-Host "Run 'az group show --name $resource_group' to check status."
+}
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+# Show help if no action specified
+if (-not $Build -and -not $Deploy -and -not $Cleanup) {
+    Write-Host ""
+    Write-Host "Multi-Party Confidential Computing Demo" -ForegroundColor Cyan
+    Write-Host "========================================"
+    Write-Host ""
+    Write-Host "This script deploys 3 containers to demonstrate multi-party"
+    Write-Host "confidential computing:"
+    Write-Host ""
+    Write-Host "  Contoso:   Confidential (AMD SEV-SNP) - CAN attest" -ForegroundColor Green
+    Write-Host "  Fabrikam:  Confidential (AMD SEV-SNP) - CAN attest" -ForegroundColor Green
+    Write-Host "  snooper:   Standard (No TEE)         - CANNOT attest" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Usage:" -ForegroundColor Yellow
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix <code> -Build         # Build container image"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix <code> -Deploy        # Deploy all 3 containers"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix <code> -Build -Deploy # Build and deploy"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix <code> -Cleanup       # Delete all resources"
+    Write-Host ""
+    Write-Host "Required Parameter:" -ForegroundColor Yellow
+    Write-Host "  -Prefix <code>  A short, unique identifier (3-8 lowercase alphanumeric chars)"
+    Write-Host "                  to prefix all Azure resources. Use your initials, team code,"
+    Write-Host "                  or project name to easily identify resource ownership."
+    Write-Host "                  Examples: jd01, dev, team42, acme" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  -SkipBrowser    Don't open browser after deployment"
+    Write-Host "  -RegistryName   Custom ACR name (default: random)"
+    Write-Host "  -Location       Azure region (default: eastus)"
+    Write-Host ""
+    
+    $config = Get-Config
+    if ($config) {
+        Write-Host "Current configuration (from acr-config.json):" -ForegroundColor Green
+        Write-Host "  Resource Group: $($config.resourceGroup)"
+        Write-Host "  Registry: $($config.loginServer)"
+        Write-Host "  Image: $($config.fullImage)"
+    } else {
+        Write-Host "No existing configuration. Run with -Prefix <code> -Build to get started." -ForegroundColor Yellow
+    }
+    Write-Host ""
+    exit 0
+}
+
+# Validate Prefix is provided when an action is specified
+if (-not $Prefix) {
+    Write-Host ""
+    Write-Host "ERROR: The -Prefix parameter is required." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Please provide a short, unique identifier (3-8 lowercase alphanumeric characters)" -ForegroundColor Yellow
+    Write-Host "to prefix all Azure resources. This helps identify who owns the resources."
+    Write-Host ""
+    Write-Host "Examples:" -ForegroundColor Cyan
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix jd01 -Build      # Use your initials + number"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix dev -Build       # Use a project code"
+    Write-Host "  .\Deploy-SimpleDemo.ps1 -Prefix team42 -Build    # Use your team identifier"
+    Write-Host ""
+    Write-Host "The prefix must be:" -ForegroundColor Gray
+    Write-Host "  - 3 to 8 characters long"
+    Write-Host "  - Lowercase letters and numbers only (a-z, 0-9)"
+    Write-Host ""
+    exit 1
+}
+
+# Check all prerequisites before doing anything
+Test-Prerequisites
+
+# ============================================================================
+# Validate Storage Connection String (.env)
+# ============================================================================
+
+$script:StorageConnectionString = ""
+$envFilePath = Join-Path $PSScriptRoot ".env"
+
+if (Test-Path $envFilePath) {
+    $envContent = Get-Content $envFilePath
+    foreach ($line in $envContent) {
+        if ($line -match "^AZURE_STORAGE_CONNECTION_STRING=(.+)$") {
+            $value = $matches[1].Trim('"').Trim("'")
+            if ($value -and $value -ne "your_connection_string_here") {
+                $script:StorageConnectionString = $value
+            }
+            break
+        }
+    }
+}
+
+if (-not $script:StorageConnectionString) {
+    Write-Host ""
+    Write-Host "No valid Azure Storage connection string found." -ForegroundColor Yellow
+    Write-Host "The demo requires an Azure Storage Account to store encrypted data externally."
+    Write-Host ""
+    Write-Host "You can create one by running:" -ForegroundColor Cyan
+    Write-Host "  .\Create-StorageAccount.ps1"
+    Write-Host ""
+    Write-Host "Then copy the connection string from the output, or find it in the Azure Portal" -ForegroundColor Gray
+    Write-Host "under Storage Account > Access keys > Connection string." -ForegroundColor Gray
+    Write-Host ""
+    $input = Read-Host "Paste your Azure Storage connection string (or press Enter to abort)"
+    $input = $input.Trim('"').Trim("'")
+
+    if (-not $input -or $input -eq "your_connection_string_here") {
+        Write-Host ""
+        Write-Host "ERROR: A valid Azure Storage connection string is required." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "To get a connection string:" -ForegroundColor Yellow
+        Write-Host "  1. Run .\Create-StorageAccount.ps1 to create a new storage account, or"
+        Write-Host "  2. Use an existing storage account from the Azure Portal:"
+        Write-Host "     Portal > Storage Account > Security + networking > Access keys > Connection string"
+        Write-Host ""
+        Write-Host "Then either:" -ForegroundColor Yellow
+        Write-Host "  a) Re-run this script and paste the connection string when prompted, or"
+        Write-Host "  b) Create a .env file in this folder with the following content:"
+        Write-Host ""
+        Write-Host "     AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=..." -ForegroundColor Gray
+        Write-Host ""
+        exit 1
+    }
+
+    # Validate it looks like a connection string
+    if ($input -notmatch "DefaultEndpointsProtocol=.+;AccountName=.+;AccountKey=.+") {
+        Write-Host ""
+        Write-Host "ERROR: That doesn't look like a valid Azure Storage connection string." -ForegroundColor Red
+        Write-Host "Expected format: DefaultEndpointsProtocol=https;AccountName=<name>;AccountKey=<key>;..." -ForegroundColor Gray
+        Write-Host ""
+        exit 1
+    }
+
+    # Save to .env file
+    $script:StorageConnectionString = $input
+    @(
+        "# Azure Storage Connection String",
+        "# Auto-generated by Deploy-SimpleDemo.ps1 on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+        "# NEVER commit this file to git!",
+        "",
+        "AZURE_STORAGE_CONNECTION_STRING=$input"
+    ) | Set-Content -Path $envFilePath -Encoding UTF8
+
+    Write-Success "Connection string saved to .env file."
+    Write-Host "  You won't be prompted again for future runs." -ForegroundColor Gray
+}
+
+Write-Host ""
+Write-Success "Storage connection string validated"
+
+# Extract account name for display
+if ($script:StorageConnectionString -match 'AccountName=([^;]+)') {
+    Write-Host "  Storage Account: $($matches[1])" -ForegroundColor Gray
+}
+Write-Host ""
+
+# Execute requested actions
+try {
+    if ($Build) {
+        $config = Invoke-Build -RegistryName $RegistryName
+    }
+    
+    if ($Deploy) {
+        Invoke-Deploy -SkipBrowser:$SkipBrowser
+    }
+    
+    if ($Cleanup) {
+        Invoke-Cleanup
+    }
+} catch {
+    Write-Error "Error: $_"
+    exit 1
+}

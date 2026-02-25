@@ -348,3 +348,11 @@ MigrationBackup/
 
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
+
+# Generated Azure deployment artifacts
+acr-config.json
+deployment-params*.json
+release-policy-*.json
+test-analytics*.json
+multiparty-view*.html
+cvm-config.json

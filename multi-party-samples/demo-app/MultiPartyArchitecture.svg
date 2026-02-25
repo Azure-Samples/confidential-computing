@@ -1,0 +1,232 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 750">
+  <defs>
+    <linearGradient id="azureGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0078d4;stop-opacity:0.1"/>
+      <stop offset="100%" style="stop-color:#0078d4;stop-opacity:0.05"/>
+    </linearGradient>
+    <linearGradient id="confGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#28a745;stop-opacity:0.15"/>
+      <stop offset="100%" style="stop-color:#28a745;stop-opacity:0.08"/>
+    </linearGradient>
+    <linearGradient id="stdGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#dc3545;stop-opacity:0.15"/>
+      <stop offset="100%" style="stop-color:#dc3545;stop-opacity:0.08"/>
+    </linearGradient>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#28a745"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dc3545"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#0078d4"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1100" height="750" fill="#fafafa"/>
+  
+  <!-- Title -->
+  <text x="550" y="35" text-anchor="middle" font-family="Segoe UI, Arial" font-size="24" font-weight="bold" fill="#333">Multi-Party Confidential Computing - Traffic Flow</text>
+  
+  <!-- Azure Cloud boundary -->
+  <rect x="30" y="55" width="1040" height="680" rx="15" fill="url(#azureGrad)" stroke="#0078d4" stroke-width="2" stroke-dasharray="8,4"/>
+  <text x="50" y="80" font-family="Segoe UI, Arial" font-size="14" fill="#0078d4" font-weight="bold">☁️ Azure Cloud</text>
+  
+  <!-- Key Vault -->
+  <g filter="url(#shadow)">
+    <rect x="420" y="95" width="260" height="110" rx="10" fill="#fff" stroke="#0078d4" stroke-width="2"/>
+    <rect x="420" y="95" width="260" height="30" rx="10" fill="#0078d4"/>
+    <text x="550" y="116" text-anchor="middle" font-family="Segoe UI, Arial" font-size="13" fill="#fff" font-weight="bold">🔐 Azure Key Vault (Premium HSM)</text>
+    <text x="480" y="150" font-family="Segoe UI, Arial" font-size="11" fill="#333">🔑 contoso-secret-key</text>
+    <text x="480" y="168" font-family="Segoe UI, Arial" font-size="10" fill="#666">RSA-HSM + Release Policy</text>
+    <text x="480" y="190" font-family="Segoe UI, Arial" font-size="11" fill="#333">🔑 fabrikam-secret-key</text>
+  </g>
+  
+  <!-- MAA -->
+  <g filter="url(#shadow)">
+    <rect x="720" y="95" width="180" height="70" rx="10" fill="#fff" stroke="#0078d4" stroke-width="2"/>
+    <rect x="720" y="95" width="180" height="25" rx="10" fill="#0078d4"/>
+    <text x="810" y="113" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#fff" font-weight="bold">🛡️ Azure Attestation</text>
+    <text x="810" y="140" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">sharedeus.eus.attest</text>
+    <text x="810" y="155" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">.azure.net</text>
+  </g>
+  
+  <!-- Blob Storage -->
+  <g filter="url(#shadow)">
+    <rect x="920" y="300" width="130" height="100" rx="10" fill="#fff" stroke="#ffc107" stroke-width="2"/>
+    <rect x="920" y="300" width="130" height="25" rx="10" fill="#ffc107"/>
+    <text x="985" y="318" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">📦 Blob Storage</text>
+    <text x="985" y="345" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#333">consolidated-</text>
+    <text x="985" y="358" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#333">records.json</text>
+    <text x="985" y="385" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#666">(Encrypted data)</text>
+  </g>
+  
+  <!-- Contoso Container -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="260" width="250" height="170" rx="10" fill="url(#confGrad)" stroke="#28a745" stroke-width="2"/>
+    <rect x="60" y="260" width="250" height="30" rx="10" fill="#28a745"/>
+    <text x="185" y="281" text-anchor="middle" font-family="Segoe UI, Arial" font-size="13" fill="#fff" font-weight="bold">🏢 Contoso (Confidential)</text>
+    <rect x="80" y="300" width="210" height="40" rx="5" fill="#d4edda" stroke="#28a745"/>
+    <text x="185" y="318" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724">🔒 AMD SEV-SNP TEE</text>
+    <text x="185" y="332" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724">Hardware Memory Encryption</text>
+    <rect x="80" y="350" width="100" height="30" rx="5" fill="#fff" stroke="#666"/>
+    <text x="130" y="370" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">Flask :80</text>
+    <rect x="190" y="350" width="100" height="30" rx="5" fill="#fff" stroke="#666"/>
+    <text x="240" y="370" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">SKR :8080</text>
+    <text x="185" y="410" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#28a745" font-weight="bold">✅ Can Attest &amp; Get Keys</text>
+  </g>
+  
+  <!-- Fabrikam Container -->
+  <g filter="url(#shadow)">
+    <rect x="340" y="260" width="250" height="170" rx="10" fill="url(#confGrad)" stroke="#28a745" stroke-width="2"/>
+    <rect x="340" y="260" width="250" height="30" rx="10" fill="#28a745"/>
+    <text x="465" y="281" text-anchor="middle" font-family="Segoe UI, Arial" font-size="13" fill="#fff" font-weight="bold">🏭 Fabrikam (Confidential)</text>
+    <rect x="360" y="300" width="210" height="40" rx="5" fill="#d4edda" stroke="#28a745"/>
+    <text x="465" y="318" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724">🔒 AMD SEV-SNP TEE</text>
+    <text x="465" y="332" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724">Hardware Memory Encryption</text>
+    <rect x="360" y="350" width="100" height="30" rx="5" fill="#fff" stroke="#666"/>
+    <text x="410" y="370" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">Flask :80</text>
+    <rect x="470" y="350" width="100" height="30" rx="5" fill="#fff" stroke="#666"/>
+    <text x="520" y="370" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">SKR :8080</text>
+    <text x="465" y="410" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#28a745" font-weight="bold">✅ Can Attest &amp; Get Keys</text>
+  </g>
+  
+  <!-- Snooper Container -->
+  <g filter="url(#shadow)">
+    <rect x="620" y="260" width="250" height="170" rx="10" fill="url(#stdGrad)" stroke="#dc3545" stroke-width="2"/>
+    <rect x="620" y="260" width="250" height="30" rx="10" fill="#dc3545"/>
+    <text x="745" y="281" text-anchor="middle" font-family="Segoe UI, Arial" font-size="13" fill="#fff" font-weight="bold">👁️ Snooper (Standard)</text>
+    <rect x="640" y="300" width="210" height="40" rx="5" fill="#f8d7da" stroke="#dc3545"/>
+    <text x="745" y="318" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#721c24">⚠️ No TEE Hardware</text>
+    <text x="745" y="332" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#721c24">/dev/sev-guest NOT available</text>
+    <rect x="640" y="350" width="100" height="30" rx="5" fill="#fff" stroke="#666"/>
+    <text x="690" y="370" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">Flask :80</text>
+    <rect x="750" y="350" width="100" height="30" rx="5" fill="#fff" stroke="#666"/>
+    <text x="800" y="370" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">SKR :8080</text>
+    <text x="745" y="410" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#dc3545" font-weight="bold">❌ Cannot Attest or Get Keys</text>
+  </g>
+  
+  <!-- User -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="95" width="120" height="70" rx="10" fill="#fff" stroke="#6c757d" stroke-width="2"/>
+    <text x="120" y="125" text-anchor="middle" font-family="Segoe UI, Arial" font-size="24">👤</text>
+    <text x="120" y="150" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">User Browser</text>
+  </g>
+  
+  <!-- Arrows: User to containers -->
+  <line x1="120" y1="165" x2="120" y2="255" stroke="#6c757d" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="140" y1="165" x2="420" y2="255" stroke="#6c757d" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="160" y1="165" x2="700" y2="255" stroke="#6c757d" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  
+  <!-- Arrows: Contoso to MAA (success) -->
+  <path d="M 290 310 Q 400 240 720 130" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  <text x="450" y="235" font-family="Segoe UI, Arial" font-size="9" fill="#28a745">1. Attest</text>
+  
+  <!-- Arrows: Contoso to Key Vault (success) -->
+  <path d="M 290 320 Q 350 250 420 180" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  <text x="320" y="245" font-family="Segoe UI, Arial" font-size="9" fill="#28a745">2. Get Key ✅</text>
+  
+  <!-- Arrows: Fabrikam to MAA (success) -->
+  <path d="M 560 310 Q 650 250 720 140" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  
+  <!-- Arrows: Fabrikam to Key Vault (success) -->
+  <path d="M 520 290 Q 530 230 550 205" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  
+  <!-- Arrows: Snooper to MAA (fail) -->
+  <path d="M 800 290 Q 810 220 810 170" stroke="#dc3545" stroke-width="2" stroke-dasharray="5,3" fill="none" marker-end="url(#arrowRed)"/>
+  <text x="820" y="230" font-family="Segoe UI, Arial" font-size="9" fill="#dc3545">DENIED ❌</text>
+  
+  <!-- Arrows: Snooper to Key Vault (fail) -->
+  <path d="M 650 290 Q 600 230 580 205" stroke="#dc3545" stroke-width="2" stroke-dasharray="5,3" fill="none" marker-end="url(#arrowRed)"/>
+  <text x="600" y="240" font-family="Segoe UI, Arial" font-size="9" fill="#dc3545">No Key ❌</text>
+  
+  <!-- Arrows: Containers to Blob Storage -->
+  <line x1="310" y1="360" x2="915" y2="340" stroke="#28a745" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <line x1="590" y1="360" x2="915" y2="350" stroke="#28a745" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <line x1="870" y1="360" x2="915" y2="360" stroke="#dc3545" stroke-width="1.5" stroke-dasharray="4,2" marker-end="url(#arrowRed)"/>
+  
+  <!-- Legend -->
+  <rect x="60" y="470" width="400" height="250" rx="10" fill="#fff" stroke="#dee2e6" stroke-width="1"/>
+  <text x="80" y="495" font-family="Segoe UI, Arial" font-size="14" fill="#333" font-weight="bold">Legend - Traffic Flow</text>
+  
+  <line x1="80" y1="520" x2="130" y2="520" stroke="#28a745" stroke-width="3"/>
+  <text x="145" y="525" font-family="Segoe UI, Arial" font-size="11" fill="#333">Successful attestation &amp; key release</text>
+  
+  <line x1="80" y1="545" x2="130" y2="545" stroke="#dc3545" stroke-width="3" stroke-dasharray="5,3"/>
+  <text x="145" y="550" font-family="Segoe UI, Arial" font-size="11" fill="#333">Denied - No TEE attestation possible</text>
+  
+  <line x1="80" y1="570" x2="130" y2="570" stroke="#6c757d" stroke-width="2"/>
+  <text x="145" y="575" font-family="Segoe UI, Arial" font-size="11" fill="#333">User HTTPS requests</text>
+  
+  <text x="80" y="605" font-family="Segoe UI, Arial" font-size="12" fill="#333" font-weight="bold">Key Points:</text>
+  <text x="80" y="625" font-family="Segoe UI, Arial" font-size="10" fill="#333">• All containers run identical code from same image</text>
+  <text x="80" y="642" font-family="Segoe UI, Arial" font-size="10" fill="#333">• Only confidential containers have /dev/sev-guest device</text>
+  <text x="80" y="659" font-family="Segoe UI, Arial" font-size="10" fill="#333">• Key Vault release policy requires sevsnpvm attestation</text>
+  <text x="80" y="676" font-family="Segoe UI, Arial" font-size="10" fill="#333">• Snooper sees encrypted data but cannot decrypt</text>
+  <text x="80" y="693" font-family="Segoe UI, Arial" font-size="10" fill="#333">• Each company can only access their own key</text>
+  <text x="80" y="710" font-family="Segoe UI, Arial" font-size="10" fill="#333">• Cross-company key access is denied by Key Vault</text>
+  
+  <!-- Data Flow Box -->
+  <rect x="490" y="470" width="570" height="250" rx="10" fill="#fff" stroke="#dee2e6" stroke-width="1"/>
+  <text x="510" y="495" font-family="Segoe UI, Arial" font-size="14" fill="#333" font-weight="bold">Data Protection Flow</text>
+  
+  <!-- CSV to Encrypt -->
+  <rect x="510" y="510" width="80" height="35" rx="5" fill="#e2d9f3" stroke="#6610f2"/>
+  <text x="550" y="532" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#333">contoso.csv</text>
+  
+  <rect x="610" y="510" width="80" height="35" rx="5" fill="#e2d9f3" stroke="#6610f2"/>
+  <text x="650" y="532" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#333">fabrikam.csv</text>
+  
+  <!-- Arrows down -->
+  <line x1="550" y1="545" x2="550" y2="560" stroke="#6610f2" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="650" y1="545" x2="650" y2="560" stroke="#6610f2" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  
+  <!-- Encrypt boxes -->
+  <rect x="510" y="565" width="80" height="35" rx="5" fill="#d4edda" stroke="#28a745"/>
+  <text x="550" y="582" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Encrypt w/</text>
+  <text x="550" y="593" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Contoso Key</text>
+  
+  <rect x="610" y="565" width="80" height="35" rx="5" fill="#d4edda" stroke="#28a745"/>
+  <text x="650" y="582" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Encrypt w/</text>
+  <text x="650" y="593" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Fabrikam Key</text>
+  
+  <!-- Merge to blob -->
+  <line x1="550" y1="600" x2="600" y2="625" stroke="#ffc107" stroke-width="2"/>
+  <line x1="650" y1="600" x2="600" y2="625" stroke="#ffc107" stroke-width="2"/>
+  
+  <rect x="540" y="630" width="120" height="40" rx="5" fill="#fff3cd" stroke="#ffc107" stroke-width="2"/>
+  <text x="600" y="650" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#856404">📦 Blob Storage</text>
+  <text x="600" y="662" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#856404">(mixed encrypted)</text>
+  
+  <!-- Read arrows -->
+  <line x1="540" y1="670" x2="510" y2="690" stroke="#28a745" stroke-width="2" marker-end="url(#arrowGreen)"/>
+  <line x1="600" y1="670" x2="600" y2="690" stroke="#28a745" stroke-width="2" marker-end="url(#arrowGreen)"/>
+  <line x1="660" y1="670" x2="690" y2="690" stroke="#dc3545" stroke-width="2" stroke-dasharray="4,2" marker-end="url(#arrowRed)"/>
+  
+  <!-- Read result boxes -->
+  <rect x="470" y="695" width="80" height="25" rx="3" fill="#d4edda" stroke="#28a745"/>
+  <text x="510" y="712" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Contoso ✅</text>
+  
+  <rect x="560" y="695" width="80" height="25" rx="3" fill="#d4edda" stroke="#28a745"/>
+  <text x="600" y="712" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Fabrikam ✅</text>
+  
+  <rect x="650" y="695" width="80" height="25" rx="3" fill="#f8d7da" stroke="#dc3545"/>
+  <text x="690" y="712" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#721c24">Snooper ❌</text>
+  
+  <!-- Company isolation note -->
+  <text x="780" y="520" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Company Isolation:</text>
+  <text x="780" y="540" font-family="Segoe UI, Arial" font-size="10" fill="#28a745">✅ Contoso decrypts Contoso data</text>
+  <text x="780" y="558" font-family="Segoe UI, Arial" font-size="10" fill="#28a745">✅ Fabrikam decrypts Fabrikam data</text>
+  <text x="780" y="576" font-family="Segoe UI, Arial" font-size="10" fill="#dc3545">❌ Contoso cannot decrypt Fabrikam</text>
+  <text x="780" y="594" font-family="Segoe UI, Arial" font-size="10" fill="#dc3545">❌ Fabrikam cannot decrypt Contoso</text>
+  <text x="780" y="612" font-family="Segoe UI, Arial" font-size="10" fill="#dc3545">❌ Snooper cannot decrypt ANY data</text>
+  
+  <text x="780" y="645" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Security Guarantee:</text>
+  <text x="780" y="665" font-family="Segoe UI, Arial" font-size="10" fill="#333">Keys never leave TEE memory</text>
+  <text x="780" y="683" font-family="Segoe UI, Arial" font-size="10" fill="#333">Data encrypted before storage</text>
+  <text x="780" y="701" font-family="Segoe UI, Arial" font-size="10" fill="#333">No plaintext exposure possible</text>
+</svg>
