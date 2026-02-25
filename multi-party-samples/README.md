@@ -1,6 +1,6 @@
 # Multi-Party Samples
 
-Secure multi-party computation demonstrations using Azure Confidential Containers with AMD SEV-SNP hardware protection.
+Secure multi-party computation demonstrations using Azure Confidential Computing with AMD SEV-SNP hardware protection. Available as both **ACI confidential containers** and **Confidential Virtual Machines (CVMs)**.
 
 ## Architecture Overview
 
@@ -102,6 +102,43 @@ See the [full documentation](advanced-app/README.md) for detailed instructions.
 
 ---
 
+### [Advanced App — CVM Edition](advanced-app-cvm/README.md) 🛡️ NEW
+
+The same 3-company multi-party demo deployed on **Ubuntu 24.04 Confidential Virtual Machines** (DCas_v5 series) instead of ACI containers:
+
+| VM | Type | Purpose |
+|----|------|---------|
+| **Contoso** | Confidential VM (AMD SEV-SNP) | Corporate data provider with 800 encrypted employee records (🏢) |
+| **Fabrikam Fashion** | Confidential VM (AMD SEV-SNP) | Online retailer with 800 encrypted customer records (👗) |
+| **Woodgrove Bank** | Confidential VM (AMD SEV-SNP) | Analytics partner with cross-company key access (🏦) |
+
+#### Key Differences from ACI Version
+
+| Aspect | ACI (`advanced-app/`) | CVM (`advanced-app-cvm/`) |
+|--------|----------------------|--------------------------|
+| **TEE** | ACI confidential containers | Ubuntu 24.04 CVM (DCas_v5) |
+| **Attestation** | ACI SKR sidecar binary | CVM SKR shim via vTPM + guest attestation |
+| **Key Binding** | Per-container ccePolicy hash | Hardware attestation (`azure-compliant-cvm` + `sevsnpvm`) + KV access policies (managed identity per VM) |
+| **Interactive Access** | Blocked by ccePolicy at hardware level | [Compensating controls](advanced-app-cvm/README.md#compensating-controls-for-removing-interactive-access): SSH disabled, NSG deny-all, no Bastion, hidden credentials |
+| **Networking** | Per-container public FQDN | Private VNet + Application Gateway WAF_v2 |
+| **Disk Encryption** | N/A (ephemeral containers) | Confidential OS disk with customer-managed keys |
+
+#### Quick Start
+
+```powershell
+cd advanced-app-cvm
+
+# Standard deployment (all interactive access controls active)
+.\Deploy-MultiPartyCVM.ps1 -Prefix <yourcode>
+
+# Debug deployment (SSH + Bastion enabled for troubleshooting)
+.\Deploy-MultiPartyCVM.ps1 -Prefix <yourcode> -EnableDebug
+```
+
+See the [full documentation](advanced-app-cvm/README.md) for architecture details, compensating controls, and the trust model comparison.
+
+---
+
 ### [Demo App](demo-app/README-MultiParty.md)
 
 A simpler 2-container demonstration of two parties storing encrypted data in external, untrusted storage without partner analytics:
@@ -124,12 +161,21 @@ cd demo-app
 
 ## Prerequisites
 
+### For ACI Samples (advanced-app, demo-app)
+
 - **Azure CLI** (v2.60+) with `confcom` extension
 - **Docker Desktop** - Required for security policy generation
 - **Azure subscription** with Confidential Container support
 - **PowerShell** 7.0+ recommended (5.1+ minimum)
 
-### Install Azure CLI Extension
+### For CVM Sample (advanced-app-cvm)
+
+- **Azure PowerShell** (`Az` module) — `Install-Module -Name Az -Force`
+- **Azure subscription** with DCas_v5 quota in the target region
+- **Contributor** role (or equivalent) on the subscription
+- **Logged in** — `Connect-AzAccount`
+
+### Install Azure CLI Extension (ACI only)
 
 ```powershell
 az extension add --name confcom --upgrade
@@ -151,7 +197,9 @@ This code is provided for **educational and demonstration purposes only**.
 
 - [Azure Confidential Computing](https://azure.microsoft.com/solutions/confidential-compute/)
 - [AMD SEV-SNP Technology](https://www.amd.com/en/developer/sev.html)
+- [Azure Confidential VMs](https://learn.microsoft.com/azure/confidential-computing/confidential-vm-overview) — DCas_v5 series overview
 - [Azure Container Instances - Confidential Containers](https://docs.microsoft.com/azure/container-instances/container-instances-confidential-overview)
 - [Microsoft Azure Attestation](https://learn.microsoft.com/azure/attestation/overview)
+- [CVM Attestation Tools](https://github.com/Azure/cvm-attestation-tools) — Python-native vTPM attestation library
 - [AKS Virtual Nodes](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes) — Virtual node architecture for AKS
 - [Virtual Nodes v2 (GitHub)](https://github.com/microsoft/virtualnodesOnAzureContainerInstances) — VN2 Helm chart

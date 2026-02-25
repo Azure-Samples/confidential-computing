@@ -355,3 +355,4 @@ deployment-params*.json
 release-policy-*.json
 test-analytics*.json
 multiparty-view*.html
+cvm-config.json

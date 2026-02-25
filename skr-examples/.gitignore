@@ -1,0 +1,5 @@
+# Ephemeral SSH keys generated during deployment
+.ssh/
+
+# Deployment config (contains resource names)
+skr-config.json
