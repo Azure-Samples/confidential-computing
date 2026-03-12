@@ -172,6 +172,86 @@
             .header { padding: 20px; }
             .header h1 { font-size: 1.6em; }
         }
+
+        /* Chat toggle button */
+        .chat-toggle {
+            position: fixed; bottom: 30px; right: 30px; z-index: 1000;
+            width: 56px; height: 56px; border-radius: 50%;
+            background: linear-gradient(135deg, #e94560, #c62a47);
+            color: white; border: none; cursor: pointer;
+            font-size: 1.5em; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 15px rgba(233,69,96,0.4);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .chat-toggle:hover { transform: scale(1.1); box-shadow: 0 6px 20px rgba(233,69,96,0.6); }
+        .chat-toggle:disabled { background: #3a3a5c; cursor: not-allowed; transform: none; box-shadow: none; }
+        .chat-toggle .badge {
+            position: absolute; top: -2px; right: -2px; width: 14px; height: 14px;
+            border-radius: 50%; background: #4caf50; border: 2px solid #1e1e2f;
+        }
+
+        /* Chat panel */
+        .chat-panel {
+            position: fixed; bottom: 100px; right: 30px; z-index: 1000;
+            width: 380px; max-height: 520px; background: #1e1e2f;
+            border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+            display: none; flex-direction: column; border: 1px solid #3a3a5c;
+        }
+        .chat-panel.open { display: flex; }
+        .chat-header {
+            padding: 14px 18px; background: linear-gradient(135deg, #0f3460, #16213e);
+            border-radius: 12px 12px 0 0; display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 2px solid #e94560;
+        }
+        .chat-header h4 { color: white; font-size: 0.95em; margin: 0; }
+        .chat-header button {
+            background: none; border: none; color: #aaa; font-size: 1.2em;
+            cursor: pointer; padding: 0; line-height: 1;
+        }
+        .chat-header button:hover { color: white; transform: none; box-shadow: none; }
+        .chat-messages {
+            flex: 1; overflow-y: auto; padding: 14px; min-height: 200px; max-height: 320px;
+        }
+        .chat-msg {
+            margin-bottom: 12px; padding: 10px 14px; border-radius: 10px;
+            font-size: 0.88em; line-height: 1.45; word-wrap: break-word;
+        }
+        .chat-msg.assistant { background: #252540; color: #e0e0e0; border-left: 3px solid #e94560; }
+        .chat-msg.user { background: #0f3460; color: #e0e0e0; text-align: right; border-right: 3px solid #4fc3f7; }
+        .chat-msg.error { background: #3a1a1a; color: #ef5350; border-left: 3px solid #ef5350; }
+        .chat-suggestions {
+            padding: 8px 14px; display: flex; gap: 6px; flex-wrap: wrap;
+        }
+        .chat-suggestions button {
+            background: #252540; color: #aaa; border: 1px solid #3a3a5c;
+            padding: 5px 10px; font-size: 0.75em; border-radius: 12px; cursor: pointer;
+        }
+        .chat-suggestions button:hover { color: #e94560; border-color: #e94560; transform: none; box-shadow: none; }
+        .chat-input-row {
+            display: flex; padding: 10px 14px; gap: 8px;
+            border-top: 1px solid #3a3a5c;
+        }
+        .chat-input-row input {
+            flex: 1; background: #252540; border: 1px solid #3a3a5c;
+            color: #e0e0e0; padding: 9px 12px; border-radius: 6px;
+            font-size: 0.88em; outline: none;
+        }
+        .chat-input-row input:focus { border-color: #e94560; }
+        .chat-input-row button {
+            background: linear-gradient(135deg, #e94560, #c62a47);
+            color: white; border: none; padding: 9px 16px; border-radius: 6px;
+            cursor: pointer; font-size: 0.88em; font-weight: 600;
+        }
+        .chat-input-row button:disabled { background: #3a3a5c; cursor: not-allowed; }
+        .typing-indicator { display: none; padding: 6px 14px; }
+        .typing-indicator span {
+            display: inline-block; width: 8px; height: 8px; margin: 0 2px;
+            background: #e94560; border-radius: 50%; opacity: 0.4;
+            animation: typingBounce 1.4s infinite ease-in-out;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typingBounce { 0%,80%,100%{opacity:0.4;transform:scale(1)} 40%{opacity:1;transform:scale(1.2)} }
     </style>
 </head>
 <body>
@@ -326,6 +406,33 @@
         </div>
     </div>
 
+    <!-- Chat toggle button -->
+    <button class="chat-toggle" id="chatToggle" onclick="toggleChat()" disabled title="AI Chat (run analysis first)">
+        💬
+    </button>
+
+    <!-- Chat panel -->
+    <div class="chat-panel" id="chatPanel">
+        <div class="chat-header">
+            <h4>🏦 Woodgrove AI Assistant</h4>
+            <button onclick="toggleChat()" title="Close">&times;</button>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            <div class="chat-msg assistant">Hi! I can answer questions about the partner transaction analytics. Run the analysis first, then ask me anything.</div>
+        </div>
+        <div class="typing-indicator" id="typingIndicator"><span></span><span></span><span></span></div>
+        <div class="chat-suggestions" id="chatSuggestions">
+            <button onclick="askQuestion('Which category has the highest spending?')">Top category?</button>
+            <button onclick="askQuestion('What is the peak grocery shopping hour?')">Peak grocery hour?</button>
+            <button onclick="askQuestion('Compare Contoso vs Fabrikam spending')">Contoso vs Fabrikam?</button>
+            <button onclick="askQuestion('What are the average loan payments?')">Loan payments?</button>
+        </div>
+        <div class="chat-input-row">
+            <input type="text" id="chatInput" placeholder="Ask about the analytics..." onkeydown="chatKeydown(event)" disabled>
+            <button id="chatSend" onclick="askQuestion()" disabled>Send</button>
+        </div>
+    </div>
+
     <script>
         // Chart instances for cleanup
         const charts = {};
@@ -391,6 +498,9 @@
                 else if (data.type === 'progress') {
                     updateProgress(data);
                 }
+                else if (data.type === 'openai_status') {
+                    logOpenAIDiagnostics(data);
+                }
                 else if (data.type === 'complete') {
                     evtSource.close();
                     log('Analysis complete in ' + data.total_time + 's', 'success');
@@ -399,6 +509,7 @@
                     btn.textContent = 'Re-run Analysis';
                     updateStatus('Complete', 'Decrypted ' + data.total_count + ' records in ' + data.total_time + ' seconds.');
                     renderDashboard(data);
+                    checkChatAvailability();
                 }
                 else if (data.type === 'error') {
                     evtSource.close();
@@ -649,6 +760,173 @@
             div.appendChild(document.createTextNode(str));
             return div.innerHTML;
         }
+
+        /* -------- AI Chat Functions -------- */
+
+        function toggleChat() {
+            const panel = document.getElementById('chatPanel');
+            panel.classList.toggle('open');
+            if (panel.classList.contains('open')) {
+                document.getElementById('chatInput').focus();
+            }
+        }
+
+        function enableChat() {
+            document.getElementById('chatToggle').disabled = false;
+            document.getElementById('chatToggle').title = 'Ask AI about the analytics';
+            var badge = document.createElement('span');
+            badge.className = 'badge';
+            document.getElementById('chatToggle').appendChild(badge);
+            document.getElementById('chatInput').disabled = false;
+            document.getElementById('chatSend').disabled = false;
+        }
+
+        function addChatMessage(text, role) {
+            const box = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = 'chat-msg ' + role;
+            div.textContent = text;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function showTyping() { document.getElementById('typingIndicator').style.display = 'block'; }
+        function hideTyping() { document.getElementById('typingIndicator').style.display = 'none'; }
+
+        function askQuestion(preset) {
+            const input = document.getElementById('chatInput');
+            const question = preset || input.value.trim();
+            if (!question) return;
+            input.value = '';
+            addChatMessage(question, 'user');
+            showTyping();
+            document.getElementById('chatSend').disabled = true;
+
+            fetch('/partner/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: question })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                hideTyping();
+                document.getElementById('chatSend').disabled = false;
+                if (data.error) {
+                    addChatMessage(data.error, 'error');
+                } else {
+                    addChatMessage(data.answer, 'assistant');
+                }
+            })
+            .catch(function(err) {
+                hideTyping();
+                document.getElementById('chatSend').disabled = false;
+                addChatMessage('Network error — please try again.', 'error');
+            });
+        }
+
+        function chatKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                askQuestion();
+            }
+        }
+
+        function checkChatAvailability() {
+            fetch('/partner/chat-status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.available) {
+                        enableChat();
+                        log('AI Chat: READY — endpoint=' + (data.endpoint || '?') + ', deployment=' + (data.deployment || '?'), 'success');
+                    } else {
+                        var reasons = [];
+                        if (!data.has_data) reasons.push('no analytics data cached');
+                        if (!data.has_openai) reasons.push('OpenAI not configured');
+                        log('AI Chat: NOT AVAILABLE — ' + reasons.join(', '), 'warn');
+                        if (data.endpoint) log('  Endpoint: ' + data.endpoint, 'info');
+                        if (data.deployment) log('  Deployment: ' + data.deployment, 'info');
+                        log('  Key configured: ' + (data.key_configured ? 'yes' : 'NO'), data.key_configured ? 'info' : 'warn');
+                    }
+                })
+                .catch(function(err) {
+                    log('AI Chat: status check failed — ' + err, 'error');
+                });
+        }
+
+        function logOpenAIDiagnostics(data) {
+            // Auto-show the log box so diagnostics are always visible
+            var logBox = document.getElementById('logBox');
+            var logBtn = document.getElementById('btnToggleLog');
+            if (logBox && (!logBox.style.display || logBox.style.display === 'none')) {
+                logBox.style.display = 'block';
+                if (logBtn) logBtn.textContent = 'Hide Log';
+            }
+            log('─── Azure OpenAI Diagnostics ───', 'info');
+            log('  Endpoint: ' + data.config.endpoint, 'info');
+            log('  Deployment: ' + data.config.deployment, 'info');
+            log('  API key configured: ' + (data.config.key_configured ? 'yes (' + data.config.key_length + ' chars)' : 'NO'), data.config.key_configured ? 'info' : 'error');
+            if (data.config.hostname) log('  Hostname: ' + data.config.hostname + ':' + data.config.port, 'info');
+
+            if (data.overall === 'unconfigured') {
+                log('  ⚠ OpenAI not configured — AI Chat will be disabled', 'warn');
+                log('───────────────────────────────', 'info');
+                return;
+            }
+
+            // DNS
+            if (data.dns) {
+                if (data.dns.status === 'ok') {
+                    log('  DNS: ✓ resolved to [' + data.dns.resolved_ips.join(', ') + '] (' + data.dns.time_ms + 'ms)', 'success');
+                } else {
+                    log('  DNS: ✗ FAILED — ' + data.dns.error, 'error');
+                }
+            }
+
+            // TCP
+            if (data.tcp) {
+                if (data.tcp.status === 'ok') {
+                    log('  TCP: ✓ connected (' + data.tcp.time_ms + 'ms)', 'success');
+                } else {
+                    log('  TCP: ✗ FAILED — ' + data.tcp.error, 'error');
+                }
+            }
+
+            // API Health
+            if (data.api_health) {
+                if (data.api_health.status === 'ok') {
+                    log('  API: ✓ HTTP ' + data.api_health.http_status + ' (' + data.api_health.time_ms + 'ms)', 'success');
+                } else if (data.api_health.status === 'warn') {
+                    log('  API: ⚠ HTTP ' + data.api_health.http_status + ' (' + data.api_health.time_ms + 'ms)', 'warn');
+                } else {
+                    log('  API: ✗ FAILED — ' + data.api_health.error, 'error');
+                }
+            }
+
+            // Completion test
+            if (data.completion_test) {
+                if (data.completion_test.status === 'ok') {
+                    log('  LLM: ✓ completion test passed — model=' + data.completion_test.model
+                        + ', reply="' + data.completion_test.reply + '"'
+                        + ' (' + data.completion_test.time_ms + 'ms'
+                        + ', tokens: ' + data.completion_test.prompt_tokens + '+' + data.completion_test.completion_tokens + ')', 'success');
+                } else {
+                    log('  LLM: ✗ completion test FAILED — ' + data.completion_test.error, 'error');
+                }
+            }
+
+            // Overall
+            if (data.overall === 'ok') {
+                log('  Overall: ✓ All OpenAI connectivity checks PASSED', 'success');
+            } else if (data.overall === 'fail') {
+                log('  Overall: ✗ OpenAI connectivity FAILED — chat may not work', 'error');
+            } else {
+                log('  Overall: ⚠ Partial — some checks had warnings', 'warn');
+            }
+            log('───────────────────────────────', 'info');
+        }
+
+        // Check on load and after each analysis completes
+        checkChatAvailability();
     </script>
 </body>
 </html>

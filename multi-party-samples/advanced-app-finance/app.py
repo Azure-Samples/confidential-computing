@@ -40,6 +40,12 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
+# Analytics cache for LLM chat (populated by partner_analyze_stream)
+# ---------------------------------------------------------------------------
+_cached_chat_summary = None
+_analytics_cache_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
 # Security Headers Middleware
 # ---------------------------------------------------------------------------
 @app.after_request
@@ -1805,6 +1811,180 @@ def partner_analyze_stream():
                     pass
         transactions_by_day = [{'day': day_names[i], 'count': day_counts.get(i, 0)} for i in range(7)]
         
+        # 9. Cross-tabulations for LLM chat context
+        category_by_hour = defaultdict(lambda: defaultdict(int))
+        category_by_country = defaultdict(lambda: defaultdict(float))
+        category_by_day = defaultdict(lambda: defaultdict(int))
+        for r in all_records:
+            cat = r.get('merchant_category')
+            amt = r.get('amount')
+            dt_str = r.get('date_time')
+            country = r.get('customer_country')
+            if cat and dt_str:
+                try:
+                    hour = int(dt_str.split(' ')[1].split(':')[0])
+                    category_by_hour[cat][hour] += 1
+                except (IndexError, ValueError):
+                    pass
+                try:
+                    from datetime import datetime as dt_cls2
+                    d2 = dt_cls2.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+                    category_by_day[cat][day_names[d2.weekday()]] += 1
+                except ValueError:
+                    pass
+            if cat and country and amt:
+                category_by_country[cat][country] += float(amt)
+
+        cross_tabs = {
+            'category_by_peak_hour': {
+                cat: max(hours, key=hours.get) for cat, hours in category_by_hour.items() if hours
+            },
+            'category_by_top_country': {
+                cat: max(countries, key=countries.get) for cat, countries in category_by_country.items() if countries
+            },
+            'category_by_peak_day': {
+                cat: max(days, key=days.get) for cat, days in category_by_day.items() if days
+            },
+        }
+
+        # Cache summary for LLM chat
+        global _cached_chat_summary
+        with _analytics_cache_lock:
+            _cached_chat_summary = {
+                'total_transactions': len(all_records),
+                'contoso_count': len(contoso_records),
+                'fabrikam_count': len(fabrikam_records),
+                'spend_by_category': spend_by_category,
+                'transactions_by_hour': transactions_by_hour,
+                'grocery_by_hour': grocery_by_hour,
+                'peak_grocery_hour': peak_grocery_hour,
+                'loan_insights': loan_insights,
+                'spending_by_country': spending_by_country,
+                'age_group_insights': age_group_insights,
+                'top_merchants': top_merchants,
+                'transactions_by_day': transactions_by_day,
+                'partner_spend': {
+                    'Contoso': round(contoso_total_spend, 2),
+                    'Fabrikam': round(fabrikam_total_spend, 2),
+                    'Combined': round(contoso_total_spend + fabrikam_total_spend, 2),
+                },
+                'cross_tabulations': cross_tabs,
+            }
+
+        # ── Phase 10: OpenAI connectivity diagnostics ─────────────────────
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'openai_check', 'message': 'Checking Azure OpenAI connectivity...'})}\n\n"
+        import socket
+        import urllib.parse as _urlparse
+
+        oai_endpoint = os.environ.get('AZURE_OPENAI_ENDPOINT', '')
+        oai_key = os.environ.get('AZURE_OPENAI_API_KEY', '')
+        oai_deployment = os.environ.get('AZURE_OPENAI_DEPLOYMENT', '')
+
+        oai_diag = {
+            'type': 'openai_status',
+            'config': {
+                'endpoint': oai_endpoint or '(not set)',
+                'deployment': oai_deployment or '(not set)',
+                'key_configured': bool(oai_key),
+                'key_length': len(oai_key) if oai_key else 0,
+            },
+            'dns': None,
+            'tcp': None,
+            'api_health': None,
+            'completion_test': None,
+            'overall': 'unconfigured',
+        }
+
+        if oai_endpoint and oai_key and oai_deployment:
+            _parsed = _urlparse.urlparse(oai_endpoint)
+            _host = _parsed.hostname or ''
+            _port = _parsed.port or 443
+            oai_diag['config']['hostname'] = _host
+            oai_diag['config']['port'] = _port
+
+            # DNS
+            try:
+                _t0 = time.time()
+                _addrs = socket.getaddrinfo(_host, _port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                _elapsed = round((time.time() - _t0) * 1000, 1)
+                _ips = list(set(a[4][0] for a in _addrs))
+                oai_diag['dns'] = {'status': 'ok', 'resolved_ips': _ips, 'time_ms': _elapsed}
+            except Exception as _e:
+                oai_diag['dns'] = {'status': 'fail', 'error': str(_e)}
+                oai_diag['overall'] = 'fail'
+                yield f"data: {json.dumps(oai_diag)}\n\n"
+                # still continue to complete event below
+
+            if oai_diag.get('overall') != 'fail':
+                # TCP
+                try:
+                    _t0 = time.time()
+                    _sock = socket.create_connection((_host, _port), timeout=10)
+                    _elapsed = round((time.time() - _t0) * 1000, 1)
+                    _sock.close()
+                    oai_diag['tcp'] = {'status': 'ok', 'time_ms': _elapsed}
+                except Exception as _e:
+                    oai_diag['tcp'] = {'status': 'fail', 'error': str(_e)}
+
+                # API health check
+                try:
+                    _t0 = time.time()
+                    _api_resp = requests.get(
+                        f"{oai_endpoint.rstrip('/')}/openai/deployments?api-version=2024-06-01",
+                        headers={'api-key': oai_key},
+                        timeout=15,
+                    )
+                    _elapsed = round((time.time() - _t0) * 1000, 1)
+                    oai_diag['api_health'] = {
+                        'status': 'ok' if _api_resp.status_code < 400 else 'warn',
+                        'http_status': _api_resp.status_code,
+                        'time_ms': _elapsed,
+                    }
+                except Exception as _e:
+                    oai_diag['api_health'] = {'status': 'fail', 'error': str(_e)}
+
+                # Live completion test
+                try:
+                    from openai import AzureOpenAI as _AzureOpenAI
+                    _t0 = time.time()
+                    _client = _AzureOpenAI(
+                        azure_endpoint=oai_endpoint,
+                        api_key=oai_key,
+                        api_version="2024-06-01",
+                    )
+                    _resp = _client.chat.completions.create(
+                        model=oai_deployment,
+                        messages=[{"role": "user", "content": "Reply with exactly: OK"}],
+                        max_tokens=5,
+                        temperature=0,
+                    )
+                    _elapsed = round((time.time() - _t0) * 1000, 1)
+                    _reply = _resp.choices[0].message.content.strip() if _resp.choices else '(empty)'
+                    oai_diag['completion_test'] = {
+                        'status': 'ok',
+                        'reply': _reply,
+                        'model': _resp.model if hasattr(_resp, 'model') else oai_deployment,
+                        'time_ms': _elapsed,
+                        'prompt_tokens': _resp.usage.prompt_tokens if _resp.usage else None,
+                        'completion_tokens': _resp.usage.completion_tokens if _resp.usage else None,
+                    }
+                except Exception as _e:
+                    oai_diag['completion_test'] = {'status': 'fail', 'error': str(_e)}
+
+                # Overall
+                _checks = [oai_diag[k].get('status') for k in ('dns', 'tcp', 'api_health', 'completion_test') if oai_diag[k]]
+                if all(s == 'ok' for s in _checks):
+                    oai_diag['overall'] = 'ok'
+                elif any(s == 'fail' for s in _checks):
+                    oai_diag['overall'] = 'fail'
+                else:
+                    oai_diag['overall'] = 'partial'
+
+            yield f"data: {json.dumps(oai_diag)}\n\n"
+        else:
+            # Not configured — send status so frontend knows
+            yield f"data: {json.dumps(oai_diag)}\n\n"
+
         total_time = time.time() - start_time
         
         # Send final results
@@ -4007,6 +4187,234 @@ def auto_initialize_container():
     except Exception as e:
         print(f"           [ERROR] Exception during encryption/upload: {str(e)}")
         print(f"{'='*60}\n")
+
+# ---------------------------------------------------------------------------
+# LLM Chat — Natural language queries over cached analytics
+# ---------------------------------------------------------------------------
+
+def _build_chat_system_prompt(summary):
+    """Build a system prompt with the cached analytics summary for the LLM."""
+    return (
+        "You are Woodgrove Bank's financial analytics assistant. You answer questions "
+        "about multi-party transaction data that was decrypted inside a confidential "
+        "computing TEE (Trusted Execution Environment) using AMD SEV-SNP hardware.\n\n"
+        "IMPORTANT RULES:\n"
+        "- Only answer questions about the analytics data provided below.\n"
+        "- Never fabricate data points that aren't in the summary.\n"
+        "- If a question cannot be answered from the data, say so.\n"
+        "- Keep answers concise (2-4 sentences).\n"
+        "- Reference specific numbers from the data when possible.\n"
+        "- All monetary values are in USD.\n"
+        "- The data comes from two partners: Contoso (corporate) and Fabrikam (retail).\n\n"
+        "ANALYTICS SUMMARY (JSON):\n"
+        f"{json.dumps(summary, indent=2)}"
+    )
+
+
+@app.route('/partner/chat', methods=['POST'])
+@rate_limit(max_calls=10, period=60)
+def partner_chat():
+    """Answer natural-language questions about cached analytics using Azure OpenAI."""
+    our_key_name = os.environ.get('SKR_KEY_NAME', '')
+    if 'woodgrove' not in our_key_name.lower():
+        return jsonify({'error': 'Only Woodgrove Bank can use AI chat'}), 403
+
+    data = request.get_json()
+    if not data or not data.get('question'):
+        return jsonify({'error': 'Missing question'}), 400
+
+    question = str(data['question']).strip()
+    if len(question) > 500:
+        return jsonify({'error': 'Question too long (max 500 chars)'}), 400
+
+    # Check analytics cache
+    with _analytics_cache_lock:
+        summary = _cached_chat_summary
+    if not summary:
+        return jsonify({'error': 'No analytics data available. Run the analysis first.'}), 400
+
+    # Check Azure OpenAI configuration
+    endpoint = os.environ.get('AZURE_OPENAI_ENDPOINT', '')
+    api_key = os.environ.get('AZURE_OPENAI_API_KEY', '')
+    deployment = os.environ.get('AZURE_OPENAI_DEPLOYMENT', '')
+    if not endpoint or not api_key or not deployment:
+        return jsonify({'error': 'Azure OpenAI not configured'}), 503
+
+    try:
+        from openai import AzureOpenAI
+
+        client = AzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=api_key,
+            api_version="2024-06-01",
+        )
+        response = client.chat.completions.create(
+            model=deployment,
+            messages=[
+                {"role": "system", "content": _build_chat_system_prompt(summary)},
+                {"role": "user", "content": question},
+            ],
+            max_tokens=800,
+            temperature=0.3,
+        )
+        answer = response.choices[0].message.content
+        return jsonify({'answer': answer})
+    except Exception as e:
+        app.logger.error("Chat error: %s", str(e))
+        return jsonify({'error': 'AI service temporarily unavailable'}), 503
+
+
+@app.route('/partner/chat-status')
+def partner_chat_status():
+    """Check whether AI chat is available (analytics cached + OpenAI configured)."""
+    with _analytics_cache_lock:
+        has_data = _cached_chat_summary is not None
+    endpoint = os.environ.get('AZURE_OPENAI_ENDPOINT', '')
+    api_key = os.environ.get('AZURE_OPENAI_API_KEY', '')
+    deployment = os.environ.get('AZURE_OPENAI_DEPLOYMENT', '')
+    has_openai = bool(endpoint and api_key and deployment)
+    return jsonify({
+        'available': has_data and has_openai,
+        'has_data': has_data,
+        'has_openai': has_openai,
+        'endpoint': endpoint if endpoint else None,
+        'deployment': deployment if deployment else None,
+        'key_configured': bool(api_key),
+    })
+
+
+@app.route('/partner/openai-diag')
+def partner_openai_diagnostics():
+    """
+    Run connectivity diagnostics against the Azure OpenAI endpoint.
+    Tests DNS resolution, TCP connectivity, API reachability, and a live completion.
+    """
+    import socket
+    import urllib.parse
+
+    our_key_name = os.environ.get('SKR_KEY_NAME', '')
+    if 'woodgrove' not in our_key_name.lower():
+        return jsonify({'error': 'Only Woodgrove Bank can run OpenAI diagnostics'}), 403
+
+    endpoint = os.environ.get('AZURE_OPENAI_ENDPOINT', '')
+    api_key = os.environ.get('AZURE_OPENAI_API_KEY', '')
+    deployment = os.environ.get('AZURE_OPENAI_DEPLOYMENT', '')
+
+    diag = {
+        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'config': {
+            'endpoint': endpoint or '(not set)',
+            'deployment': deployment or '(not set)',
+            'key_configured': bool(api_key),
+            'key_length': len(api_key) if api_key else 0,
+        },
+        'dns': {'status': 'skipped'},
+        'tcp': {'status': 'skipped'},
+        'api_health': {'status': 'skipped'},
+        'completion_test': {'status': 'skipped'},
+    }
+
+    if not endpoint:
+        diag['overall'] = 'fail'
+        diag['message'] = 'AZURE_OPENAI_ENDPOINT not set'
+        return jsonify(diag)
+
+    # Parse hostname from endpoint
+    parsed = urllib.parse.urlparse(endpoint)
+    hostname = parsed.hostname or ''
+    port = parsed.port or 443
+    diag['config']['hostname'] = hostname
+    diag['config']['port'] = port
+
+    # Step 1: DNS resolution
+    try:
+        start = time.time()
+        addrs = socket.getaddrinfo(hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        elapsed = round((time.time() - start) * 1000, 1)
+        ip_list = list(set(a[4][0] for a in addrs))
+        diag['dns'] = {'status': 'ok', 'resolved_ips': ip_list, 'time_ms': elapsed}
+    except Exception as e:
+        diag['dns'] = {'status': 'fail', 'error': str(e)}
+        diag['overall'] = 'fail'
+        diag['message'] = f'DNS resolution failed for {hostname}'
+        return jsonify(diag)
+
+    # Step 2: TCP connectivity
+    try:
+        start = time.time()
+        sock = socket.create_connection((hostname, port), timeout=10)
+        elapsed = round((time.time() - start) * 1000, 1)
+        sock.close()
+        diag['tcp'] = {'status': 'ok', 'time_ms': elapsed}
+    except Exception as e:
+        diag['tcp'] = {'status': 'fail', 'error': str(e)}
+        diag['overall'] = 'fail'
+        diag['message'] = f'TCP connection to {hostname}:{port} failed'
+        return jsonify(diag)
+
+    # Step 3: API health (GET the endpoint root via requests)
+    try:
+        import requests as req_lib
+        start = time.time()
+        resp = req_lib.get(
+            f"{endpoint.rstrip('/')}/openai/deployments?api-version=2024-06-01",
+            headers={'api-key': api_key},
+            timeout=15,
+        )
+        elapsed = round((time.time() - start) * 1000, 1)
+        diag['api_health'] = {
+            'status': 'ok' if resp.status_code < 400 else 'warn',
+            'http_status': resp.status_code,
+            'time_ms': elapsed,
+        }
+    except Exception as e:
+        diag['api_health'] = {'status': 'fail', 'error': str(e)}
+
+    # Step 4: Live completion test (lightweight)
+    if api_key and deployment:
+        try:
+            from openai import AzureOpenAI
+            start = time.time()
+            client = AzureOpenAI(
+                azure_endpoint=endpoint,
+                api_key=api_key,
+                api_version="2024-06-01",
+            )
+            resp = client.chat.completions.create(
+                model=deployment,
+                messages=[{"role": "user", "content": "Reply with exactly: OK"}],
+                max_tokens=5,
+                temperature=0,
+            )
+            elapsed = round((time.time() - start) * 1000, 1)
+            reply = resp.choices[0].message.content.strip() if resp.choices else '(empty)'
+            diag['completion_test'] = {
+                'status': 'ok',
+                'reply': reply,
+                'model': resp.model if hasattr(resp, 'model') else deployment,
+                'time_ms': elapsed,
+                'usage': {
+                    'prompt_tokens': resp.usage.prompt_tokens if resp.usage else None,
+                    'completion_tokens': resp.usage.completion_tokens if resp.usage else None,
+                },
+            }
+        except Exception as e:
+            diag['completion_test'] = {'status': 'fail', 'error': str(e)}
+
+    # Overall assessment
+    statuses = [diag[k].get('status') for k in ('dns', 'tcp', 'api_health', 'completion_test') if diag[k].get('status') != 'skipped']
+    if all(s == 'ok' for s in statuses):
+        diag['overall'] = 'ok'
+        diag['message'] = 'All connectivity checks passed'
+    elif any(s == 'fail' for s in statuses):
+        diag['overall'] = 'fail'
+        diag['message'] = 'One or more connectivity checks failed'
+    else:
+        diag['overall'] = 'partial'
+        diag['message'] = 'Some checks returned warnings'
+
+    return jsonify(diag)
+
 
 _auto_init_started = False
 _auto_init_lock = threading.Lock()

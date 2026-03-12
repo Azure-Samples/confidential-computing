@@ -41,6 +41,7 @@ This project deploys **three containers** running identical code to demonstrate 
 - **Attestation Claim Explanations** - Detailed breakdown of every MAA token claim, grouped by category with human-readable descriptions
 - **Container Access Testing** - Live proof that SSH, exec, and shell access are blocked by the ccePolicy
 - **Unique Per-Deployment Storage** - Each deployment uses `consolidated-records-{resource_group}.json`
+- **AI Chat Assistant** - Natural language queries over analytics results powered by Azure OpenAI (gpt-4o-mini), with data isolation ensuring the LLM only sees aggregate summaries
 
 ## Architecture
 
@@ -455,6 +456,31 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `MultiPartyTopology.svg` | High-level topology diagram |
 | `MultiPartyArchitecture.svg` | Detailed architecture diagram |
 | `DataFlowDiagram.svg` | Encrypted data flow diagram showing TEE decryption |
+| `requirements.txt` | Python dependencies including `openai` for AI Chat |
+
+## AI Chat Assistant
+
+The Woodgrove Bank dashboard includes an **AI Chat Assistant** powered by Azure OpenAI (gpt-4o-mini). After partner analytics complete, users can ask natural language questions about the results.
+
+### How It Works
+
+1. **Analytics run first** — Partner data is decrypted inside the TEE, and aggregate statistics are computed
+2. **Summary cached** — A structured summary of all analytics (no raw records) is cached in memory
+3. **Chat queries** — The cached summary is sent as system context to Azure OpenAI; the LLM answers questions based only on aggregate data
+4. **Data isolation** — The LLM never sees raw transaction records, individual customer data, or encryption keys. Only pre-computed aggregates leave the TEE boundary via the chat endpoint.
+
+### Provisioning
+
+The `-Build` phase of `Deploy-MultiFinance.ps1` automatically:
+- Creates an Azure OpenAI account (`{prefix}-openai-finance`)
+- Deploys the `gpt-4o-mini` model with GlobalStandard SKU
+- Stores the API key in the Woodgrove Key Vault
+
+No manual Azure OpenAI setup is required.
+
+### Disabling Chat
+
+If the `AZURE_OPENAI_ENDPOINT` environment variable is empty or unset, the chat feature is gracefully disabled. The chat toggle button will not appear on the dashboard.
 
 ## API Endpoints
 
@@ -477,6 +503,8 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `/container/access-test` | POST | Attempt SSH/exec/shell access (all blocked by ccePolicy) |
 | `/debug/partner-keys` | GET | Inspect stored partner key structure (diagnostics) |
 | `/debug/test-partner-decrypt` | POST | Test single-record partner decryption with detailed errors |
+| `/partner/chat` | POST | Ask a natural language question about analytics results (requires Azure OpenAI) |
+| `/partner/chat-status` | GET | Check if AI Chat is available (OpenAI configured + analytics cached) |
 
 ## Troubleshooting
 

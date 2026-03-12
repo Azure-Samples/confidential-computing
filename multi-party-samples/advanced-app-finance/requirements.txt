@@ -9,3 +9,6 @@ requests>=2.31.0,<3.0.0
 
 # Cryptography library for RSA encryption/decryption
 cryptography>=42.0.0,<45.0.0
+
+# Azure OpenAI client for AI chat
+openai>=1.0.0,<3.0.0

@@ -883,6 +883,63 @@ function Invoke-Build {
     az keyvault secret set --vault-name $KeyVaultName --name "acr-username" --value $acrUsername --only-show-errors | Out-Null
     az keyvault secret set --vault-name $KeyVaultName --name "acr-password" --value $acrPassword --only-show-errors | Out-Null
     
+    # ========== Provision Azure OpenAI for Woodgrove AI Chat ==========
+    Write-Host ""
+    Write-Host "Provisioning Azure OpenAI for Woodgrove AI Chat..." -ForegroundColor Cyan
+    $OpenAIAccountName = "${Prefix}-openai-finance"
+    $OpenAIDeploymentName = "gpt-4o-mini"
+    
+    # Create Cognitive Services account (kind=OpenAI)
+    $existingOAI = az cognitiveservices account show --name $OpenAIAccountName --resource-group $ResourceGroup -o json 2>$null | ConvertFrom-Json
+    if (-not $existingOAI) {
+        Write-Host "  Creating Azure OpenAI account: $OpenAIAccountName"
+        az cognitiveservices account create `
+            --name $OpenAIAccountName `
+            --resource-group $ResourceGroup `
+            --location $Location `
+            --kind OpenAI `
+            --sku S0 `
+            --yes `
+            --only-show-errors | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Failed to create Azure OpenAI account" }
+    } else {
+        Write-Host "  Azure OpenAI account already exists: $OpenAIAccountName"
+    }
+    
+    # Deploy gpt-4o-mini model
+    $existingModel = az cognitiveservices account deployment show `
+        --name $OpenAIAccountName `
+        --resource-group $ResourceGroup `
+        --deployment-name $OpenAIDeploymentName -o json 2>$null | ConvertFrom-Json
+    if (-not $existingModel) {
+        Write-Host "  Deploying model: $OpenAIDeploymentName"
+        az cognitiveservices account deployment create `
+            --name $OpenAIAccountName `
+            --resource-group $ResourceGroup `
+            --deployment-name $OpenAIDeploymentName `
+            --model-name "gpt-4o-mini" `
+            --model-version "2024-07-18" `
+            --model-format OpenAI `
+            --sku-capacity 30 `
+            --sku-name "GlobalStandard" `
+            --only-show-errors | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Failed to deploy OpenAI model" }
+    } else {
+        Write-Host "  Model deployment already exists: $OpenAIDeploymentName"
+    }
+    
+    # Retrieve endpoint and key
+    $OpenAIEndpoint = az cognitiveservices account show `
+        --name $OpenAIAccountName --resource-group $ResourceGroup `
+        --query properties.endpoint -o tsv
+    $OpenAIKey = az cognitiveservices account keys list `
+        --name $OpenAIAccountName --resource-group $ResourceGroup `
+        --query key1 -o tsv
+    
+    # Store key in Woodgrove's Key Vault
+    az keyvault secret set --vault-name $KeyVaultNameC --name "openai-key" --value $OpenAIKey --only-show-errors | Out-Null
+    Write-Success "Azure OpenAI provisioned ($OpenAIDeploymentName) — key stored in $KeyVaultNameC"
+    
     # Save configuration with both companies
     $config = @{
         registryName = $RegistryName
@@ -920,6 +977,12 @@ function Invoke-Build {
             identityName = $IdentityNameC
             identityResourceId = $IdentityResourceIdC
             identityClientId = $IdentityClientIdC
+        }
+        # Azure OpenAI configuration
+        openai = @{
+            endpoint = $OpenAIEndpoint
+            deploymentName = $OpenAIDeploymentName
+            keyVaultSecret = "openai-key"
         }
     }
     Save-Config $config
@@ -994,6 +1057,21 @@ function Invoke-Deploy {
         throw "Failed to retrieve ACR credentials from Key Vault"
     }
     Write-Success "Credentials retrieved successfully"
+    
+    # Get OpenAI key from Woodgrove's Key Vault for AI Chat
+    $openaiConfig = $config.openai
+    $OpenAIKey = ""
+    if ($openaiConfig) {
+        Write-Host "Retrieving OpenAI key from Key Vault..."
+        $OpenAIKey = az keyvault secret show --vault-name $config.woodgrove.keyVaultName --name $openaiConfig.keyVaultSecret --query "value" -o tsv
+        if ($OpenAIKey) {
+            Write-Success "OpenAI key retrieved"
+        } else {
+            Write-Warning "OpenAI key not found in Key Vault — AI Chat will be disabled"
+        }
+    } else {
+        Write-Warning "No OpenAI config found — AI Chat will be disabled. Re-run -Build to provision."
+    }
     Write-Host ""
     
     # Load storage connection string from .env file if it exists
@@ -1153,6 +1231,9 @@ function Invoke-Deploy {
             'partnerFabrikamAkvEndpoint' = @{ 'value' = $config.fabrikam.skrAkvEndpoint }
             'partnerContosoUrl' = @{ 'value' = $contosoContainerUrl }
             'partnerFabrikamUrl' = @{ 'value' = $fabrikamContainerUrl }
+            'azureOpenaiEndpoint' = @{ 'value' = if ($openaiConfig) { $openaiConfig.endpoint } else { '' } }
+            'azureOpenaiKey' = @{ 'value' = if ($OpenAIKey) { $OpenAIKey } else { '' } }
+            'azureOpenaiDeployment' = @{ 'value' = if ($openaiConfig) { $openaiConfig.deploymentName } else { '' } }
         }
     }
     $params_companyC | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-woodgrove.json'

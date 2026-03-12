@@ -121,6 +121,27 @@
       "metadata": {
         "description": "SHA256 hash of the container security policy (x-ms-sevsnpvm-hostdata)"
       }
+    },
+    "azureOpenaiEndpoint": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure OpenAI endpoint URL for AI chat"
+      }
+    },
+    "azureOpenaiKey": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure OpenAI API key"
+      }
+    },
+    "azureOpenaiDeployment": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure OpenAI model deployment name"
+      }
     }
   },
   "resources": [
@@ -190,6 +211,18 @@
                 {
                   "name": "SECURITY_POLICY_HASH",
                   "value": "[parameters('securityPolicyHash')]"
+                },
+                {
+                  "name": "AZURE_OPENAI_ENDPOINT",
+                  "value": "[parameters('azureOpenaiEndpoint')]"
+                },
+                {
+                  "name": "AZURE_OPENAI_API_KEY",
+                  "secureValue": "[parameters('azureOpenaiKey')]"
+                },
+                {
+                  "name": "AZURE_OPENAI_DEPLOYMENT",
+                  "value": "[parameters('azureOpenaiDeployment')]"
                 }
               ],
               "resources": {

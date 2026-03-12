@@ -297,6 +297,45 @@ The web UI dynamically updates security feature indicators based on attestation 
 | Remote Attestation | Valid token received |
 | Runtime Protection | `x-ms-sevsnpvm-is-debuggable` is `false` |
 
+## AI Chat Data Isolation
+
+The Woodgrove Bank dashboard includes an AI Chat Assistant powered by Azure OpenAI. This section documents how data isolation is maintained when chat queries are processed.
+
+### What the LLM Sees
+
+The chat system prompt contains **only pre-computed aggregate analytics** — never raw transaction records. Specifically:
+
+| Data Sent to LLM | Examples | Contains PII? |
+|-------------------|----------|---------------|
+| Category totals | "groceries: $1.2M across 4,200 txns" | No |
+| Hourly/daily patterns | "peak hour: 14:00 with 890 txns" | No |
+| Country aggregates | "US: $800K, UK: $200K" | No |
+| Cross-tabulations | "groceries peak at 12:00" | No |
+| Loan summary stats | "avg loan: $15K, median: $12K" | No |
+
+### What the LLM Never Sees
+
+- Raw transaction records (card numbers, merchant IDs, individual amounts)
+- Encryption keys or Key Vault secrets
+- Attestation tokens or security policy hashes
+- Storage connection strings or partner URLs
+- Individual customer data from Contoso or Fabrikam
+
+### Data Flow
+
+```
+Raw partner data (encrypted in Azure Storage)
+    ↓ Decrypted inside TEE via SKR keys
+    ↓ Aggregate analytics computed in-memory
+    ↓ Structured summary cached (no raw records)
+    ↓ Summary sent as system prompt to Azure OpenAI
+    ↓ LLM response returned to user
+```
+
+### Rate Limiting
+
+The `/partner/chat` endpoint enforces a rate limit of **10 requests per 60 seconds** per client to prevent abuse of the Azure OpenAI API.
+
 ## Files Reference
 
 | File | Purpose |
