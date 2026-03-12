@@ -1,0 +1,501 @@
+transaction_id,date_time,customer_name,customer_age,customer_address,customer_postal_code,customer_country,merchant_name,merchant_category,amount,currency
+TXN-658174840,2025-01-01 01:31:12,Astrid Persson,69,23 Anna Salai,600002,India,Contoso Vehicle Loans,Car Loan,748.87,INR
+TXN-179938974,2025-01-01 02:05:50,Brian Lopez,77,12 High Street,SW1A 1AA,United Kingdom,Contoso Education Finance,Student Loan Repayment,148.28,GBP
+TXN-240830915,2025-01-01 02:35:32,Daniel Patel,47,9 Salamanca Place,7000,Australia,Contoso Education Finance,Student Loan Repayment,342.14,AUD
+TXN-775994940,2025-01-01 03:06:58,Timothy Martin,30,6-7-8 Ueno,110-0005,Japan,Woodgrove Student Lending,Student Loan Repayment,586.98,JPY
+TXN-851452594,2025-01-01 08:44:55,Hans Clark,38,Avenida Paulista 1000,01310-100,Brazil,Woodgrove Mortgage Services,Mortgage,1947.88,BRL
+TXN-469000038,2025-01-01 09:51:48,Noah Oliveira,63,1-1-1 Harajuku,150-0001,Japan,Contoso Insurance,Insurance,458.55,JPY
+TXN-275497920,2025-01-03 07:56:58,Edward Martinez,44,Paseo de Montejo 100,97000,Mexico,Adventure Fuel Stop,Petrol Station,71.63,MXN
+TXN-200327126,2025-01-03 09:40:57,Sakura Svensson,42,33 Bristol Mews,BS1 1AA,United Kingdom,Contoso Coffee,Coffee Shop,4.36,GBP
+TXN-679041277,2025-01-03 10:08:38,Matthew Perez,61,999 Sequoia Ridge,97201,United States,Northwind Petrol,Petrol Station,47.32,USD
+TXN-204093428,2025-01-05 11:38:49,Raj Garcia,45,88 Adelaide Street,4000,Australia,Northwind Grocers,Grocery Store,105.94,AUD
+TXN-104445138,2025-01-05 18:39:27,Michelle Costa,31,654 Portage Avenue,R3C 0G1,Canada,Trey Research Grill,Restaurant - American,31.67,CAD
+TXN-856616963,2025-01-05 19:51:19,Mia Torres,42,42 Boulevard de la Liberte,59000,France,Litware Digital,Electronics Store,711.85,EUR
+TXN-409300759,2025-01-06 12:23:54,Deborah Wilson,64,9 Salamanca Place,7000,Australia,Wide World Grocers,Grocery Store,63.61,AUD
+TXN-317826986,2025-01-07 14:12:57,Elizabeth Schmidt,42,88 Brigade Road,560001,India,Adventure Works Electronics,Electronics Store,1104.96,INR
+TXN-951431111,2025-01-11 20:40:14,Dorothy Lee,40,Gartenweg 8,20095,Germany,Contoso Quick Bites,Fast Food,11.60,EUR
+TXN-614552355,2025-01-14 13:00:11,Mary Oliveira,44,Rua XV de Novembro 88,90020-080,Brazil,Tailspin Burgers,Fast Food,17.21,BRL
+TXN-620465706,2025-01-14 15:08:11,Joseph Yamamoto,77,321 Elm Boulevard,77001,United States,Contoso Coffee,Coffee Shop,10.48,USD
+TXN-915241839,2025-01-14 16:01:03,Jason Hernandez,57,11 Cambridge Way,LS1 1AA,United Kingdom,Northwind Grocers,Grocery Store,193.41,GBP
+TXN-795648795,2025-01-14 17:28:32,Karen Rossi,21,654 Portage Avenue,R3C 0G1,Canada,Northwind Fried Chicken,Fast Food,7.92,CAD
+TXN-158374016,2025-01-15 03:36:00,James Torres,47,42 George Street,2000,Australia,Contoso Vehicle Loans,Car Loan,729.25,AUD
+TXN-474291782,2025-01-15 08:50:25,Joseph Yamamoto,77,321 Elm Boulevard,77001,United States,Woodgrove Student Lending,Student Loan Repayment,144.63,USD
+TXN-106079881,2025-01-15 11:55:06,Zara Johansson,48,Rua das Flores 55,80020-010,Brazil,Northwind Grocers,Grocery Store,156.65,BRL
+TXN-531665346,2025-01-16 07:57:38,Greta Ferrari,19,56 Queen's Gate,W1A 0AX,United Kingdom,Fourth Coffee,Coffee Shop,5.50,GBP
+TXN-567123895,2025-01-17 19:52:17,Noah Oliveira,63,1-1-1 Harajuku,150-0001,Japan,Contoso Fresh Market,Grocery Store,76.96,JPY
+TXN-474922945,2025-01-18 11:31:22,Natasha Gonzalez,78,31 FC Road,411001,India,Fabrikam Pizza Express,Fast Food,5.81,INR
+TXN-298084574,2025-01-19 07:22:03,James Hernandez,46,123 Yonge Street,M5B 2H1,Canada,Northwind Espresso,Coffee Shop,7.93,CAD
+TXN-552051881,2025-01-19 08:32:42,Sakura Russo,24,88 Brigade Road,560001,India,Adventure Fuel Stop,Petrol Station,78.35,INR
+TXN-933689887,2025-01-19 10:13:57,Kenji Li,66,23 Anna Salai,600002,India,Northwind Espresso,Coffee Shop,3.94,INR
+TXN-213227248,2025-01-19 10:17:18,Mei Gonzalez,30,27 Avenue des Champs-Elysees,75008,France,Alpine Bean Roasters,Coffee Shop,9.16,EUR
+TXN-615655465,2025-01-20 09:36:42,Anthony Thompson,76,Schulstrasse 42,50667,Germany,Fourth Coffee,Coffee Shop,9.31,EUR
+TXN-283942390,2025-01-20 12:35:52,Elizabeth Schmidt,42,88 Brigade Road,560001,India,Northwind Curry House,Restaurant - Indian,38.14,INR
+TXN-678749009,2025-01-20 12:58:16,Olivia Moore,66,333 Ash Place,30301,United States,Trey Research Grill,Restaurant - American,90.15,USD
+TXN-248425070,2025-01-20 14:40:14,Barbara Larsson,62,Rua das Flores 55,80020-010,Brazil,Fourth Coffee,Coffee Shop,11.72,BRL
+TXN-605691625,2025-01-20 22:29:36,Ava Kumar,29,Rosenweg 12,01067,Germany,Northwind Fried Chicken,Fast Food,5.37,EUR
+TXN-393446654,2025-01-21 08:06:52,Aisha Ali,28,444 Poplar Circle,94102,United States,Alpine Bean Roasters,Coffee Shop,6.49,USD
+TXN-994165280,2025-01-23 18:18:48,Mia Muller,52,9 Banjara Hills,500034,India,Datum Steakhouse,Restaurant - American,42.78,INR
+TXN-282564192,2025-01-24 07:54:25,Ivan Rossi,28,Rua XV de Novembro 88,90020-080,Brazil,Northwind Espresso,Coffee Shop,9.45,BRL
+TXN-904420398,2025-01-26 12:28:15,Charles Clark,19,31 FC Road,411001,India,Northwind Fried Chicken,Fast Food,9.06,INR
+TXN-566699071,2025-01-26 17:55:52,Greta Ferrari,19,56 Queen's Gate,W1A 0AX,United Kingdom,Contoso Fuel,Petrol Station,32.05,GBP
+TXN-637266064,2025-01-27 10:13:48,Anthony Green,61,88 Brigade Road,560001,India,Contoso Fuel,Petrol Station,46.27,INR
+TXN-648742434,2025-01-27 22:29:01,Sharon Allen,68,6-7-8 Ueno,110-0005,Japan,Contoso Quick Bites,Fast Food,5.18,JPY
+TXN-754651104,2025-01-28 14:39:05,Sakura Svensson,42,33 Bristol Mews,BS1 1AA,United Kingdom,Contoso Fresh Market,Grocery Store,55.87,GBP
+TXN-773448348,2025-01-28 16:07:42,Natasha Yamamoto,70,Hauptstrasse 15,10115,Germany,Tailspin Grocery,Grocery Store,104.06,EUR
+TXN-738073370,2025-01-29 12:01:32,Kimberly Oliveira,33,78 Victoria Lane,M1 1AA,United Kingdom,Wide World Grocers,Grocery Store,149.83,GBP
+TXN-503221446,2025-01-30 07:48:07,Hans Clark,38,Avenida Paulista 1000,01310-100,Brazil,Fourth Coffee,Coffee Shop,3.84,BRL
+TXN-675274417,2025-01-30 11:06:03,Jason Hernandez,57,11 Cambridge Way,LS1 1AA,United Kingdom,Northwind Grocers,Grocery Store,33.44,GBP
+TXN-970365837,2025-01-31 07:35:59,Matthew Perez,61,999 Sequoia Ridge,97201,United States,Fourth Coffee,Coffee Shop,7.65,USD
+TXN-380405844,2025-02-01 01:02:30,Kenji Gonzalez,72,3 Place Bellecour,69002,France,Woodgrove Insurance Group,Insurance,735.14,EUR
+TXN-839974145,2025-02-01 01:20:42,Mary Anderson,75,3-4-5 Ikebukuro,170-0013,Japan,Contoso Vehicle Loans,Car Loan,583.79,JPY
+TXN-901369605,2025-02-01 02:14:51,Christopher Costa,66,555 Willow Trail,75201,United States,Fabrikam Auto Finance,Car Loan,611.88,USD
+TXN-189815579,2025-02-01 09:01:49,Stephanie Davis,60,90 Oxford Terrace,B1 1AA,United Kingdom,Contoso Insurance,Insurance,542.39,GBP
+TXN-905272966,2025-02-01 09:27:22,Anthony Thompson,76,Schulstrasse 42,50667,Germany,Alpine Bean Roasters,Coffee Shop,3.82,EUR
+TXN-765868191,2025-02-01 09:28:28,Natasha Gonzalez,78,31 FC Road,411001,India,Woodgrove Student Lending,Student Loan Repayment,421.62,INR
+TXN-679077481,2025-02-02 08:48:02,Omar Miller,29,2-3-4 Akihabara,101-0021,Japan,Northwind Espresso,Coffee Shop,10.85,JPY
+TXN-594119744,2025-02-02 14:03:59,Mia Muller,52,9 Banjara Hills,500034,India,Adventure Works Electronics,Electronics Store,159.24,INR
+TXN-122954985,2025-02-04 13:33:37,Anthony Thompson,76,Schulstrasse 42,50667,Germany,Contoso Trattoria,Restaurant - Italian,55.94,EUR
+TXN-946712714,2025-02-04 18:14:25,William Baker,44,Calle Madero 55,06000,Mexico,Contoso Bank ATM,Cash Withdrawal,161.50,MXN
+TXN-737459827,2025-02-05 21:51:00,Elizabeth Schmidt,42,88 Brigade Road,560001,India,Wingtip Electronics,Electronics Store,1118.66,INR
+TXN-952689660,2025-02-06 14:06:03,Diego Lee,57,987 Spring Garden Road,B3J 3R4,Canada,Northwind Grocers,Grocery Store,18.15,CAD
+TXN-494955989,2025-02-08 09:59:00,Mei Persson,23,777 Juniper Run,55401,United States,Adventure Fuel Stop,Petrol Station,38.76,USD
+TXN-777163566,2025-02-09 12:06:34,Brian Robinson,19,999 Sequoia Ridge,97201,United States,Northwind Grocers,Grocery Store,169.24,USD
+TXN-358071566,2025-02-09 17:35:37,Ava Kumar,29,Rosenweg 12,01067,Germany,Wide World Grocers,Grocery Store,174.64,EUR
+TXN-610160434,2025-02-12 10:39:21,Donald Li,38,Waldstrasse 55,40210,Germany,Northwind Grocers,Grocery Store,137.80,EUR
+TXN-763188384,2025-02-14 19:00:08,Kimberly Oliveira,33,78 Victoria Lane,M1 1AA,United Kingdom,Contoso Fresh Market,Grocery Store,214.85,GBP
+TXN-521917600,2025-02-15 08:53:48,Fatima Meyer,50,42 MG Road,400001,India,Woodgrove Student Lending,Student Loan Repayment,342.00,INR
+TXN-359412112,2025-02-15 10:28:04,Michael Singh,36,42 MG Road,400001,India,Contoso Home Loans,Mortgage,981.61,INR
+TXN-527451393,2025-02-16 08:57:16,Mei Persson,23,777 Juniper Run,55401,United States,Alpine Bean Roasters,Coffee Shop,4.67,USD
+TXN-347629715,2025-02-17 18:15:18,Brian Silva,63,Avenida Brasil 450,30130-000,Brazil,Contoso Fresh Market,Grocery Store,42.88,BRL
+TXN-941894636,2025-02-19 17:11:04,Olivia Souza,54,123 Yonge Street,M5B 2H1,Canada,Contoso Bank ATM,Cash Withdrawal,388.90,CAD
+TXN-443692832,2025-02-20 09:53:37,Jason Hernandez,57,11 Cambridge Way,LS1 1AA,United Kingdom,Tailspin Grocery,Grocery Store,198.28,GBP
+TXN-623694887,2025-02-20 10:14:15,Donna Weber,43,23 Hay Street,6000,Australia,Contoso Fresh Market,Grocery Store,199.42,AUD
+TXN-334353399,2025-02-20 17:50:54,Daniel Johansson,69,15 Collins Street,3000,Australia,Northwind Grocers,Grocery Store,173.86,AUD
+TXN-131678959,2025-02-21 07:18:56,Ava Kumar,29,Rosenweg 12,01067,Germany,Contoso Coffee,Coffee Shop,4.90,EUR
+TXN-999533582,2025-02-22 13:42:28,Ethan Lewis,60,23 Anna Salai,600002,India,Contoso Quick Bites,Fast Food,7.47,INR
+TXN-702315104,2025-02-22 14:01:43,Lisa Rivera,64,Avenida Revolucion 300,44100,Mexico,Wingtip Electronics,Electronics Store,2316.36,MXN
+TXN-717531062,2025-02-24 11:11:48,Amanda Garcia,55,76 Civil Lines,302001,India,Northwind Fried Chicken,Fast Food,10.32,INR
+TXN-227875566,2025-02-24 12:48:13,Margaret Romano,44,27 Avenue des Champs-Elysees,75008,France,Northwind Grocers,Grocery Store,161.41,EUR
+TXN-391679252,2025-02-25 17:55:12,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Tailspin Grocery,Grocery Store,39.89,JPY
+TXN-416919949,2025-02-26 19:54:08,Natasha Yamamoto,70,Hauptstrasse 15,10115,Germany,Wingtip Electronics,Electronics Store,272.99,EUR
+TXN-700476735,2025-02-28 09:17:52,Greta Ferrari,19,56 Queen's Gate,W1A 0AX,United Kingdom,Contoso Education Finance,Student Loan Repayment,389.81,GBP
+TXN-315870787,2025-02-28 10:15:42,Linda Williams,43,42 Boulevard de la Liberte,59000,France,Contoso Home Loans,Mortgage,3203.70,EUR
+TXN-386429569,2025-03-01 00:56:37,Michelle Robinson,21,23 Hay Street,6000,Australia,Woodgrove Insurance Group,Insurance,274.55,AUD
+TXN-840054156,2025-03-01 03:30:33,Chen King,78,555 Willow Trail,75201,United States,Woodgrove Student Lending,Student Loan Repayment,234.38,USD
+TXN-550068353,2025-03-01 03:52:29,Barbara Larsson,62,Rua das Flores 55,80020-010,Brazil,Woodgrove Mortgage Services,Mortgage,3046.60,BRL
+TXN-208780196,2025-03-01 13:16:02,Mary Oliveira,44,Rua XV de Novembro 88,90020-080,Brazil,Tailspin Burgers,Fast Food,15.50,BRL
+TXN-548966862,2025-03-01 15:05:34,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Tailspin Grocery,Grocery Store,67.47,JPY
+TXN-990593537,2025-03-03 13:05:57,Timothy Martin,30,6-7-8 Ueno,110-0005,Japan,Contoso Quick Bites,Fast Food,10.62,JPY
+TXN-755010432,2025-03-05 10:17:37,Ava Kumar,29,Rosenweg 12,01067,Germany,Woodgrove Bank ATM,Cash Withdrawal,348.83,EUR
+TXN-460658657,2025-03-05 12:06:49,Joshua Jones,54,888 Magnolia Bend,80201,United States,Wide World Grocers,Grocery Store,189.73,USD
+TXN-604644102,2025-03-05 17:00:40,Patricia Khan,76,66 Durham Row,G1 1AA,United Kingdom,Contoso Fresh Market,Grocery Store,45.26,GBP
+TXN-315267167,2025-03-06 19:47:42,Charles Chen,64,456 Rue Sainte-Catherine,H3B 1A7,Canada,Wingtip Noodle House,Restaurant - Vietnamese,31.97,CAD
+TXN-130448406,2025-03-08 07:41:00,Betty Ramirez,72,Rosenweg 12,01067,Germany,Alpine Bean Roasters,Coffee Shop,3.79,EUR
+TXN-878345722,2025-03-08 11:01:33,Michael Singh,36,42 MG Road,400001,India,Tailspin Grocery,Grocery Store,75.78,INR
+TXN-527033382,2025-03-08 11:25:53,Brian Schmidt,50,456 Rue Sainte-Catherine,H3B 1A7,Canada,Tailspin Burgers,Fast Food,10.61,CAD
+TXN-617426006,2025-03-08 19:20:18,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Wingtip Electronics,Electronics Store,1516.99,JPY
+TXN-849200388,2025-03-09 08:53:29,Kofi Miller,64,Calle Madero 55,06000,Mexico,Northwind Petrol,Petrol Station,79.17,MXN
+TXN-233635754,2025-03-09 18:02:56,Priya Schulz,29,31 FC Road,411001,India,Contoso Fresh Market,Grocery Store,37.26,INR
+TXN-105510980,2025-03-11 09:17:37,Sakura Russo,24,88 Brigade Road,560001,India,Northwind Espresso,Coffee Shop,8.48,INR
+TXN-446231589,2025-03-11 10:32:52,Donna Weber,43,23 Hay Street,6000,Australia,Northwind Grocers,Grocery Store,39.76,AUD
+TXN-780996082,2025-03-11 13:10:20,William Lewis,73,42 MG Road,400001,India,Trey Research Grill,Restaurant - American,54.81,INR
+TXN-482879974,2025-03-12 07:34:25,James Torres,47,42 George Street,2000,Australia,Contoso Coffee,Coffee Shop,9.86,AUD
+TXN-333379937,2025-03-13 10:44:22,Olivia Becker,59,15 Park Street,700016,India,Wide World Grocers,Grocery Store,137.63,INR
+TXN-365739622,2025-03-13 11:24:48,Sharon Allen,68,6-7-8 Ueno,110-0005,Japan,Trey Research Grill,Restaurant - American,24.37,JPY
+TXN-798212203,2025-03-14 14:27:00,Matthew Perez,61,999 Sequoia Ridge,97201,United States,Northwind Espresso,Coffee Shop,4.07,USD
+TXN-128888147,2025-03-15 08:21:49,Jessica Perez,42,Avenida Revolucion 300,44100,Mexico,Woodgrove Insurance Group,Insurance,183.30,MXN
+TXN-291489781,2025-03-15 10:39:56,Isabella Khan,46,333 Ash Place,30301,United States,Contoso Vehicle Loans,Car Loan,653.62,USD
+TXN-752910383,2025-03-15 13:06:29,Donna Robinson,60,42 George Street,2000,Australia,Alpine Bistro,Restaurant - French,161.12,AUD
+TXN-483943220,2025-03-16 15:20:24,Ivan Rossi,28,Rua XV de Novembro 88,90020-080,Brazil,Contoso Coffee,Coffee Shop,4.86,BRL
+TXN-384206374,2025-03-17 10:09:17,Patricia Svensson,71,3 Place Bellecour,69002,France,Northwind Espresso,Coffee Shop,3.64,EUR
+TXN-497960004,2025-03-19 07:41:14,Anya Yang,28,Paseo de Montejo 100,97000,Mexico,Contoso Fuel,Petrol Station,92.52,MXN
+TXN-427209748,2025-03-19 15:16:21,Donald Nakamura,58,15 Collins Street,3000,Australia,Fourth Coffee,Coffee Shop,10.20,AUD
+TXN-794269180,2025-03-20 12:44:49,Karen Rossi,21,654 Portage Avenue,R3C 0G1,Canada,Datum Steakhouse,Restaurant - American,84.42,CAD
+TXN-106865027,2025-03-20 18:30:12,Aisha Ali,28,444 Poplar Circle,94102,United States,Northwind Grocers,Grocery Store,226.28,USD
+TXN-967602120,2025-03-20 22:01:11,Steven Ali,72,Schulstrasse 42,50667,Germany,Tailspin Burgers,Fast Food,14.48,EUR
+TXN-823678313,2025-03-21 12:18:18,Raj Garcia,45,88 Adelaide Street,4000,Australia,Adventure Cantina,Restaurant - Mexican,63.92,AUD
+TXN-134048625,2025-03-21 14:43:45,Isabella Eriksson,72,7-8-9 Ginza,104-0061,Japan,Tailspin Grocery,Grocery Store,161.35,JPY
+TXN-931440654,2025-03-24 08:45:41,James Torres,47,42 George Street,2000,Australia,Northwind Petrol,Petrol Station,41.19,AUD
+TXN-115127818,2025-03-25 10:55:31,Michelle Robinson,21,23 Hay Street,6000,Australia,Contoso Fresh Market,Grocery Store,27.62,AUD
+TXN-176965071,2025-03-25 17:42:58,Christopher Costa,66,555 Willow Trail,75201,United States,Northwind Fried Chicken,Fast Food,23.21,USD
+TXN-292760230,2025-03-27 19:56:19,Mei Persson,23,777 Juniper Run,55401,United States,Fabrikam Pizza Express,Fast Food,14.04,USD
+TXN-982648702,2025-03-28 17:51:36,Olivia Moore,66,333 Ash Place,30301,United States,Wide World Grocers,Grocery Store,185.57,USD
+TXN-101150734,2025-03-28 19:35:22,Hans Rossi,64,Schulstrasse 42,50667,Germany,Datum Steakhouse,Restaurant - American,33.96,EUR
+TXN-890694725,2025-03-29 09:55:28,Michael Singh,36,42 MG Road,400001,India,Contoso Coffee,Coffee Shop,11.70,INR
+TXN-203277807,2025-03-30 17:13:53,Omar Nakamura,48,Avenida Brasil 450,30130-000,Brazil,Fabrikam Pizza Express,Fast Food,20.10,BRL
+TXN-966317100,2025-03-31 07:00:49,Isabella Wright,22,7-8-9 Ginza,104-0061,Japan,Northwind Espresso,Coffee Shop,8.44,JPY
+TXN-676573030,2025-03-31 12:04:58,Michelle Costa,31,654 Portage Avenue,R3C 0G1,Canada,Contoso Quick Bites,Fast Food,14.97,CAD
+TXN-541432800,2025-03-31 18:47:45,Lisa Rivera,64,Avenida Revolucion 300,44100,Mexico,Contoso Fresh Market,Grocery Store,193.98,MXN
+TXN-271287681,2025-03-31 21:47:02,Linda Fernandez,29,Paseo de Montejo 100,97000,Mexico,Northwind Fried Chicken,Fast Food,20.57,MXN
+TXN-313592816,2025-04-01 03:10:26,Donna Robinson,60,42 George Street,2000,Australia,Contoso Vehicle Loans,Car Loan,812.41,AUD
+TXN-617639487,2025-04-01 09:19:05,Elizabeth Schmidt,42,88 Brigade Road,560001,India,Fabrikam Life Insurance,Insurance,161.35,INR
+TXN-433386067,2025-04-01 09:49:09,Mary Anderson,75,3-4-5 Ikebukuro,170-0013,Japan,Woodgrove Mortgage Services,Mortgage,2516.50,JPY
+TXN-844922723,2025-04-01 12:52:52,Patricia Khan,76,66 Durham Row,G1 1AA,United Kingdom,Tailspin Burgers,Fast Food,21.90,GBP
+TXN-296766780,2025-04-01 19:40:27,Fatima Wilson,59,90 Oxford Terrace,B1 1AA,United Kingdom,Contoso Quick Bites,Fast Food,19.23,GBP
+TXN-895856560,2025-04-02 12:59:31,Lisa Rivera,64,Avenida Revolucion 300,44100,Mexico,Proseware Thai Kitchen,Restaurant - Thai,45.78,MXN
+TXN-128941515,2025-04-04 11:27:07,Barbara Larsson,62,Rua das Flores 55,80020-010,Brazil,Wide World Grocers,Grocery Store,108.20,BRL
+TXN-445308224,2025-04-05 17:19:28,Edward Martinez,44,Paseo de Montejo 100,97000,Mexico,Contoso Quick Bites,Fast Food,20.61,MXN
+TXN-929824235,2025-04-08 10:04:28,Zara Johansson,48,Rua das Flores 55,80020-010,Brazil,Fourth Coffee,Coffee Shop,5.28,BRL
+TXN-776428725,2025-04-09 18:07:14,Linda Fernandez,29,Paseo de Montejo 100,97000,Mexico,Litware Digital,Electronics Store,1324.79,MXN
+TXN-600721464,2025-04-11 08:57:26,Mark Muller,24,44 York Place,CF10 1AA,United Kingdom,Alpine Bean Roasters,Coffee Shop,11.69,GBP
+TXN-692727266,2025-04-11 13:57:45,Elizabeth Young,58,12 High Street,SW1A 1AA,United Kingdom,Wingtip Noodle House,Restaurant - Vietnamese,36.72,GBP
+TXN-363411938,2025-04-12 11:32:35,Daniel Patel,47,9 Salamanca Place,7000,Australia,Contoso Fresh Market,Grocery Store,87.54,AUD
+TXN-755434076,2025-04-13 06:00:23,Michael Colombo,35,3 Place Bellecour,69002,France,Fourth Coffee,Coffee Shop,10.64,EUR
+TXN-223319119,2025-04-13 18:45:03,Linda Williams,43,42 Boulevard de la Liberte,59000,France,Contoso Fresh Market,Grocery Store,216.88,EUR
+TXN-103580543,2025-04-14 18:04:52,Steven Ali,72,Schulstrasse 42,50667,Germany,Contoso Fuel,Petrol Station,45.68,EUR
+TXN-989637684,2025-04-15 08:30:46,James Wright,65,44 York Place,CF10 1AA,United Kingdom,Contoso Fuel,Petrol Station,56.29,GBP
+TXN-307338261,2025-04-15 10:36:25,Edward Martinez,44,Paseo de Montejo 100,97000,Mexico,Contoso Insurance,Insurance,214.43,MXN
+TXN-779947380,2025-04-15 10:52:44,Dorothy Lopez,57,Kirchweg 19,60311,Germany,Contoso Vehicle Loans,Car Loan,668.58,EUR
+TXN-172572565,2025-04-16 07:07:32,Christopher Costa,66,555 Willow Trail,75201,United States,Fourth Coffee,Coffee Shop,10.01,USD
+TXN-658094226,2025-04-19 08:18:20,Lisa Rivera,64,Avenida Revolucion 300,44100,Mexico,Northwind Espresso,Coffee Shop,4.01,MXN
+TXN-943339429,2025-04-19 13:26:07,William Baker,44,Calle Madero 55,06000,Mexico,Bellows Korean BBQ,Restaurant - Korean,50.41,MXN
+TXN-907648566,2025-04-20 13:21:55,Ivan Rossi,28,Rua XV de Novembro 88,90020-080,Brazil,Contoso Quick Bites,Fast Food,19.34,BRL
+TXN-867572041,2025-04-20 14:03:36,Isabella Wilson,26,789 Robson Street,V6Z 1C2,Canada,Northwind Petrol,Petrol Station,53.23,CAD
+TXN-597989083,2025-04-20 14:17:32,Sakura Svensson,42,33 Bristol Mews,BS1 1AA,United Kingdom,Northwind Petrol,Petrol Station,73.35,GBP
+TXN-668070099,2025-04-20 14:40:48,Paolo Garcia,41,42 Boulevard de la Liberte,59000,France,Contoso Fuel,Petrol Station,72.36,EUR
+TXN-991502014,2025-04-23 18:08:22,James Wright,65,44 York Place,CF10 1AA,United Kingdom,Tailspin Grocery,Grocery Store,82.23,GBP
+TXN-667945333,2025-04-24 11:24:55,Dorothy Lopez,57,Kirchweg 19,60311,Germany,Contoso Fresh Market,Grocery Store,141.14,EUR
+TXN-164150128,2025-04-24 13:16:18,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Contoso Quick Bites,Fast Food,5.77,JPY
+TXN-495390171,2025-04-26 17:40:40,Anya Yang,28,Paseo de Montejo 100,97000,Mexico,Tailspin Grocery,Grocery Store,84.32,MXN
+TXN-997835203,2025-04-26 18:50:40,Isabella Eriksson,72,7-8-9 Ginza,104-0061,Japan,Northwind Fried Chicken,Fast Food,17.59,JPY
+TXN-465518220,2025-04-27 06:13:07,Joseph Meyer,66,34 King's Road,EC1A 1BB,United Kingdom,Fourth Coffee,Coffee Shop,6.08,GBP
+TXN-945953534,2025-04-27 20:59:40,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Contoso Trattoria,Restaurant - Italian,27.59,JPY
+TXN-496155258,2025-04-28 09:29:45,Omar Miller,29,2-3-4 Akihabara,101-0021,Japan,Northwind Grocers,Grocery Store,59.00,JPY
+TXN-377502469,2025-04-28 19:27:08,Barbara Larsson,62,Rua das Flores 55,80020-010,Brazil,Tailspin Grocery,Grocery Store,30.99,BRL
+TXN-108203771,2025-04-29 17:16:23,Dorothy Thomas,38,15 Park Street,700016,India,Wide World Grocers,Grocery Store,31.13,INR
+TXN-997681083,2025-04-30 13:10:55,Anthony Wright,37,23 Anna Salai,600002,India,Woodgrove Bank ATM,Cash Withdrawal,252.68,INR
+TXN-839344572,2025-04-30 13:16:53,Omar Nakamura,48,Avenida Brasil 450,30130-000,Brazil,Fabrikam Tech Store,Electronics Store,415.93,BRL
+TXN-953072203,2025-04-30 13:45:14,Michelle Costa,31,654 Portage Avenue,R3C 0G1,Canada,Fabrikam Pizza Express,Fast Food,10.51,CAD
+TXN-557197346,2025-04-30 14:00:59,Zara Johansson,48,Rua das Flores 55,80020-010,Brazil,Northwind Grocers,Grocery Store,13.37,BRL
+TXN-534112516,2025-05-01 00:01:38,Michael Colombo,35,3 Place Bellecour,69002,France,Contoso Education Finance,Student Loan Repayment,357.77,EUR
+TXN-690568940,2025-05-01 08:24:03,William Lewis,73,42 MG Road,400001,India,Contoso Home Loans,Mortgage,1054.15,INR
+TXN-939997065,2025-05-01 09:58:54,Timothy Martin,30,6-7-8 Ueno,110-0005,Japan,Woodgrove Student Lending,Student Loan Repayment,136.03,JPY
+TXN-275374693,2025-05-02 08:34:05,Patricia Khan,76,66 Durham Row,G1 1AA,United Kingdom,Fourth Coffee,Coffee Shop,6.09,GBP
+TXN-958238745,2025-05-02 17:09:16,Zara Johansson,48,Rua das Flores 55,80020-010,Brazil,Northwind Grocers,Grocery Store,72.34,BRL
+TXN-986883254,2025-05-02 19:25:15,Mia Muller,52,9 Banjara Hills,500034,India,Fabrikam Pizza Express,Fast Food,7.83,INR
+TXN-757975441,2025-05-02 21:12:11,Natasha Yamamoto,70,Hauptstrasse 15,10115,Germany,Adventure Cantina,Restaurant - Mexican,45.76,EUR
+TXN-971186453,2025-05-03 19:08:20,Noah Muller,38,66 Durham Row,G1 1AA,United Kingdom,Northwind Fried Chicken,Fast Food,6.47,GBP
+TXN-803182575,2025-05-04 15:22:33,Mary Anderson,75,3-4-5 Ikebukuro,170-0013,Japan,Alpine Bean Roasters,Coffee Shop,11.24,JPY
+TXN-160024853,2025-05-05 08:06:05,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Fabrikam Life Insurance,Insurance,501.26,JPY
+TXN-547234268,2025-05-07 12:50:30,Daniel Johansson,69,15 Collins Street,3000,Australia,Alpine Bistro,Restaurant - French,42.39,AUD
+TXN-293330104,2025-05-08 15:30:18,Daniel Johansson,69,15 Collins Street,3000,Australia,Northwind Espresso,Coffee Shop,3.69,AUD
+TXN-252085146,2025-05-08 17:59:20,Paolo Garcia,41,42 Boulevard de la Liberte,59000,France,Contoso Fresh Market,Grocery Store,246.01,EUR
+TXN-435915894,2025-05-09 15:46:39,Michelle Costa,31,654 Portage Avenue,R3C 0G1,Canada,Alpine Bean Roasters,Coffee Shop,8.93,CAD
+TXN-248475812,2025-05-10 17:14:11,Stephanie Davis,60,90 Oxford Terrace,B1 1AA,United Kingdom,Tailspin Grocery,Grocery Store,201.10,GBP
+TXN-173252902,2025-05-12 13:04:29,Omar Nakamura,48,Avenida Brasil 450,30130-000,Brazil,Tailspin Burgers,Fast Food,21.60,BRL
+TXN-673413595,2025-05-14 18:20:07,Robert Wang,35,Rua Augusta 200,01305-000,Brazil,Tailspin Grocery,Grocery Store,34.59,BRL
+TXN-762248339,2025-05-14 18:41:35,Joshua Jones,54,888 Magnolia Bend,80201,United States,Northwind Grocers,Grocery Store,138.22,USD
+TXN-734639053,2025-05-15 01:27:55,Raj Garcia,45,88 Adelaide Street,4000,Australia,Contoso Vehicle Loans,Car Loan,614.76,AUD
+TXN-362733106,2025-05-15 14:26:59,Anya Yang,28,Paseo de Montejo 100,97000,Mexico,Tailspin Grocery,Grocery Store,219.49,MXN
+TXN-735910633,2025-05-15 17:15:50,Isabella Wright,22,7-8-9 Ginza,104-0061,Japan,Contoso Fresh Market,Grocery Store,144.61,JPY
+TXN-414510253,2025-05-17 14:03:24,Paolo Garcia,41,42 Boulevard de la Liberte,59000,France,Wide World Grocers,Grocery Store,138.89,EUR
+TXN-551714820,2025-05-18 16:07:39,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Northwind Grocers,Grocery Store,23.43,JPY
+TXN-885933461,2025-05-19 16:41:35,Ava Kumar,29,Rosenweg 12,01067,Germany,Tailspin Grocery,Grocery Store,60.74,EUR
+TXN-598533385,2025-05-20 19:18:27,Edward Martinez,44,Paseo de Montejo 100,97000,Mexico,Adventure Cantina,Restaurant - Mexican,21.59,MXN
+TXN-243348916,2025-05-21 09:00:11,Dorothy Thomas,38,15 Park Street,700016,India,Northwind Espresso,Coffee Shop,3.94,INR
+TXN-740075852,2025-05-22 16:26:54,Anthony Green,61,88 Brigade Road,560001,India,Northwind Grocers,Grocery Store,141.64,INR
+TXN-268490684,2025-05-23 19:25:26,Donna Weber,43,23 Hay Street,6000,Australia,Contoso Bank ATM,Cash Withdrawal,60.57,AUD
+TXN-827403491,2025-05-24 15:08:15,Barbara Thomas,63,15 Park Street,700016,India,Contoso Fresh Market,Grocery Store,246.74,INR
+TXN-743078966,2025-05-25 11:11:49,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Contoso Quick Bites,Fast Food,9.84,JPY
+TXN-348486801,2025-05-26 14:24:27,Mark Muller,24,44 York Place,CF10 1AA,United Kingdom,Northwind Espresso,Coffee Shop,8.76,GBP
+TXN-226535959,2025-05-26 15:57:28,Olivia Becker,59,15 Park Street,700016,India,Northwind Petrol,Petrol Station,79.83,INR
+TXN-374443365,2025-05-26 18:59:27,Isabella Khan,46,333 Ash Place,30301,United States,Northwind Grocers,Grocery Store,191.99,USD
+TXN-509752178,2025-05-27 06:59:31,Mark Muller,24,44 York Place,CF10 1AA,United Kingdom,Contoso Coffee,Coffee Shop,5.52,GBP
+TXN-512331955,2025-05-29 10:09:31,Steven Ali,72,Schulstrasse 42,50667,Germany,Fourth Coffee,Coffee Shop,10.74,EUR
+TXN-219206234,2025-05-29 10:35:31,Priya Schulz,29,31 FC Road,411001,India,Wide World Grocers,Grocery Store,211.61,INR
+TXN-548675437,2025-05-29 15:33:29,Ethan Lewis,60,23 Anna Salai,600002,India,Fabrikam Tech Store,Electronics Store,1472.66,INR
+TXN-363867970,2025-05-29 16:36:53,Noah Muller,38,66 Durham Row,G1 1AA,United Kingdom,Woodgrove Bank ATM,Cash Withdrawal,364.26,GBP
+TXN-453782215,2025-05-30 18:46:33,Daniel Patel,47,9 Salamanca Place,7000,Australia,Wide World Grocers,Grocery Store,185.96,AUD
+TXN-672220651,2025-06-01 03:40:13,Anthony Green,61,88 Brigade Road,560001,India,Contoso Vehicle Loans,Car Loan,513.59,INR
+TXN-566603531,2025-06-01 09:06:55,Stephanie Kumar,20,9 Banjara Hills,500034,India,Woodgrove Student Lending,Student Loan Repayment,540.94,INR
+TXN-164820748,2025-06-02 06:47:24,Paolo Ali,41,77 Stratford Green,BT1 1AA,United Kingdom,Northwind Espresso,Coffee Shop,11.98,GBP
+TXN-417717347,2025-06-05 12:15:25,Charles Clark,19,31 FC Road,411001,India,Northwind Fried Chicken,Fast Food,12.12,INR
+TXN-585349786,2025-06-06 09:13:43,Betty Ramirez,72,Rosenweg 12,01067,Germany,Fourth Coffee,Coffee Shop,6.83,EUR
+TXN-594636124,2025-06-07 17:59:36,Patricia Svensson,71,3 Place Bellecour,69002,France,Wide World Grocers,Grocery Store,220.19,EUR
+TXN-577403538,2025-06-07 18:44:55,Jessica Perez,42,Avenida Revolucion 300,44100,Mexico,Adventure Fuel Stop,Petrol Station,93.15,MXN
+TXN-938787019,2025-06-08 08:36:41,Natasha Gonzalez,78,31 FC Road,411001,India,Northwind Espresso,Coffee Shop,10.08,INR
+TXN-218631842,2025-06-09 08:25:41,Dorothy Lopez,57,Kirchweg 19,60311,Germany,Fourth Coffee,Coffee Shop,7.91,EUR
+TXN-152301934,2025-06-09 11:06:40,Anthony Thompson,76,Schulstrasse 42,50667,Germany,Tailspin Grocery,Grocery Store,203.08,EUR
+TXN-553155980,2025-06-09 21:18:29,Ivan Rossi,28,Rua XV de Novembro 88,90020-080,Brazil,Contoso Quick Bites,Fast Food,6.90,BRL
+TXN-441942465,2025-06-10 10:06:13,Linda Williams,43,42 Boulevard de la Liberte,59000,France,Woodgrove Bank ATM,Cash Withdrawal,94.23,EUR
+TXN-856529137,2025-06-10 13:35:03,Brian Schmidt,50,456 Rue Sainte-Catherine,H3B 1A7,Canada,Tailspin Burgers,Fast Food,22.87,CAD
+TXN-100226836,2025-06-10 21:51:13,Donna Robinson,60,42 George Street,2000,Australia,Fabrikam Pizza Express,Fast Food,22.84,AUD
+TXN-633321248,2025-06-11 17:42:33,Mia Muller,52,9 Banjara Hills,500034,India,Contoso Quick Bites,Fast Food,5.42,INR
+TXN-769059401,2025-06-14 13:22:47,Karen Rossi,21,654 Portage Avenue,R3C 0G1,Canada,Fabrikam Pizza Express,Fast Food,14.12,CAD
+TXN-946581151,2025-06-14 17:47:11,Patricia Svensson,71,3 Place Bellecour,69002,France,Contoso Fuel,Petrol Station,41.19,EUR
+TXN-577342785,2025-06-14 18:00:01,Christopher Costa,66,555 Willow Trail,75201,United States,Contoso Fresh Market,Grocery Store,246.05,USD
+TXN-811783841,2025-06-15 15:45:48,Jason Hernandez,57,11 Cambridge Way,LS1 1AA,United Kingdom,Contoso Fresh Market,Grocery Store,147.44,GBP
+TXN-495876443,2025-06-19 09:23:53,Steven Ali,72,Schulstrasse 42,50667,Germany,Alpine Bean Roasters,Coffee Shop,11.73,EUR
+TXN-946782502,2025-06-20 18:39:52,Kenji Li,66,23 Anna Salai,600002,India,Woodgrove Bank ATM,Cash Withdrawal,252.87,INR
+TXN-166521720,2025-06-21 19:57:54,Daniel Patel,47,9 Salamanca Place,7000,Australia,Fabrikam Sushi Bar,Restaurant - Japanese,110.25,AUD
+TXN-400887496,2025-06-22 12:08:38,Isabella Wright,22,7-8-9 Ginza,104-0061,Japan,Trey Research Grill,Restaurant - American,20.02,JPY
+TXN-190185950,2025-06-23 08:24:37,Sofia Thomas,21,Calle Madero 55,06000,Mexico,Fourth Coffee,Coffee Shop,6.10,MXN
+TXN-825102713,2025-06-23 09:28:17,Susan Silva,78,Hauptstrasse 15,10115,Germany,Fourth Coffee,Coffee Shop,4.11,EUR
+TXN-384005799,2025-06-23 09:57:43,Joshua Jones,54,888 Magnolia Bend,80201,United States,Wide World Grocers,Grocery Store,216.28,USD
+TXN-835742820,2025-06-23 19:06:35,Isabella Eriksson,72,7-8-9 Ginza,104-0061,Japan,Tailspin Grocery,Grocery Store,78.37,JPY
+TXN-135020482,2025-06-24 19:22:42,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Alpine Bistro,Restaurant - French,165.28,JPY
+TXN-593461675,2025-06-25 11:15:34,Olivia Moore,66,333 Ash Place,30301,United States,Litware Dragon Palace,Restaurant - Chinese,29.83,USD
+TXN-569331148,2025-06-25 20:24:26,Lisa Rivera,64,Avenida Revolucion 300,44100,Mexico,Litware Dragon Palace,Restaurant - Chinese,60.15,MXN
+TXN-566700343,2025-06-26 10:43:41,Anthony Wright,37,23 Anna Salai,600002,India,Fourth Coffee,Coffee Shop,5.73,INR
+TXN-527428745,2025-06-28 15:30:02,Mia Muller,52,9 Banjara Hills,500034,India,Fourth Coffee,Coffee Shop,10.37,INR
+TXN-502939757,2025-06-28 20:08:34,Michael Scott,22,77 Stratford Green,BT1 1AA,United Kingdom,Contoso Trattoria,Restaurant - Italian,28.25,GBP
+TXN-331838538,2025-06-29 18:03:51,Greta Ferrari,19,56 Queen's Gate,W1A 0AX,United Kingdom,Contoso Fresh Market,Grocery Store,159.04,GBP
+TXN-733050829,2025-07-01 02:29:59,Robert Wang,35,Rua Augusta 200,01305-000,Brazil,Fabrikam Auto Finance,Car Loan,551.17,BRL
+TXN-919776923,2025-07-01 02:42:33,Patricia Svensson,71,3 Place Bellecour,69002,France,Woodgrove Mortgage Services,Mortgage,1919.77,EUR
+TXN-888354104,2025-07-01 12:07:08,Brian Robinson,19,999 Sequoia Ridge,97201,United States,Tailspin Burgers,Fast Food,19.48,USD
+TXN-625638787,2025-07-01 13:51:57,Chen King,78,555 Willow Trail,75201,United States,Northwind Fried Chicken,Fast Food,21.10,USD
+TXN-758009992,2025-07-01 14:08:43,Sakura Russo,24,88 Brigade Road,560001,India,Wide World Grocers,Grocery Store,198.49,INR
+TXN-928053067,2025-07-02 11:12:32,Susan Silva,78,Hauptstrasse 15,10115,Germany,Northwind Grocers,Grocery Store,81.56,EUR
+TXN-341692939,2025-07-02 17:46:32,Brian Silva,63,Avenida Brasil 450,30130-000,Brazil,Wide World Grocers,Grocery Store,193.01,BRL
+TXN-110856365,2025-07-02 20:07:12,Hans Clark,38,Avenida Paulista 1000,01310-100,Brazil,Adventure Works Electronics,Electronics Store,1626.77,BRL
+TXN-486548424,2025-07-02 20:15:58,Mia Torres,42,42 Boulevard de la Liberte,59000,France,Datum Steakhouse,Restaurant - American,36.91,EUR
+TXN-612370498,2025-07-03 07:08:16,Joseph Yamamoto,77,321 Elm Boulevard,77001,United States,Alpine Bean Roasters,Coffee Shop,9.25,USD
+TXN-616457498,2025-07-03 08:44:35,Astrid Persson,69,23 Anna Salai,600002,India,Contoso Coffee,Coffee Shop,8.53,INR
+TXN-537555577,2025-07-03 17:16:35,Aisha Jones,20,Bahnhofstrasse 27,80331,Germany,Woodgrove Bank ATM,Cash Withdrawal,392.40,EUR
+TXN-481592649,2025-07-04 12:03:19,Aisha Jones,20,Bahnhofstrasse 27,80331,Germany,Tailspin Burgers,Fast Food,7.70,EUR
+TXN-772445750,2025-07-04 12:09:22,Sofia Harris,73,Boulevard Kukulcan 88,77500,Mexico,Alpine Bistro,Restaurant - French,101.03,MXN
+TXN-852566083,2025-07-04 14:09:55,Dorothy Lee,40,Gartenweg 8,20095,Germany,Northwind Espresso,Coffee Shop,6.69,EUR
+TXN-916810151,2025-07-04 14:38:11,Anthony Wright,37,23 Anna Salai,600002,India,Litware Digital,Electronics Store,1984.89,INR
+TXN-292296114,2025-07-04 18:58:15,Kimberly Oliveira,33,78 Victoria Lane,M1 1AA,United Kingdom,Northwind Grocers,Grocery Store,47.05,GBP
+TXN-397520487,2025-07-06 19:35:48,Ronald Hall,70,67 King William Street,5000,Australia,Contoso Quick Bites,Fast Food,6.43,AUD
+TXN-486903324,2025-07-08 18:17:52,James Torres,47,42 George Street,2000,Australia,Northwind Fried Chicken,Fast Food,24.54,AUD
+TXN-482179624,2025-07-09 16:10:02,Sofia Thomas,21,Calle Madero 55,06000,Mexico,Tailspin Grocery,Grocery Store,26.67,MXN
+TXN-157884400,2025-07-09 18:56:08,William Lewis,73,42 MG Road,400001,India,Northwind Petrol,Petrol Station,31.98,INR
+TXN-338685775,2025-07-10 12:45:36,Fatima Wilson,59,90 Oxford Terrace,B1 1AA,United Kingdom,Proseware Thai Kitchen,Restaurant - Thai,60.13,GBP
+TXN-983185005,2025-07-10 18:43:53,Anya Yang,28,Paseo de Montejo 100,97000,Mexico,Tailspin Burgers,Fast Food,15.11,MXN
+TXN-273952603,2025-07-11 16:19:34,Aisha Jones,20,Bahnhofstrasse 27,80331,Germany,Northwind Grocers,Grocery Store,63.08,EUR
+TXN-519797004,2025-07-12 07:48:03,Mei Gonzalez,30,27 Avenue des Champs-Elysees,75008,France,Fourth Coffee,Coffee Shop,6.97,EUR
+TXN-630803572,2025-07-13 20:42:10,Priya Schulz,29,31 FC Road,411001,India,Trey Research Grill,Restaurant - American,78.26,INR
+TXN-689060413,2025-07-14 12:16:19,Matthew Perez,61,999 Sequoia Ridge,97201,United States,Trey Research Grill,Restaurant - American,43.75,USD
+TXN-206291868,2025-07-15 17:21:45,Thomas Anderson,33,Boulevard Kukulcan 88,77500,Mexico,Contoso Bank ATM,Cash Withdrawal,124.51,MXN
+TXN-313511419,2025-07-15 18:56:49,Omar Miller,29,2-3-4 Akihabara,101-0021,Japan,Tailspin Grocery,Grocery Store,58.41,JPY
+TXN-528733370,2025-07-16 20:45:58,Isabella Eriksson,72,7-8-9 Ginza,104-0061,Japan,Contoso Bank ATM,Cash Withdrawal,234.45,JPY
+TXN-140978264,2025-07-17 19:21:49,Steven Ali,72,Schulstrasse 42,50667,Germany,Adventure Cantina,Restaurant - Mexican,23.09,EUR
+TXN-381069885,2025-07-18 11:45:42,Christopher Costa,66,555 Willow Trail,75201,United States,Wide World Grocers,Grocery Store,44.78,USD
+TXN-140785300,2025-07-20 19:36:45,Aisha Jones,20,Bahnhofstrasse 27,80331,Germany,Northwind Fried Chicken,Fast Food,9.34,EUR
+TXN-175221974,2025-07-21 08:07:09,Kenji Li,66,23 Anna Salai,600002,India,Wingtip Electronics,Electronics Store,684.97,INR
+TXN-579035814,2025-07-22 07:25:34,Michael Singh,36,42 MG Road,400001,India,Northwind Espresso,Coffee Shop,7.81,INR
+TXN-840816935,2025-07-24 14:50:44,Elizabeth Young,58,12 High Street,SW1A 1AA,United Kingdom,Woodgrove Bank ATM,Cash Withdrawal,269.58,GBP
+TXN-207156084,2025-07-25 09:37:22,Sakura Svensson,42,33 Bristol Mews,BS1 1AA,United Kingdom,Contoso Fuel,Petrol Station,77.28,GBP
+TXN-512874396,2025-07-26 13:59:36,Robert Wang,35,Rua Augusta 200,01305-000,Brazil,Fabrikam Pizza Express,Fast Food,24.38,BRL
+TXN-585044434,2025-07-26 16:52:52,Paolo Garcia,41,42 Boulevard de la Liberte,59000,France,Contoso Fresh Market,Grocery Store,82.96,EUR
+TXN-311164061,2025-07-26 19:30:03,Olivia Becker,59,15 Park Street,700016,India,Northwind Grocers,Grocery Store,28.96,INR
+TXN-821143076,2025-07-27 06:23:14,Thomas Anderson,33,Boulevard Kukulcan 88,77500,Mexico,Alpine Bean Roasters,Coffee Shop,5.13,MXN
+TXN-315099914,2025-07-28 08:49:21,Kimberly Oliveira,33,78 Victoria Lane,M1 1AA,United Kingdom,Woodgrove Mortgage Services,Mortgage,1890.39,GBP
+TXN-386811294,2025-07-28 21:53:14,Raj Garcia,45,88 Adelaide Street,4000,Australia,Contoso Trattoria,Restaurant - Italian,30.32,AUD
+TXN-525470394,2025-07-29 08:10:51,Donna Robinson,60,42 George Street,2000,Australia,Contoso Fuel,Petrol Station,78.41,AUD
+TXN-163440619,2025-07-29 09:56:13,Sakura Svensson,42,33 Bristol Mews,BS1 1AA,United Kingdom,Alpine Bean Roasters,Coffee Shop,8.38,GBP
+TXN-252900030,2025-07-31 08:36:10,Donald Li,38,Waldstrasse 55,40210,Germany,Contoso Coffee,Coffee Shop,10.88,EUR
+TXN-587732276,2025-07-31 12:40:14,Patricia Svensson,71,3 Place Bellecour,69002,France,Fabrikam Pizza Express,Fast Food,21.76,EUR
+TXN-256400927,2025-07-31 18:03:01,Donna Robinson,60,42 George Street,2000,Australia,Adventure Cantina,Restaurant - Mexican,19.27,AUD
+TXN-654348207,2025-08-01 01:50:26,Noah Oliveira,63,1-1-1 Harajuku,150-0001,Japan,Fabrikam Auto Finance,Car Loan,490.89,JPY
+TXN-671149635,2025-08-01 03:10:20,Mary Silva,31,33 Bristol Mews,BS1 1AA,United Kingdom,Fabrikam Auto Finance,Car Loan,683.30,GBP
+TXN-999032374,2025-08-01 08:05:01,Ivan Rossi,28,Rua XV de Novembro 88,90020-080,Brazil,Northwind Espresso,Coffee Shop,8.03,BRL
+TXN-214135586,2025-08-01 08:15:07,Ronald Hall,70,67 King William Street,5000,Australia,Northwind Espresso,Coffee Shop,10.72,AUD
+TXN-347635240,2025-08-01 10:31:12,Ivan Rossi,28,Rua XV de Novembro 88,90020-080,Brazil,Contoso Education Finance,Student Loan Repayment,171.40,BRL
+TXN-140524238,2025-08-01 10:44:47,James Torres,47,42 George Street,2000,Australia,Woodgrove Mortgage Services,Mortgage,2052.99,AUD
+TXN-379074095,2025-08-02 17:02:41,Joseph Yamamoto,77,321 Elm Boulevard,77001,United States,Contoso Fresh Market,Grocery Store,208.72,USD
+TXN-758328592,2025-08-03 17:18:21,Dorothy Lee,40,Gartenweg 8,20095,Germany,Woodgrove Bank ATM,Cash Withdrawal,338.03,EUR
+TXN-516957699,2025-08-04 11:43:47,Joseph Yamamoto,77,321 Elm Boulevard,77001,United States,Contoso Fresh Market,Grocery Store,208.88,USD
+TXN-682980163,2025-08-04 17:22:39,James Wright,65,44 York Place,CF10 1AA,United Kingdom,Adventure Fuel Stop,Petrol Station,78.83,GBP
+TXN-889796714,2025-08-08 13:32:52,Brian Robinson,19,999 Sequoia Ridge,97201,United States,Contoso Quick Bites,Fast Food,9.32,USD
+TXN-343239457,2025-08-08 14:23:38,Elizabeth Schmidt,42,88 Brigade Road,560001,India,Contoso Fresh Market,Grocery Store,94.97,INR
+TXN-243359368,2025-08-08 18:37:05,Richard Jones,60,Schulstrasse 42,50667,Germany,Trey Research Grill,Restaurant - American,50.82,EUR
+TXN-284474964,2025-08-11 19:23:37,Jason Hernandez,57,11 Cambridge Way,LS1 1AA,United Kingdom,Northwind Fried Chicken,Fast Food,16.71,GBP
+TXN-303148568,2025-08-11 21:28:01,Dorothy Lopez,57,Kirchweg 19,60311,Germany,Tailspin Burgers,Fast Food,8.13,EUR
+TXN-200055997,2025-08-12 16:19:51,Hans Rossi,64,Schulstrasse 42,50667,Germany,Adventure Works Electronics,Electronics Store,2260.10,EUR
+TXN-952484209,2025-08-13 12:14:46,Omar Nakamura,48,Avenida Brasil 450,30130-000,Brazil,Tailspin Grocery,Grocery Store,90.56,BRL
+TXN-126048251,2025-08-13 19:39:37,Natasha Yamamoto,70,Hauptstrasse 15,10115,Germany,Fabrikam Pizza Express,Fast Food,16.74,EUR
+TXN-591344123,2025-08-14 09:11:12,Deborah Wilson,64,9 Salamanca Place,7000,Australia,Contoso Coffee,Coffee Shop,6.75,AUD
+TXN-528643562,2025-08-14 15:30:52,Paolo Garcia,41,42 Boulevard de la Liberte,59000,France,Adventure Fuel Stop,Petrol Station,63.84,EUR
+TXN-536651671,2025-08-14 21:50:35,Barbara Liu,52,Calle Madero 55,06000,Mexico,Contoso Quick Bites,Fast Food,6.68,MXN
+TXN-736165974,2025-08-15 00:55:45,Charles Clark,19,31 FC Road,411001,India,Fabrikam Life Insurance,Insurance,394.55,INR
+TXN-547221423,2025-08-15 10:19:22,Mia Torres,42,42 Boulevard de la Liberte,59000,France,Contoso Education Finance,Student Loan Repayment,262.25,EUR
+TXN-336110957,2025-08-17 07:12:04,Michelle Costa,31,654 Portage Avenue,R3C 0G1,Canada,Fourth Coffee,Coffee Shop,9.38,CAD
+TXN-932027010,2025-08-17 19:04:56,Dorothy Lopez,57,Kirchweg 19,60311,Germany,Contoso Fresh Market,Grocery Store,30.71,EUR
+TXN-876054317,2025-08-18 07:02:23,Michael Scott,22,77 Stratford Green,BT1 1AA,United Kingdom,Adventure Fuel Stop,Petrol Station,82.27,GBP
+TXN-534790961,2025-08-18 11:13:54,Chen Ferrari,56,Waldstrasse 55,40210,Germany,Fabrikam Pizza Express,Fast Food,17.22,EUR
+TXN-740354529,2025-08-20 19:33:01,Steven Ali,72,Schulstrasse 42,50667,Germany,Woodgrove Bank ATM,Cash Withdrawal,80.79,EUR
+TXN-497289694,2025-08-23 08:03:30,Jason Hernandez,57,11 Cambridge Way,LS1 1AA,United Kingdom,Northwind Espresso,Coffee Shop,9.49,GBP
+TXN-612131691,2025-08-23 12:00:11,Raj Garcia,45,88 Adelaide Street,4000,Australia,Fabrikam Pizza Express,Fast Food,23.51,AUD
+TXN-901903958,2025-08-25 07:01:47,Jason Hernandez,57,11 Cambridge Way,LS1 1AA,United Kingdom,Contoso Fuel,Petrol Station,91.45,GBP
+TXN-845833196,2025-08-25 08:19:27,Anya Yang,28,Paseo de Montejo 100,97000,Mexico,Northwind Espresso,Coffee Shop,9.02,MXN
+TXN-849226155,2025-08-25 09:54:12,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Wide World Grocers,Grocery Store,34.10,JPY
+TXN-462173678,2025-08-26 22:20:23,Isabella Wilson,26,789 Robson Street,V6Z 1C2,Canada,Fabrikam Pizza Express,Fast Food,16.39,CAD
+TXN-405383415,2025-08-28 09:03:14,Stephanie Davis,60,90 Oxford Terrace,B1 1AA,United Kingdom,Contoso Coffee,Coffee Shop,10.35,GBP
+TXN-697981175,2025-08-29 20:31:29,Donna Weber,43,23 Hay Street,6000,Australia,Wide World Kebab,Restaurant - Turkish,60.13,AUD
+TXN-424608631,2025-08-30 10:23:43,Isabella Wilson,26,789 Robson Street,V6Z 1C2,Canada,Tailspin Grocery,Grocery Store,122.82,CAD
+TXN-483949956,2025-08-30 11:34:37,Brian Schmidt,50,456 Rue Sainte-Catherine,H3B 1A7,Canada,Northwind Fried Chicken,Fast Food,19.21,CAD
+TXN-352331353,2025-08-30 15:13:47,Chen Ferrari,56,Waldstrasse 55,40210,Germany,Adventure Fuel Stop,Petrol Station,54.22,EUR
+TXN-176605662,2025-08-30 18:45:21,Timothy Lewis,23,456 Maple Avenue,90210,United States,Northwind Grocers,Grocery Store,103.66,USD
+TXN-724613328,2025-08-31 14:24:56,Greta Ferrari,19,56 Queen's Gate,W1A 0AX,United Kingdom,Fourth Coffee,Coffee Shop,9.25,GBP
+TXN-558833061,2025-09-01 02:18:20,Linda Fernandez,29,Paseo de Montejo 100,97000,Mexico,Woodgrove Student Lending,Student Loan Repayment,195.06,MXN
+TXN-204745736,2025-09-01 08:39:24,Michael Singh,36,42 MG Road,400001,India,Fabrikam Life Insurance,Insurance,726.42,INR
+TXN-559733310,2025-09-01 10:04:22,Brian Robinson,19,999 Sequoia Ridge,97201,United States,Adventure Fuel Stop,Petrol Station,70.11,USD
+TXN-516667798,2025-09-01 13:39:51,Linda Fernandez,29,Paseo de Montejo 100,97000,Mexico,Woodgrove Bank ATM,Cash Withdrawal,407.53,MXN
+TXN-421322853,2025-09-01 14:30:54,Sofia Thomas,21,Calle Madero 55,06000,Mexico,Wide World Grocers,Grocery Store,188.85,MXN
+TXN-227358619,2025-09-01 14:38:53,Dorothy Thomas,38,15 Park Street,700016,India,Fourth Coffee,Coffee Shop,6.74,INR
+TXN-186034326,2025-09-03 13:44:32,Fatima Meyer,50,42 MG Road,400001,India,Contoso Quick Bites,Fast Food,21.46,INR
+TXN-105578333,2025-09-03 19:29:37,Susan Silva,78,Hauptstrasse 15,10115,Germany,Litware Dragon Palace,Restaurant - Chinese,45.85,EUR
+TXN-154918433,2025-09-04 13:29:01,Dorothy Thomas,38,15 Park Street,700016,India,Tailspin Burgers,Fast Food,6.24,INR
+TXN-532977335,2025-09-04 21:53:42,Paolo Ali,41,77 Stratford Green,BT1 1AA,United Kingdom,Wide World Kebab,Restaurant - Turkish,53.07,GBP
+TXN-487380922,2025-09-06 17:29:35,Daniel Johansson,69,15 Collins Street,3000,Australia,Contoso Quick Bites,Fast Food,12.49,AUD
+TXN-629453557,2025-09-07 09:46:50,Michael Colombo,35,3 Place Bellecour,69002,France,Contoso Coffee,Coffee Shop,7.42,EUR
+TXN-115745748,2025-09-07 11:36:38,Daniel Johansson,69,15 Collins Street,3000,Australia,Contoso Fresh Market,Grocery Store,91.33,AUD
+TXN-929668706,2025-09-07 17:50:35,James Hernandez,46,123 Yonge Street,M5B 2H1,Canada,Northwind Grocers,Grocery Store,104.90,CAD
+TXN-449005451,2025-09-07 19:20:22,Karen Rossi,21,654 Portage Avenue,R3C 0G1,Canada,Tailspin Burgers,Fast Food,8.15,CAD
+TXN-345178404,2025-09-08 11:31:28,Brian Schmidt,50,456 Rue Sainte-Catherine,H3B 1A7,Canada,Tailspin Grocery,Grocery Store,169.84,CAD
+TXN-242966406,2025-09-08 12:18:47,Charles Chen,64,456 Rue Sainte-Catherine,H3B 1A7,Canada,Contoso Quick Bites,Fast Food,11.00,CAD
+TXN-699148577,2025-09-11 16:23:24,Mei Gonzalez,30,27 Avenue des Champs-Elysees,75008,France,Tailspin Grocery,Grocery Store,221.59,EUR
+TXN-191231623,2025-09-11 20:04:21,Ava Kumar,29,Rosenweg 12,01067,Germany,Wingtip Noodle House,Restaurant - Vietnamese,49.85,EUR
+TXN-295786449,2025-09-13 18:24:07,Donna Robinson,60,42 George Street,2000,Australia,Northwind Fried Chicken,Fast Food,16.68,AUD
+TXN-866181004,2025-09-14 15:54:09,James Wright,65,44 York Place,CF10 1AA,United Kingdom,Contoso Fuel,Petrol Station,42.65,GBP
+TXN-580383076,2025-09-17 14:38:19,Aisha Jones,20,Bahnhofstrasse 27,80331,Germany,Fabrikam Tech Store,Electronics Store,120.30,EUR
+TXN-355500637,2025-09-18 06:30:24,Astrid Persson,69,23 Anna Salai,600002,India,Contoso Coffee,Coffee Shop,4.93,INR
+TXN-398306546,2025-09-18 17:53:20,Thomas Li,49,666 Hazel Path,48201,United States,Contoso Fresh Market,Grocery Store,245.49,USD
+TXN-827178134,2025-09-19 10:43:12,Natasha Yamamoto,70,Hauptstrasse 15,10115,Germany,Alpine Bean Roasters,Coffee Shop,5.79,EUR
+TXN-819528519,2025-09-21 11:30:22,Linda Williams,43,42 Boulevard de la Liberte,59000,France,Wide World Grocers,Grocery Store,136.91,EUR
+TXN-865058996,2025-09-21 17:04:32,Olivia Moore,66,333 Ash Place,30301,United States,Tailspin Burgers,Fast Food,23.46,USD
+TXN-776160147,2025-09-22 13:57:27,Timothy Martin,30,6-7-8 Ueno,110-0005,Japan,Northwind Fried Chicken,Fast Food,11.85,JPY
+TXN-237417515,2025-09-22 17:56:14,William Baker,44,Calle Madero 55,06000,Mexico,Woodgrove Bank ATM,Cash Withdrawal,436.75,MXN
+TXN-232728241,2025-09-23 07:28:51,Anthony Wright,37,23 Anna Salai,600002,India,Northwind Espresso,Coffee Shop,7.62,INR
+TXN-368822864,2025-09-25 12:17:23,Mary Silva,31,33 Bristol Mews,BS1 1AA,United Kingdom,Northwind Grocers,Grocery Store,246.42,GBP
+TXN-106702181,2025-09-25 15:21:44,Donald Nakamura,58,15 Collins Street,3000,Australia,Fabrikam Tech Store,Electronics Store,2426.43,AUD
+TXN-755610188,2025-09-25 16:33:46,Donald Nakamura,58,15 Collins Street,3000,Australia,Northwind Petrol,Petrol Station,64.66,AUD
+TXN-156088266,2025-09-26 06:49:52,Mei Gonzalez,30,27 Avenue des Champs-Elysees,75008,France,Northwind Espresso,Coffee Shop,8.57,EUR
+TXN-694807541,2025-10-01 00:11:49,Anthony Wright,37,23 Anna Salai,600002,India,Woodgrove Insurance Group,Insurance,698.72,INR
+TXN-569281822,2025-10-01 02:43:45,Thomas Li,49,666 Hazel Path,48201,United States,Contoso Home Loans,Mortgage,801.43,USD
+TXN-843816649,2025-10-01 03:48:20,Elizabeth Schmidt,42,88 Brigade Road,560001,India,Woodgrove Student Lending,Student Loan Repayment,419.94,INR
+TXN-252478952,2025-10-01 10:10:59,Paolo Ali,41,77 Stratford Green,BT1 1AA,United Kingdom,Woodgrove Mortgage Services,Mortgage,2435.28,GBP
+TXN-172807638,2025-10-01 17:22:10,Ronald Hall,70,67 King William Street,5000,Australia,Wide World Grocers,Grocery Store,96.15,AUD
+TXN-841698748,2025-10-03 08:34:34,Daniel Patel,47,9 Salamanca Place,7000,Australia,Northwind Espresso,Coffee Shop,8.12,AUD
+TXN-182678263,2025-10-03 14:45:45,Anthony Thompson,76,Schulstrasse 42,50667,Germany,Contoso Coffee,Coffee Shop,7.38,EUR
+TXN-319431632,2025-10-04 11:46:19,Margaret Romano,44,27 Avenue des Champs-Elysees,75008,France,Northwind Grocers,Grocery Store,158.15,EUR
+TXN-631334441,2025-10-04 11:59:56,Zara Johansson,48,Rua das Flores 55,80020-010,Brazil,Tailspin Burgers,Fast Food,10.68,BRL
+TXN-951005666,2025-10-04 12:40:33,Kimberly Oliveira,33,78 Victoria Lane,M1 1AA,United Kingdom,Fabrikam Pizza Express,Fast Food,11.86,GBP
+TXN-301371926,2025-10-05 18:41:39,Linda Williams,43,42 Boulevard de la Liberte,59000,France,Contoso Fresh Market,Grocery Store,187.43,EUR
+TXN-787796772,2025-10-07 15:03:22,Greta Ferrari,19,56 Queen's Gate,W1A 0AX,United Kingdom,Fourth Coffee,Coffee Shop,9.43,GBP
+TXN-173711723,2025-10-07 22:03:34,James Torres,47,42 George Street,2000,Australia,Fabrikam Pizza Express,Fast Food,5.23,AUD
+TXN-481012801,2025-10-08 08:23:42,Olivia Souza,54,123 Yonge Street,M5B 2H1,Canada,Contoso Coffee,Coffee Shop,6.42,CAD
+TXN-437363059,2025-10-08 19:38:23,Sofia Thomas,21,Calle Madero 55,06000,Mexico,Trey Research Grill,Restaurant - American,40.96,MXN
+TXN-821524008,2025-10-10 18:23:27,Isabella Wilson,26,789 Robson Street,V6Z 1C2,Canada,Adventure Fuel Stop,Petrol Station,88.98,CAD
+TXN-456171318,2025-10-10 18:53:51,Astrid Persson,69,23 Anna Salai,600002,India,Fabrikam Pizza Express,Fast Food,14.17,INR
+TXN-159460963,2025-10-11 09:51:39,Barbara Larsson,62,Rua das Flores 55,80020-010,Brazil,Contoso Fresh Market,Grocery Store,14.35,BRL
+TXN-253350685,2025-10-11 15:10:04,Paolo Garcia,41,42 Boulevard de la Liberte,59000,France,Northwind Petrol,Petrol Station,82.59,EUR
+TXN-688324959,2025-10-11 15:53:31,Dorothy Lopez,57,Kirchweg 19,60311,Germany,Contoso Coffee,Coffee Shop,10.60,EUR
+TXN-208443451,2025-10-13 17:59:09,Olivia Souza,54,123 Yonge Street,M5B 2H1,Canada,Contoso Fresh Market,Grocery Store,16.52,CAD
+TXN-745369721,2025-10-13 19:43:44,William Baker,44,Calle Madero 55,06000,Mexico,Northwind Fried Chicken,Fast Food,6.51,MXN
+TXN-570454667,2025-10-14 14:31:03,Mary Oliveira,44,Rua XV de Novembro 88,90020-080,Brazil,Fourth Coffee,Coffee Shop,8.80,BRL
+TXN-324864266,2025-10-15 06:29:33,James Torres,47,42 George Street,2000,Australia,Alpine Bean Roasters,Coffee Shop,10.67,AUD
+TXN-244841963,2025-10-15 12:37:52,Anthony Wright,37,23 Anna Salai,600002,India,Northwind Fried Chicken,Fast Food,7.96,INR
+TXN-199104908,2025-10-15 15:15:12,Donald Nakamura,58,15 Collins Street,3000,Australia,Fourth Coffee,Coffee Shop,4.67,AUD
+TXN-921751594,2025-10-17 22:04:04,Dorothy Thomas,38,15 Park Street,700016,India,Northwind Fried Chicken,Fast Food,19.50,INR
+TXN-419021627,2025-10-19 09:25:18,Jason Hernandez,57,11 Cambridge Way,LS1 1AA,United Kingdom,Fourth Coffee,Coffee Shop,8.92,GBP
+TXN-465516215,2025-10-19 21:51:51,Jason Hernandez,57,11 Cambridge Way,LS1 1AA,United Kingdom,Contoso Trattoria,Restaurant - Italian,65.11,GBP
+TXN-411624396,2025-10-20 11:45:20,Amanda Garcia,55,76 Civil Lines,302001,India,Contoso Quick Bites,Fast Food,21.60,INR
+TXN-230284104,2025-10-20 20:03:41,Elizabeth Young,58,12 High Street,SW1A 1AA,United Kingdom,Datum Steakhouse,Restaurant - American,25.28,GBP
+TXN-505130941,2025-10-23 08:55:05,Fatima Meyer,50,42 MG Road,400001,India,Contoso Coffee,Coffee Shop,8.22,INR
+TXN-233596897,2025-10-23 18:59:34,Michael Kumar,64,321 Jasper Avenue,T5J 1S9,Canada,Northwind Petrol,Petrol Station,60.11,CAD
+TXN-955305716,2025-10-26 18:19:50,Sofia Harris,73,Boulevard Kukulcan 88,77500,Mexico,Contoso Fresh Market,Grocery Store,57.63,MXN
+TXN-825622726,2025-10-27 13:49:58,Donna Robinson,60,42 George Street,2000,Australia,Northwind Fried Chicken,Fast Food,12.68,AUD
+TXN-697826875,2025-10-28 08:02:45,Anthony Green,61,88 Brigade Road,560001,India,Northwind Espresso,Coffee Shop,7.78,INR
+TXN-269571390,2025-10-28 12:40:53,Elizabeth Schmidt,42,88 Brigade Road,560001,India,Litware Dragon Palace,Restaurant - Chinese,19.21,INR
+TXN-383213289,2025-10-30 14:20:12,Anthony Thompson,76,Schulstrasse 42,50667,Germany,Alpine Bean Roasters,Coffee Shop,11.61,EUR
+TXN-893002967,2025-10-31 11:04:38,Dorothy Lopez,57,Kirchweg 19,60311,Germany,Northwind Grocers,Grocery Store,180.88,EUR
+TXN-548707863,2025-10-31 14:27:26,Mei Gonzalez,30,27 Avenue des Champs-Elysees,75008,France,Fourth Coffee,Coffee Shop,11.86,EUR
+TXN-543874059,2025-10-31 17:33:44,Ivan Garcia,49,Paseo de Montejo 100,97000,Mexico,Contoso Fresh Market,Grocery Store,236.16,MXN
+TXN-986319160,2025-11-01 02:44:58,Chen King,78,555 Willow Trail,75201,United States,Contoso Education Finance,Student Loan Repayment,368.88,USD
+TXN-690985954,2025-11-01 08:10:36,Sakura Baker,49,8 Rue de la Republique,69001,France,Fourth Coffee,Coffee Shop,9.96,EUR
+TXN-964218831,2025-11-01 10:19:12,Anthony Green,61,88 Brigade Road,560001,India,Contoso Education Finance,Student Loan Repayment,598.31,INR
+TXN-254214583,2025-11-01 10:45:29,Dorothy Thomas,38,15 Park Street,700016,India,Woodgrove Student Lending,Student Loan Repayment,506.25,INR
+TXN-453598811,2025-11-03 12:22:49,William Baker,44,Calle Madero 55,06000,Mexico,Wide World Grocers,Grocery Store,30.86,MXN
+TXN-465634477,2025-11-04 18:17:12,Michael Colombo,35,3 Place Bellecour,69002,France,Wide World Kebab,Restaurant - Turkish,30.00,EUR
+TXN-819326237,2025-11-05 00:16:57,Daniel Patel,47,9 Salamanca Place,7000,Australia,Contoso Insurance,Insurance,742.60,AUD
+TXN-438224552,2025-11-07 08:38:22,Isabella Eriksson,72,7-8-9 Ginza,104-0061,Japan,Alpine Bean Roasters,Coffee Shop,10.08,JPY
+TXN-213371933,2025-11-09 07:25:18,Mia Muller,52,9 Banjara Hills,500034,India,Fourth Coffee,Coffee Shop,7.80,INR
+TXN-846254475,2025-11-09 08:04:58,Timothy Lewis,23,456 Maple Avenue,90210,United States,Alpine Bean Roasters,Coffee Shop,9.23,USD
+TXN-174803691,2025-11-09 11:51:41,Aisha Ali,28,444 Poplar Circle,94102,United States,Contoso Fresh Market,Grocery Store,109.14,USD
+TXN-545261931,2025-11-09 16:31:45,Mei Persson,23,777 Juniper Run,55401,United States,Northwind Grocers,Grocery Store,212.04,USD
+TXN-568582758,2025-11-09 18:18:26,Sofia Harris,73,Boulevard Kukulcan 88,77500,Mexico,Contoso Fresh Market,Grocery Store,94.74,MXN
+TXN-866346869,2025-11-10 09:05:16,Donald Li,38,Waldstrasse 55,40210,Germany,Alpine Bean Roasters,Coffee Shop,10.72,EUR
+TXN-385651542,2025-11-10 09:15:16,Noah Oliveira,63,1-1-1 Harajuku,150-0001,Japan,Alpine Bean Roasters,Coffee Shop,8.57,JPY
+TXN-742246792,2025-11-10 19:35:59,Joseph Meyer,66,34 King's Road,EC1A 1BB,United Kingdom,Contoso Quick Bites,Fast Food,19.99,GBP
+TXN-201990057,2025-11-10 21:52:43,Ronald Hall,70,67 King William Street,5000,Australia,Contoso Quick Bites,Fast Food,24.18,AUD
+TXN-488205399,2025-11-12 12:38:07,Timothy Martin,30,6-7-8 Ueno,110-0005,Japan,Northwind Curry House,Restaurant - Indian,37.28,JPY
+TXN-895070845,2025-11-13 08:17:04,Raj Garcia,45,88 Adelaide Street,4000,Australia,Contoso Coffee,Coffee Shop,4.02,AUD
+TXN-997099246,2025-11-13 18:53:53,Kenji Li,66,23 Anna Salai,600002,India,Tailspin Grocery,Grocery Store,34.77,INR
+TXN-114811195,2025-11-13 19:56:54,Thomas Li,49,666 Hazel Path,48201,United States,Contoso Trattoria,Restaurant - Italian,83.39,USD
+TXN-259998320,2025-11-14 10:34:51,Isabella Wilson,26,789 Robson Street,V6Z 1C2,Canada,Fourth Coffee,Coffee Shop,10.12,CAD
+TXN-894316843,2025-11-14 14:31:38,Mary Anderson,75,3-4-5 Ikebukuro,170-0013,Japan,Alpine Bean Roasters,Coffee Shop,3.81,JPY
+TXN-139553647,2025-11-14 17:04:12,Kimberly Oliveira,33,78 Victoria Lane,M1 1AA,United Kingdom,Contoso Fresh Market,Grocery Store,27.12,GBP
+TXN-277668816,2025-11-15 03:42:16,Barbara Liu,52,Calle Madero 55,06000,Mexico,Woodgrove Mortgage Services,Mortgage,2345.81,MXN
+TXN-367547638,2025-11-15 09:22:12,Elizabeth Young,58,12 High Street,SW1A 1AA,United Kingdom,Contoso Education Finance,Student Loan Repayment,277.74,GBP
+TXN-879449144,2025-11-15 19:51:43,Donald Li,38,Waldstrasse 55,40210,Germany,Contoso Quick Bites,Fast Food,10.76,EUR
+TXN-778252821,2025-11-16 19:50:28,Sakura Baker,49,8 Rue de la Republique,69001,France,Fabrikam Sushi Bar,Restaurant - Japanese,40.10,EUR
+TXN-389886090,2025-11-17 08:40:34,Daniel Johansson,69,15 Collins Street,3000,Australia,Fourth Coffee,Coffee Shop,5.29,AUD
+TXN-946949411,2025-11-18 17:47:48,Natasha Gonzalez,78,31 FC Road,411001,India,Northwind Grocers,Grocery Store,150.17,INR
+TXN-113044267,2025-11-18 21:02:54,Margaret Romano,44,27 Avenue des Champs-Elysees,75008,France,Litware Dragon Palace,Restaurant - Chinese,59.11,EUR
+TXN-931945970,2025-11-19 19:21:12,Kenji Gonzalez,72,3 Place Bellecour,69002,France,Tailspin Grocery,Grocery Store,212.89,EUR
+TXN-680640789,2025-11-19 20:54:59,Mary Silva,31,33 Bristol Mews,BS1 1AA,United Kingdom,Fabrikam Sushi Bar,Restaurant - Japanese,92.14,GBP
+TXN-870480757,2025-11-20 13:28:43,Christopher Costa,66,555 Willow Trail,75201,United States,Wingtip Electronics,Electronics Store,2160.30,USD
+TXN-263245780,2025-11-21 11:44:40,Astrid Persson,69,23 Anna Salai,600002,India,Tailspin Grocery,Grocery Store,16.30,INR
+TXN-160849696,2025-11-21 20:04:35,Anthony Green,61,88 Brigade Road,560001,India,Fabrikam Pizza Express,Fast Food,8.16,INR
+TXN-708659826,2025-11-21 20:50:03,Elizabeth Young,58,12 High Street,SW1A 1AA,United Kingdom,Bellows Korean BBQ,Restaurant - Korean,62.97,GBP
+TXN-730041746,2025-11-23 06:40:29,Amanda Garcia,55,76 Civil Lines,302001,India,Alpine Bean Roasters,Coffee Shop,11.11,INR
+TXN-443090116,2025-11-23 07:48:59,Michael Colombo,35,3 Place Bellecour,69002,France,Alpine Bean Roasters,Coffee Shop,9.77,EUR
+TXN-443006409,2025-11-24 18:52:56,Michelle Costa,31,654 Portage Avenue,R3C 0G1,Canada,Wide World Grocers,Grocery Store,28.00,CAD
+TXN-533806000,2025-11-24 19:49:56,Stephanie Kumar,20,9 Banjara Hills,500034,India,Fabrikam Sushi Bar,Restaurant - Japanese,35.29,INR
+TXN-829212159,2025-11-25 11:56:07,Noah Muller,38,66 Durham Row,G1 1AA,United Kingdom,Tailspin Burgers,Fast Food,17.27,GBP
+TXN-754946130,2025-11-26 13:19:24,Stephanie Davis,60,90 Oxford Terrace,B1 1AA,United Kingdom,Tailspin Burgers,Fast Food,8.33,GBP
+TXN-876303745,2025-11-28 09:42:41,Richard Jones,60,Schulstrasse 42,50667,Germany,Woodgrove Mortgage Services,Mortgage,936.30,EUR
+TXN-924212328,2025-11-30 19:24:30,Omar Miller,29,2-3-4 Akihabara,101-0021,Japan,Woodgrove Bank ATM,Cash Withdrawal,417.68,JPY
+TXN-537597410,2025-12-01 02:39:34,Ivan Garcia,49,Paseo de Montejo 100,97000,Mexico,Fabrikam Auto Finance,Car Loan,719.72,MXN
+TXN-305784196,2025-12-02 11:47:54,Amanda Garcia,55,76 Civil Lines,302001,India,Northwind Grocers,Grocery Store,13.29,INR
+TXN-383203170,2025-12-03 13:06:23,Kenji Gonzalez,72,3 Place Bellecour,69002,France,Tailspin Burgers,Fast Food,12.61,EUR
+TXN-151736341,2025-12-03 17:10:21,Donald Li,38,Waldstrasse 55,40210,Germany,Tailspin Grocery,Grocery Store,199.99,EUR
+TXN-874174507,2025-12-04 16:24:24,Anthony Green,61,88 Brigade Road,560001,India,Northwind Grocers,Grocery Store,84.07,INR
+TXN-218987768,2025-12-05 01:11:13,Michael Kumar,64,321 Jasper Avenue,T5J 1S9,Canada,Fabrikam Life Insurance,Insurance,649.16,CAD
+TXN-256444133,2025-12-05 08:02:59,Elizabeth Young,58,12 High Street,SW1A 1AA,United Kingdom,Contoso Insurance,Insurance,400.63,GBP
+TXN-516362519,2025-12-05 13:18:10,Anya Yang,28,Paseo de Montejo 100,97000,Mexico,Adventure Cantina,Restaurant - Mexican,39.53,MXN
+TXN-568897418,2025-12-07 08:17:08,Susan Silva,78,Hauptstrasse 15,10115,Germany,Contoso Coffee,Coffee Shop,10.85,EUR
+TXN-144597238,2025-12-07 09:10:55,Karen Rossi,21,654 Portage Avenue,R3C 0G1,Canada,Tailspin Grocery,Grocery Store,205.17,CAD
+TXN-678078534,2025-12-07 12:10:06,Ethan Lewis,60,23 Anna Salai,600002,India,Contoso Fresh Market,Grocery Store,105.56,INR
+TXN-331046317,2025-12-09 08:12:16,Sofia Harris,73,Boulevard Kukulcan 88,77500,Mexico,Alpine Bean Roasters,Coffee Shop,5.27,MXN
+TXN-958525939,2025-12-09 13:20:37,Linda Fernandez,29,Paseo de Montejo 100,97000,Mexico,Fabrikam Pizza Express,Fast Food,6.04,MXN
+TXN-360765815,2025-12-09 21:41:31,Michelle Costa,31,654 Portage Avenue,R3C 0G1,Canada,Northwind Fried Chicken,Fast Food,15.18,CAD
+TXN-202410217,2025-12-10 12:04:07,Sofia Harris,73,Boulevard Kukulcan 88,77500,Mexico,Tailspin Grocery,Grocery Store,39.25,MXN
+TXN-492884713,2025-12-10 17:39:53,Patricia Svensson,71,3 Place Bellecour,69002,France,Contoso Fresh Market,Grocery Store,177.34,EUR
+TXN-744123833,2025-12-12 08:56:59,Charles Clark,19,31 FC Road,411001,India,Northwind Petrol,Petrol Station,70.15,INR
+TXN-810325794,2025-12-12 15:50:33,Priya Schulz,29,31 FC Road,411001,India,Contoso Fuel,Petrol Station,60.05,INR
+TXN-821124300,2025-12-12 17:06:30,Barbara Liu,52,Calle Madero 55,06000,Mexico,Tailspin Burgers,Fast Food,7.42,MXN
+TXN-567576293,2025-12-13 19:52:43,Anthony Wright,37,23 Anna Salai,600002,India,Contoso Trattoria,Restaurant - Italian,78.69,INR
+TXN-954575128,2025-12-14 18:25:27,Linda Fernandez,29,Paseo de Montejo 100,97000,Mexico,Wide World Grocers,Grocery Store,43.87,MXN
+TXN-279485970,2025-12-14 20:49:33,Betty Ramirez,72,Rosenweg 12,01067,Germany,Tailspin Burgers,Fast Food,14.65,EUR
+TXN-422772863,2025-12-15 01:50:04,Mary Oliveira,44,Rua XV de Novembro 88,90020-080,Brazil,Contoso Vehicle Loans,Car Loan,582.98,BRL
+TXN-695057664,2025-12-15 18:09:44,Chen King,78,555 Willow Trail,75201,United States,Wide World Grocers,Grocery Store,42.77,USD
+TXN-558360898,2025-12-15 18:21:07,Margaret Romano,44,27 Avenue des Champs-Elysees,75008,France,Tailspin Grocery,Grocery Store,38.10,EUR
+TXN-573189349,2025-12-16 07:09:11,Daniel Johansson,69,15 Collins Street,3000,Australia,Fourth Coffee,Coffee Shop,7.46,AUD
+TXN-343537364,2025-12-17 08:43:56,Anthony Green,61,88 Brigade Road,560001,India,Fourth Coffee,Coffee Shop,7.61,INR
+TXN-203428225,2025-12-17 18:52:16,Mei Gonzalez,30,27 Avenue des Champs-Elysees,75008,France,Wide World Grocers,Grocery Store,73.54,EUR
+TXN-122463113,2025-12-17 20:22:00,Emily Zhang,45,3-4-5 Ikebukuro,170-0013,Japan,Northwind Curry House,Restaurant - Indian,68.83,JPY
+TXN-164297592,2025-12-18 09:22:46,Kofi Miller,64,Calle Madero 55,06000,Mexico,Northwind Espresso,Coffee Shop,8.20,MXN
+TXN-944896546,2025-12-19 10:21:11,Isabella Wilson,26,789 Robson Street,V6Z 1C2,Canada,Wide World Grocers,Grocery Store,14.54,CAD
+TXN-580093092,2025-12-19 18:03:02,Stephanie Kumar,20,9 Banjara Hills,500034,India,Contoso Quick Bites,Fast Food,7.85,INR
+TXN-870186962,2025-12-20 07:08:01,Michael Kumar,64,321 Jasper Avenue,T5J 1S9,Canada,Contoso Coffee,Coffee Shop,9.13,CAD
+TXN-121108128,2025-12-20 14:27:04,Stephanie Kumar,20,9 Banjara Hills,500034,India,Northwind Espresso,Coffee Shop,5.65,INR
+TXN-715501609,2025-12-22 09:04:13,Charles Chen,64,456 Rue Sainte-Catherine,H3B 1A7,Canada,Alpine Bean Roasters,Coffee Shop,10.08,CAD
+TXN-593728404,2025-12-23 19:09:29,Mei Persson,23,777 Juniper Run,55401,United States,Fabrikam Pizza Express,Fast Food,14.21,USD
+TXN-990693067,2025-12-24 08:42:24,Ethan Lewis,60,23 Anna Salai,600002,India,Alpine Bean Roasters,Coffee Shop,11.18,INR
+TXN-233776041,2025-12-25 16:10:01,Sakura Baker,49,8 Rue de la Republique,69001,France,Contoso Fresh Market,Grocery Store,225.10,EUR
+TXN-923948753,2025-12-26 08:29:08,Mei Khan,34,Avenida Revolucion 300,44100,Mexico,Contoso Coffee,Coffee Shop,6.66,MXN
+TXN-825535433,2025-12-27 12:49:56,Donald Nakamura,58,15 Collins Street,3000,Australia,Wide World Grocers,Grocery Store,64.32,AUD
+TXN-636161667,2025-12-27 18:37:15,Ivan Garcia,49,Paseo de Montejo 100,97000,Mexico,Northwind Petrol,Petrol Station,71.83,MXN
+TXN-751735666,2025-12-27 19:20:27,Ronald Hall,70,67 King William Street,5000,Australia,Wide World Kebab,Restaurant - Turkish,44.16,AUD
+TXN-375877217,2025-12-27 20:28:39,Astrid Persson,69,23 Anna Salai,600002,India,Wingtip Noodle House,Restaurant - Vietnamese,25.28,INR
+TXN-791262527,2025-12-28 09:11:45,Michelle Costa,31,654 Portage Avenue,R3C 0G1,Canada,Contoso Home Loans,Mortgage,2888.57,CAD
+TXN-616982071,2025-12-28 20:44:37,Edward Martinez,44,Paseo de Montejo 100,97000,Mexico,Woodgrove Bank ATM,Cash Withdrawal,297.34,MXN
+TXN-401576824,2025-12-29 16:48:48,Stephanie Kumar,20,9 Banjara Hills,500034,India,Contoso Bank ATM,Cash Withdrawal,423.19,INR
+TXN-530170707,2025-12-30 10:29:08,Michael Kumar,64,321 Jasper Avenue,T5J 1S9,Canada,Contoso Fuel,Petrol Station,88.43,CAD
+TXN-612541951,2025-12-30 15:40:38,Isabella Khan,46,333 Ash Place,30301,United States,Contoso Fresh Market,Grocery Store,50.93,USD
+TXN-310590966,2025-12-30 17:55:25,Donna Robinson,60,42 George Street,2000,Australia,Woodgrove Bank ATM,Cash Withdrawal,85.22,AUD
+TXN-597091978,2025-12-31 14:44:58,Michelle Costa,31,654 Portage Avenue,R3C 0G1,Canada,Wide World Grocers,Grocery Store,97.20,CAD
