@@ -1930,7 +1930,7 @@ def partner_analyze_stream():
                 try:
                     _t0 = time.time()
                     _api_resp = requests.get(
-                        f"{oai_endpoint.rstrip('/')}/openai/deployments?api-version=2024-06-01",
+                        f"{oai_endpoint.rstrip('/')}/openai/deployments/{oai_deployment}?api-version=2024-06-01",
                         headers={'api-key': oai_key},
                         timeout=15,
                     )
@@ -4357,7 +4357,7 @@ def partner_openai_diagnostics():
         import requests as req_lib
         start = time.time()
         resp = req_lib.get(
-            f"{endpoint.rstrip('/')}/openai/deployments?api-version=2024-06-01",
+            f"{endpoint.rstrip('/')}/openai/deployments/{deployment}?api-version=2024-06-01",
             headers={'api-key': api_key},
             timeout=15,
         )
