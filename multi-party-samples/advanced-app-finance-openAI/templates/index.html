@@ -1,0 +1,2927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confidential ACI - Attestation Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.95;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section h2 {
+            color: #0078d4;
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #0078d4;
+        }
+        
+        /* Collapsible section styling */
+        details.section > summary {
+            list-style: none;
+            cursor: pointer;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #0078d4;
+            margin-bottom: 20px;
+        }
+        
+        details.section > summary::-webkit-details-marker {
+            display: none;
+        }
+        
+        details.section > summary::before {
+            content: '▶ ';
+            color: #0078d4;
+            transition: transform 0.2s;
+        }
+        
+        details.section[open] > summary::before {
+            content: '▼ ';
+        }
+        
+        details.section > summary h2 {
+            display: inline;
+            border-bottom: none;
+            padding-bottom: 0;
+            margin-bottom: 0;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        
+        .info-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            border-left: 4px solid #0078d4;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .info-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .info-card h3 {
+            color: #495057;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        
+        .info-card p {
+            color: #0078d4;
+            font-size: 1.3em;
+            font-weight: bold;
+        }
+        
+        .attestation-box {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 30px;
+            margin: 20px 0;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin: 25px 0;
+        }
+        
+        button {
+            background: #0078d4;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1em;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+        
+        button:hover {
+            background: #005a9e;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,120,212,0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        .status-success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .status-error {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .status-info {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .status-warning {
+            background: #ffc107;
+            color: #333;
+        }
+        
+        .output-box {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            line-height: 1.6;
+            margin: 20px 0;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .output-box pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .features-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .features-list li {
+            padding: 15px;
+            margin: 10px 0;
+            background: white;
+            border-left: 4px solid #6c757d;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        }
+        
+        .features-list li.verified {
+            border-left-color: #28a745;
+        }
+        
+        .features-list li.unverified {
+            border-left-color: #dc3545;
+        }
+        
+        .features-list li.pending {
+            border-left-color: #6c757d;
+        }
+        
+        .features-list li .status-icon {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .features-list li.verified .status-icon {
+            color: #28a745;
+        }
+        
+        .features-list li.unverified .status-icon {
+            color: #dc3545;
+        }
+        
+        .features-list li.pending .status-icon {
+            color: #6c757d;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-left: 10px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 30px;
+            background: #f8f9fa;
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        .footer a {
+            color: #0078d4;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        
+        .page-timer {
+            position: fixed;
+            top: 10px;
+            right: 15px;
+            background: rgba(0, 120, 212, 0.9);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-family: monospace;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        
+        .page-timer .timer-icon {
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Page Timer -->
+    <div class="page-timer">
+        <span class="timer-icon">⏱️</span>
+        <span id="pageTimer">00:00</span>
+    </div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>🔒 Confidential Azure Container Instances</h1>
+            <p>Remote Attestation Demo with AMD SEV-SNP</p>
+        </div>
+        
+        <div class="content">
+            <details class="section" open>
+                <summary style="cursor: pointer;"><h2 style="display: inline;">🛡️ Security Features</h2></summary>
+                <p id="securityStatus" style="margin-bottom: 15px; font-style: italic; color: #6c757d; margin-top: 15px;">
+                    Click "Request Attestation Token" to verify security features...
+                </p>
+                <ul class="features-list" id="featuresList">
+                    <li class="pending" data-feature="tee"><span class="status-icon">○</span> Hardware-based Trusted Execution Environment (TEE)</li>
+                    <li class="pending" data-feature="memory"><span class="status-icon">○</span> Memory encryption with AMD SEV-SNP technology</li>
+                    <li class="pending" data-feature="confidentiality"><span class="status-icon">○</span> Data confidentiality and integrity protection</li>
+                    <li class="pending" data-feature="policy"><span class="status-icon">○</span> Code integrity verification through security policies</li>
+                    <li class="pending" data-feature="attestation"><span class="status-icon">○</span> Remote attestation with cryptographic proof</li>
+                    <li class="pending" data-feature="protection"><span class="status-icon">○</span> Protection against cloud provider and hardware attacks</li>
+                </ul>
+            </details>
+            
+            <details class="section">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">🔍 Remote Attestation</h2></summary>
+                <div class="attestation-box" style="margin-top: 15px;">
+                    <p><strong>Remote attestation</strong> allows you to cryptographically verify that your workload is running in a genuine confidential computing environment with the expected security configuration.</p>
+                    
+                    <div class="button-group">
+                        <button id="attestBtn" onclick="requestAttestation()">
+                            Request Attestation Token
+                        </button>
+                        <button id="rawBtn" onclick="requestRawAttestation()">
+                            Get Raw Attestation Report
+                        </button>
+                    </div>
+                    
+                    <div id="attestResult"></div>
+                </div>
+            </details>
+            
+            <details class="section">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">🔑 Secure Key Release</h2></summary>
+                <div class="attestation-box" style="margin-top: 15px;">
+                    <p><strong>Secure Key Release (SKR)</strong> allows Azure Key Vault to release cryptographic keys only to verified confidential computing environments. The key is released only if the container proves it's running in a genuine AMD SEV-SNP TEE with the correct security policy.</p>
+                    
+                    <div id="skrConfigInfo" style="margin: 20px 0; padding: 20px; background: #e7f3ff; border-radius: 8px; border: 2px solid #0078d4;">
+                        <p style="color: #004085;"><em>Loading SKR configuration...</em></p>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button id="skrBtn" onclick="testSecureKeyRelease()">
+                            🔐 Test Secure Key Release
+                        </button>
+                    </div>
+                    
+                    <div id="skrResult"></div>
+                </div>
+            </details>
+            
+            <!-- Cross-Company Key Access Attempt Section -->
+            <details class="section" id="crossCompanySection" style="display: none;">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">&#128683; Attempt to Use Key from Other Company</h2></summary>
+                <div class="attestation-box" style="border-left-color: #dc3545; margin-top: 15px;">
+                    <div style="margin-bottom: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545;">
+                        <p style="color: #721c24;"><strong>Cross-Company Access Test:</strong> This demonstrates that even though both Contoso and Fabrikam are running in confidential containers with TEE protection, each company can ONLY access their own cryptographic keys.</p>
+                    </div>
+                    
+                    <div id="crossCompanyInfo" style="margin-bottom: 20px; padding: 15px; background: #e2e3e5; border-radius: 8px;">
+                        <p style="color: #495057;"><em>Loading company information...</em></p>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button id="attemptOtherKeyBtn" onclick="attemptOtherCompanyKey()" style="background: #dc3545;">
+                            &#128683; Attempt to Access Other Company's Key
+                        </button>
+                    </div>
+                    
+                    <div id="crossCompanyResult" style="margin-top: 20px;"></div>
+                    
+                    <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+                        <h4 style="color: #856404; margin-bottom: 10px;">&#128161; Why This Matters</h4>
+                        <ul style="color: #856404; margin-left: 20px;">
+                            <li><strong>Managed Identity Isolation</strong> - Each company has its own Azure Managed Identity</li>
+                            <li><strong>Key Vault Access Policies</strong> - Each Key Vault only grants access to its company's identity</li>
+                            <li><strong>TEE is Necessary but Not Sufficient</strong> - Being in a TEE proves code integrity, but doesn't grant access to other companies' secrets</li>
+                            <li><strong>Multi-Party Security</strong> - Companies can share infrastructure while maintaining cryptographic isolation</li>
+                        </ul>
+                    </div>
+                </div>
+            </details>
+            
+            <!-- Partner Demographic Analysis Section (Woodgrove Bank Only) -->
+            <details class="section" id="partnerAnalysisSection" style="display: none;">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">&#128202; Partner Demographic Analysis</h2></summary>
+                <div class="attestation-box" style="border-left-color: #1a472a; margin-top: 15px;">
+                    <div style="margin-bottom: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border: 2px solid #1a472a;">
+                        <p style="color: #155724;"><strong>&#127970; Woodgrove Bank Partner Analysis System</strong></p>
+                        <p style="color: #155724; margin-top: 8px;">As a trusted analytics partner, Woodgrove Bank has been granted secure key release access to both Contoso and Fabrikam's Key Vaults. This allows aggregate demographic analysis while maintaining cryptographic isolation.</p>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                        <div id="contosoKeyStatus" style="padding: 15px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                                <span id="contosoStatusIcon" style="font-size: 20px;">⏳</span>
+                                <strong style="color: #495057;">Contoso Key</strong>
+                            </div>
+                            <p id="contosoStatusText" style="color: #6c757d; font-size: 12px;">Not started</p>
+                        </div>
+                        <div id="fabrikamKeyStatus" style="padding: 15px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                                <span id="fabrikamStatusIcon" style="font-size: 20px;">⏳</span>
+                                <strong style="color: #495057;">Fabrikam Key</strong>
+                            </div>
+                            <p id="fabrikamStatusText" style="color: #6c757d; font-size: 12px;">Not started</p>
+                        </div>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button id="startPartnerAnalysisBtn" onclick="startPartnerAnalysis()" style="background: #1a472a;">
+                            &#128202; Start Partner Demographic Analysis
+                        </button>
+                    </div>
+                    
+                    <!-- Progress Bar Section -->
+                    <div id="progressSection" style="display: none; margin-top: 20px;">
+                        <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; border: 2px solid #1a472a;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <span id="progressStatus" style="font-weight: bold; color: #1a472a;">Initializing...</span>
+                                <span id="progressPercent" style="font-weight: bold; color: #1a472a;">0%</span>
+                            </div>
+                            <div style="background: #dee2e6; border-radius: 10px; height: 24px; overflow: hidden;">
+                                <div id="progressBar" style="background: linear-gradient(90deg, #1a472a 0%, #28a745 100%); height: 100%; width: 0%; transition: width 0.3s ease; border-radius: 10px;"></div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 12px; color: #6c757d;">
+                                <span id="progressDecrypted">0 / 0 records</span>
+                                <span id="progressTime">Elapsed: 0s | Remaining: --</span>
+                            </div>
+                            <div id="progressPartner" style="margin-top: 8px; font-size: 12px; color: #495057;"></div>
+                        </div>
+                    </div>
+                    
+                    <div id="partnerAnalysisResult" style="margin-top: 20px;"></div>
+                    
+                    <!-- Demographics Summary -->
+                    <div id="demographicsSummary" style="display: none; margin-top: 25px;">
+                        <h4 style="color: #1a472a; margin-bottom: 15px;">&#128202; Aggregate Demographics Summary</h4>
+                        
+                        <!-- Staff Count Cards -->
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
+                            <div style="padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; text-align: center; color: white;">
+                                <div style="font-size: 32px; font-weight: bold;" id="statContosoRecords">0</div>
+                                <div style="font-size: 12px; opacity: 0.9;">Contoso Staff</div>
+                            </div>
+                            <div style="padding: 20px; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); border-radius: 8px; text-align: center; color: white;">
+                                <div style="font-size: 32px; font-weight: bold;" id="statFabrikamRecords">0</div>
+                                <div style="font-size: 12px; opacity: 0.9;">Fabrikam Staff</div>
+                            </div>
+                            <div style="padding: 20px; background: linear-gradient(135deg, #1a472a 0%, #2d5a3d 100%); border-radius: 8px; text-align: center; color: white;">
+                                <div style="font-size: 32px; font-weight: bold;" id="statTotalRecords">0</div>
+                                <div style="font-size: 12px; opacity: 0.9;">Total Combined</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Average Salaries -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">💰 Average Salaries</h5>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
+                            <div style="padding: 15px; background: #e8eaf6; border-radius: 8px; text-align: center; border: 2px solid #667eea;">
+                                <div style="font-size: 24px; font-weight: bold; color: #667eea;" id="avgSalaryContoso">$0</div>
+                                <div style="font-size: 12px; color: #495057;">Contoso Avg</div>
+                            </div>
+                            <div style="padding: 15px; background: #e0f2f1; border-radius: 8px; text-align: center; border: 2px solid #11998e;">
+                                <div style="font-size: 24px; font-weight: bold; color: #11998e;" id="avgSalaryFabrikam">$0</div>
+                                <div style="font-size: 12px; color: #495057;">Fabrikam Avg</div>
+                            </div>
+                            <div style="padding: 15px; background: #e8f5e9; border-radius: 8px; text-align: center; border: 2px solid #1a472a;">
+                                <div style="font-size: 24px; font-weight: bold; color: #1a472a;" id="avgSalaryCombined">$0</div>
+                                <div style="font-size: 12px; color: #495057;">Combined Avg</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Generation Breakdown -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">👥 Workforce by Generation</h5>
+                        <div id="generationBreakdown" style="margin-bottom: 20px;"></div>
+                        
+                        <!-- Generation Breakdown by Company -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">📊 Generation Split by Company</h5>
+                        <div id="generationByCompany" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                            <!-- Contoso Generations -->
+                            <div style="padding: 15px; background: #e8eaf6; border-radius: 8px; border: 2px solid #667eea;">
+                                <h6 style="color: #667eea; margin-bottom: 10px; text-align: center;">🏢 Contoso</h6>
+                                <div id="contosoGenerations"></div>
+                            </div>
+                            <!-- Fabrikam Generations -->
+                            <div style="padding: 15px; background: #fce4ec; border-radius: 8px; border: 2px solid #e83e8c;">
+                                <h6 style="color: #e83e8c; margin-bottom: 10px; text-align: center;">👗 Fabrikam Fashion</h6>
+                                <div id="fabrikamGenerations"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- World Map - Average Salary by Country -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">🗺️ Average Salary by Country</h5>
+                        <div id="salaryMapContainer" style="margin-bottom: 20px; background: #f8f9fa; border-radius: 8px; padding: 15px; border: 2px solid #dee2e6;">
+                            <div id="salaryWorldMap" style="width: 100%; height: 400px;"></div>
+                            <div id="salaryMapLegend" style="margin-top: 10px; text-align: center;"></div>
+                        </div>
+                        
+                        <!-- Eye Colors -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">👁️ Eye Color Distribution</h5>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                            <div style="padding: 15px; background: #d4edda; border-radius: 8px; border: 2px solid #28a745;">
+                                <div style="font-size: 14px; color: #155724; margin-bottom: 5px;">Most Common</div>
+                                <div style="font-size: 20px; font-weight: bold; color: #155724;" id="eyeColorMost">-</div>
+                            </div>
+                            <div style="padding: 15px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545;">
+                                <div style="font-size: 14px; color: #721c24; margin-bottom: 5px;">Least Common</div>
+                                <div style="font-size: 20px; font-weight: bold; color: #721c24;" id="eyeColorLeast">-</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Favorite Colors -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">🎨 Top 3 Favorite Colors</h5>
+                        <div id="favoriteColors" style="display: flex; gap: 15px; margin-bottom: 20px;"></div>
+                        
+                        <!-- Top 10 Countries with Cities -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">🌍 Top 10 Countries (with Top 3 Cities)</h5>
+                        <div id="countriesTable" style="margin-bottom: 20px;"></div>
+                    </div>
+                </div>
+            </details>
+            
+            <details class="section">
+                <summary style="cursor: pointer; display: flex; align-items: center; gap: 10px;">
+                    <h2 style="margin: 0;">&#128274; Encrypt Data Using <span id="encryptionCompanyName">Company</span> Key</h2>
+                </summary>
+                <div class="attestation-box">
+                    <p><strong>Live Encryption Demo:</strong> After successfully releasing a key, you can encrypt text in real-time using the released RSA key. The encryption uses RSA-OAEP with SHA-256 padding.</p>
+                    
+                    <div id="encryptionStatus" style="margin: 20px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+                        <p style="color: #856404;"><em>⚠️ Key not released yet. Click "Test Secure Key Release" above first.</em></p>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                        <div>
+                            <label for="plaintextInput" style="display: block; font-weight: bold; margin-bottom: 10px; color: #495057;">
+                                📝 Plaintext Input
+                            </label>
+                            <textarea 
+                                id="plaintextInput" 
+                                placeholder="Type your secret message here..."
+                                style="width: 100%; height: 150px; padding: 15px; border: 2px solid #dee2e6; border-radius: 8px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; resize: vertical;"
+                                oninput="encryptRealtime()"
+                                disabled
+                            ></textarea>
+                            <p style="margin-top: 5px; font-size: 0.85em; color: #6c757d;">
+                                <span id="plaintextLength">0</span> characters | Max: <span id="maxPlaintextLength">--</span> bytes
+                            </p>
+                        </div>
+                        <div>
+                            <label for="ciphertextOutput" style="display: block; font-weight: bold; margin-bottom: 10px; color: #495057;">
+                                🔐 Encrypted Output (Base64)
+                            </label>
+                            <textarea 
+                                id="ciphertextOutput" 
+                                placeholder="Encrypted ciphertext will appear here..."
+                                style="width: 100%; height: 150px; padding: 15px; border: 2px solid #28a745; border-radius: 8px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; background: #f8f9fa; resize: vertical;"
+                                readonly
+                            ></textarea>
+                            <p style="margin-top: 5px; font-size: 0.85em; color: #6c757d;">
+                                <span id="ciphertextLength">0</span> bytes encrypted | Algorithm: RSA-OAEP-SHA256
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div id="encryptionInfo" style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4; display: none;">
+                        <h4 style="color: #004085; margin-bottom: 10px;">ℹ️ How it works</h4>
+                        <ul style="color: #004085; margin-left: 20px;">
+                            <li>The released key (RSA public key) is stored in server memory</li>
+                            <li>Your plaintext is encrypted using RSA-OAEP with SHA-256</li>
+                            <li>Only the holder of the private key (Azure Key Vault HSM) can decrypt</li>
+                            <li>The private key never leaves the HSM - even after release</li>
+                        </ul>
+                    </div>
+                </div>
+            </details>
+            
+            <details class="section">
+                <summary style="cursor: pointer; display: flex; align-items: center; gap: 10px;">
+                    <h2 style="margin: 0;">🖥️ Try to Access Container OS</h2>
+                </summary>
+                <div class="attestation-box">
+                    <p><strong>Can an operator shell into a Confidential Container?</strong> This test attempts several ways an infrastructure operator might try to get command-line access to a running container — SSH, <code>az container exec</code>, and spawning a shell process. All are blocked by the Confidential Computing Enforcement Policy.</p>
+                    
+                    <div style="margin: 20px 0;">
+                        <button id="accessTestBtn" onclick="testContainerAccess()" style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 1em; cursor: pointer; font-weight: bold;">
+                            🔓 Attempt to Connect
+                        </button>
+                    </div>
+                    
+                    <div id="accessTestResult" style="display: none;"></div>
+                </div>
+            </details>
+            
+            <details class="section">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">📦 Container Image Information</h2></summary>
+                <div id="containerInfo" style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #6c757d; margin-top: 15px;">
+                    <p><em>Loading container information...</em></p>
+                </div>
+            </details>
+        </div>
+        
+        <div class="footer">
+            <p><strong>Powered by Azure Container Instances Confidential Computing</strong></p>
+            <p>Learn more: <a href="https://learn.microsoft.com/azure/container-instances/container-instances-confidential-overview" target="_blank">Confidential containers on ACI documentation</a></p>
+            <p>Sample based on: <a href="https://github.com/Azure-Samples/confidential-container-samples" target="_blank">Azure Confidential Container Samples</a></p>
+        </div>
+    </div>
+    
+    <script>
+        // Load deployment info and SKR config on page load
+        window.onload = function() {
+            // Load SKR configuration
+            fetch('/skr/config')
+                .then(response => response.json())
+                .then(data => {
+                    const skrConfigDiv = document.getElementById('skrConfigInfo');
+                    if (data.configured) {
+                        let html = '<div style="text-align: center; margin-bottom: 15px;">';
+                        html += '<p style="color: #004085; font-size: 0.9em; margin-bottom: 5px;">TARGET KEY FOR SECURE KEY RELEASE</p>';
+                        html += '<p style="color: #0078d4; font-size: 1.8em; font-weight: bold; font-family: monospace; background: white; padding: 12px 20px; border-radius: 6px; display: inline-block; border: 2px dashed #0078d4;">🔑 ' + escapeHtml(data.key_name) + '</p>';
+                        html += '</div>';
+                        html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 0.9em;">';
+                        html += '<div style="background: white; padding: 10px; border-radius: 4px;"><strong style="color: #666;">Key Vault:</strong><br><span style="color: #004085; font-family: monospace;">' + escapeHtml(data.akv_endpoint) + '</span></div>';
+                        html += '<div style="background: white; padding: 10px; border-radius: 4px;"><strong style="color: #666;">MAA Endpoint:</strong><br><span style="color: #004085; font-family: monospace;">' + escapeHtml(data.maa_endpoint) + '</span></div>';
+                        html += '</div>';
+                        
+                        // Show security policy hash if available
+                        if (data.security_policy_hash) {
+                            html += '<div style="margin-top: 15px; padding: 12px; background: linear-gradient(135deg, #e8f4ff 0%, #f0f7ff 100%); border-radius: 6px; border: 1px solid #b8daff;">';
+                            html += '<p style="color: #0056b3; font-size: 0.85em; margin-bottom: 5px;"><strong>🛡️ SECURITY POLICY BINDING</strong></p>';
+                            html += '<p style="font-family: monospace; font-size: 0.75em; color: #004085; word-break: break-all; background: white; padding: 8px; border-radius: 4px; margin-bottom: 8px;">' + escapeHtml(data.security_policy_hash) + '</p>';
+                            html += '<p style="font-size: 0.75em; color: #666;">This key can ONLY be released to containers with this exact security policy hash (x-ms-sevsnpvm-hostdata)</p>';
+                            html += '</div>';
+                        }
+                        
+                        skrConfigDiv.innerHTML = html;
+                    } else {
+                        skrConfigDiv.innerHTML = '<p style="color: #856404;"><em>⚠️ SKR not configured. Deploy with -SKR parameter to enable Secure Key Release.</em></p>';
+                        skrConfigDiv.style.background = '#fff3cd';
+                        skrConfigDiv.style.borderColor = '#ffc107';
+                        document.getElementById('skrBtn').disabled = true;
+                        document.getElementById('skrBtn').title = 'SKR not configured';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('skrConfigInfo').innerHTML = 
+                        '<p style="color: #856404;"><em>⚠️ Could not load SKR configuration: ' + escapeHtml(error.message) + '</em></p>';
+                });
+            
+            // Check if a key has already been released (e.g., page refresh)
+            checkKeyStatus();
+            
+            fetch('/info')
+                .then(response => response.json())
+                .then(data => {
+                    // Only update header if attestation is verified - otherwise keep default
+                    const header = document.querySelector('.header');
+                    const headerH1 = header.querySelector('h1');
+                    const headerP = header.querySelector('p');
+                    
+                    if (data.status && data.status.attestation_works) {
+                        // Attestation verified - show green success header
+                        header.style.background = 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)';
+                        headerH1.innerHTML = '🔒 Confidential Azure Container Instances';
+                        headerP.textContent = 'Running in AMD SEV-SNP Trusted Execution Environment';
+                        
+                        // Update security features to verified
+                        updateSecurityFeatures(true, null, null);
+                        
+                        // Update features list for verified state
+                        if (data.features && Array.isArray(data.features)) {
+                            updateFeaturesFromInfo(data.features, true);
+                        }
+                    }
+                    // If attestation fails, keep the default header - user will see failure when they click the button
+                })
+                .catch(error => {
+                    console.error('Error loading info:', error);
+                });
+            
+            // Load container image information
+            fetch('/container/info')
+                .then(response => response.json())
+                .then(data => {
+                    let html = '';
+                    
+                    // Container identity
+                    html += '<div style="margin-bottom: 20px;">';
+                    html += '<h4 style="color: #495057; margin-bottom: 10px;">🏷️ Container Identity</h4>';
+                    html += '<table style="width: 100%; border-collapse: collapse;">';
+                    html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold; width: 200px;">Hostname</td>';
+                    html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.hostname || 'Unknown') + '</td></tr>';
+                    html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Container ID</td>';
+                    html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.container_id || 'Unknown') + '</td></tr>';
+                    if (data.os) {
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">OS</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + escapeHtml(data.os.pretty_name || 'Unknown') + '</td></tr>';
+                    }
+                    html += '</table>';
+                    html += '</div>';
+                    
+                    // SKR Service Status (important for NoAcc mode)
+                    if (data.skr_status) {
+                        const skrRunning = data.skr_status.running === true;
+                        const statusColor = skrRunning ? '#28a745' : '#dc3545';
+                        const statusIcon = skrRunning ? '✅' : '❌';
+                        
+                        html += '<div style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: ' + (skrRunning ? '#d4edda' : '#f8d7da') + '; border-left: 4px solid ' + statusColor + ';">';
+                        html += '<h4 style="color: ' + statusColor + '; margin-bottom: 10px;">' + statusIcon + ' SKR Service Status</h4>';
+                        
+                        if (skrRunning) {
+                            html += '<p style="color: #155724;"><strong>Status:</strong> Running on port 8080</p>';
+                        } else {
+                            html += '<p style="color: #721c24;"><strong>Status:</strong> Not Running</p>';
+                            if (data.skr_status.reason) {
+                                html += '<p style="color: #721c24; margin-top: 10px;"><strong>Reason:</strong> ' + escapeHtml(data.skr_status.reason) + '</p>';
+                            }
+                            if (data.skr_status.explanation) {
+                                html += '<div style="margin-top: 10px; padding: 10px; background: rgba(255,255,255,0.5); border-radius: 4px;">';
+                                html += '<p style="color: #721c24; font-size: 0.9em;">' + escapeHtml(data.skr_status.explanation) + '</p>';
+                                html += '</div>';
+                            }
+                            if (data.skr_status.solution) {
+                                html += '<p style="color: #155724; margin-top: 10px; background: #d4edda; padding: 8px; border-radius: 4px;"><strong>💡 Solution:</strong> ' + escapeHtml(data.skr_status.solution) + '</p>';
+                            }
+                            if (data.skr_status.technical_detail) {
+                                html += '<p style="color: #6c757d; margin-top: 10px; font-size: 0.85em;"><em>Technical: ' + escapeHtml(data.skr_status.technical_detail) + '</em></p>';
+                            }
+                        }
+                        html += '</div>';
+                    }
+                    
+                    // SEV Device Status
+                    if (data.sev_device) {
+                        const sevAvailable = data.sev_device.available;
+                        const sevColor = sevAvailable ? '#28a745' : '#dc3545';
+                        const sevIcon = sevAvailable ? '✅' : '❌';
+                        
+                        html += '<div style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: ' + (sevAvailable ? '#d4edda' : '#f8d7da') + '; border-left: 4px solid ' + sevColor + ';">';
+                        html += '<h4 style="color: ' + sevColor + '; margin-bottom: 10px;">' + sevIcon + ' AMD SEV-SNP Device</h4>';
+                        
+                        if (sevAvailable) {
+                            html += '<p style="color: #155724;"><strong>Device:</strong> ' + escapeHtml(data.sev_device.device_path) + '</p>';
+                        } else {
+                            html += '<p style="color: #721c24;"><strong>Device:</strong> Not found (no /dev/sev-guest)</p>';
+                            html += '<p style="color: #721c24; font-size: 0.9em; margin-top: 5px;"><em>This container is NOT running on confidential computing hardware.</em></p>';
+                        }
+                        html += '</div>';
+                    }
+                    
+                    // SKR Binary Info with checksums
+                    if (data.skr_binary_info && !data.skr_binary_info.error) {
+                        html += '<div style="margin-bottom: 20px;">';
+                        html += '<h4 style="color: #495057; margin-bottom: 10px;">🔐 SKR Binary</h4>';
+                        html += '<table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold; width: 200px;">Path</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace;">' + escapeHtml(data.skr_binary_info.path) + '</td></tr>';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Size</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + (data.skr_binary_info.size_bytes ? (data.skr_binary_info.size_bytes / 1024 / 1024).toFixed(2) + ' MB' : 'Unknown') + '</td></tr>';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">SHA256</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-family: monospace; font-size: 0.85em;">' + escapeHtml(data.skr_binary_info.sha256 || 'N/A') + '</td></tr>';
+                        html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Executable</td>';
+                        html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + (data.skr_binary_info.executable ? '✓ Yes' : '✗ No') + '</td></tr>';
+                        if (data.skr_binary_info.version) {
+                            html += '<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-weight: bold;">Version</td>';
+                            html += '<td style="padding: 8px; border-bottom: 1px solid #dee2e6;">' + escapeHtml(data.skr_binary_info.version) + '</td></tr>';
+                        }
+                        html += '</table>';
+                        html += '</div>';
+                    }
+                    
+                    // Application file checksums
+                    if (data.app_checksums && Object.keys(data.app_checksums).length > 0) {
+                        html += '<div style="margin-bottom: 20px;">';
+                        html += '<h4 style="color: #495057; margin-bottom: 10px;">📄 Application Files (SHA256 Checksums)</h4>';
+                        html += '<table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">';
+                        for (const [path, info] of Object.entries(data.app_checksums)) {
+                            if (info.sha256) {
+                                html += '<tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6; font-family: monospace; word-break: break-all;">' + escapeHtml(path) + '</td>';
+                                html += '<td style="padding: 6px; border-bottom: 1px solid #dee2e6; font-family: monospace; color: #0078d4;">' + escapeHtml(info.sha256) + '</td>';
+                                html += '<td style="padding: 6px; border-bottom: 1px solid #dee2e6; color: #6c757d;">' + (info.size_bytes ? (info.size_bytes / 1024).toFixed(1) + ' KB' : '') + '</td></tr>';
+                            }
+                        }
+                        html += '</table>';
+                        html += '</div>';
+                    }
+                    
+                    document.getElementById('containerInfo').innerHTML = html;
+                })
+                .catch(error => {
+                    document.getElementById('containerInfo').innerHTML = 
+                        '<p style="color: #dc3545;">Error loading container info: ' + escapeHtml(error.message) + '</p>';
+                });
+        };
+        
+        // ======== Try to access container OS ========
+        function testContainerAccess() {
+            const btn = document.getElementById('accessTestBtn');
+            const resultDiv = document.getElementById('accessTestResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = '🔓 Attempting access<span class="loading"></span>';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<p style="color: #856404;"><em>Running access tests against the container...</em></p>';
+            
+            fetch('/container/access-test', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '🔓 Attempt to Connect';
+                
+                let html = '';
+                
+                if (data.tests) {
+                    data.tests.forEach(function(test) {
+                        const isBlocked = test.result === 'blocked';
+                        const icon = isBlocked ? '🛡️' : (test.result === 'unavailable' ? '⚫' : '⚠️');
+                        const borderColor = isBlocked ? '#dc3545' : '#6c757d';
+                        const bgColor = isBlocked ? '#f8d7da' : '#f8f9fa';
+                        
+                        html += '<div style="margin: 12px 0; padding: 15px; background: ' + bgColor + '; border-radius: 8px; border-left: 4px solid ' + borderColor + ';">';
+                        html += '<h4 style="margin: 0 0 8px 0; color: #333;">' + icon + ' ' + escapeHtml(test.name) + '</h4>';
+                        html += '<p style="margin: 0 0 8px 0;"><span class="status-badge ' + (isBlocked ? 'status-error' : 'status-warning') + '">' + escapeHtml(test.result.toUpperCase()) + '</span></p>';
+                        html += '<p style="margin: 0 0 6px 0; color: #555;">' + escapeHtml(test.detail) + '</p>';
+                        
+                        if (test.policy_rule) {
+                            html += '<div style="margin-top: 8px; padding: 10px; background: #1e1e1e; border-radius: 6px;">';
+                            html += '<code style="color: #d4d4d4; font-size: 0.85em; white-space: pre-wrap;">' + escapeHtml(test.policy_rule) + '</code>';
+                            html += '</div>';
+                        }
+                        html += '</div>';
+                    });
+                }
+                
+                // Summary box
+                html += '<div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4;">';
+                html += '<h4 style="color: #004085; margin: 0 0 10px 0;">🛡️ Why is access blocked?</h4>';
+                html += '<p style="color: #004085; margin: 0 0 10px 0;">';
+                html += 'The <strong>Confidential Computing Enforcement Policy</strong> (ccePolicy) is cryptographically bound to this container\'s TEE. ';
+                html += 'It enforces three key protections that prevent <em>anyone</em> — including the cloud operator — from accessing the container OS:';
+                html += '</p>';
+                html += '<ul style="color: #004085; margin: 0 0 15px 20px;">';
+                html += '<li><code>"exec_processes": []</code> — No additional processes can be spawned (blocks <code>az container exec</code>, <code>docker exec</code>)</li>';
+                html += '<li><code>"allow_stdio_access": false</code> — No stdin/stdout from host (blocks interactive shells)</li>';
+                html += '<li><strong>No SSH server</strong> — The container image has no SSH daemon, and the policy prevents adding one at runtime</li>';
+                html += '</ul>';
+                html += '<p style="color: #004085; margin: 0;">These rules are enforced by the AMD SEV-SNP hardware — the hypervisor itself cannot bypass them. ';
+                html += 'See <a href="https://github.com/vinfnet/confidential-computing/blob/main/multi-party-samples/advanced-app/SECURITY-POLICY.md" target="_blank" style="color: #0056b3; font-weight: bold;">SECURITY-POLICY.md</a> for the full annotated policy.</p>';
+                html += '</div>';
+                
+                resultDiv.innerHTML = html;
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = '🔓 Attempt to Connect';
+                resultDiv.innerHTML = '<p style="color: #dc3545;">Error: ' + escapeHtml(error.message) + '</p>';
+            });
+        }
+        
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+        }
+        
+        // Detailed explanations for MAA attestation token claims
+        function getClaimExplanation(key, value) {
+            const explanations = {
+                'exp': {
+                    title: 'Token Expiration Time',
+                    icon: '⏰',
+                    category: 'JWT Standard',
+                    description: 'Unix timestamp after which this attestation token is no longer valid. Tokens are short-lived to prevent replay attacks. After expiry, a new attestation must be performed.',
+                    detail: value ? 'Expires: ' + new Date(value * 1000).toUTCString() : null
+                },
+                'iat': {
+                    title: 'Token Issued At',
+                    icon: '📅',
+                    category: 'JWT Standard',
+                    description: 'Unix timestamp when this attestation token was issued by the MAA service. Used together with "exp" to determine the token\'s validity window.',
+                    detail: value ? 'Issued: ' + new Date(value * 1000).toUTCString() : null
+                },
+                'iss': {
+                    title: 'Token Issuer',
+                    icon: '🏛️',
+                    category: 'JWT Standard',
+                    description: 'The Microsoft Azure Attestation (MAA) endpoint that issued this token. This is the shared attestation provider for the Azure region where the container is deployed. Relying parties should verify this matches the expected MAA endpoint.'
+                },
+                'jti': {
+                    title: 'JWT Token ID',
+                    icon: '🆔',
+                    category: 'JWT Standard',
+                    description: 'A unique identifier for this specific attestation token. Prevents token replay attacks — each attestation request produces a token with a unique JTI that can be tracked by relying parties.'
+                },
+                'nbf': {
+                    title: 'Not Valid Before',
+                    icon: '⏳',
+                    category: 'JWT Standard',
+                    description: 'Unix timestamp before which this token should not be accepted. Typically the same as "iat" (issued at). Prevents tokens from being used before they were created.',
+                    detail: value ? 'Valid from: ' + new Date(value * 1000).toUTCString() : null
+                },
+                'nonce': {
+                    title: 'Attestation Nonce',
+                    icon: '🎲',
+                    category: 'Request Binding',
+                    description: 'A random value provided by the client during the attestation request. Included in the signed token to prove freshness — ensures this token was generated in response to this specific request and is not a replay of an old attestation.'
+                },
+                'x-ms-attestation-type': {
+                    title: 'Attestation Type',
+                    icon: '🔐',
+                    category: 'Platform Identity',
+                    description: 'Identifies the type of Trusted Execution Environment (TEE) that was attested. "sevsnpvm" means AMD SEV-SNP (Secure Encrypted Virtualization - Secure Nested Paging), the hardware-level confidential computing technology protecting this VM.',
+                    detail: value === 'sevsnpvm' ? '✅ AMD SEV-SNP hardware attestation confirmed' : null
+                },
+                'x-ms-compliance-status': {
+                    title: 'Compliance Status',
+                    icon: '✅',
+                    category: 'Platform Identity',
+                    description: 'Indicates the compliance status of the Utility VM (UVM) running the container. "azure-compliant-uvm" means the VM image has been verified by Microsoft as meeting Azure\'s confidential computing security requirements.',
+                    detail: value === 'azure-compliant-uvm' ? '✅ Running Microsoft-verified compliant UVM' : null
+                },
+                'x-ms-policy-hash': {
+                    title: 'Attestation Policy Hash',
+                    icon: '📜',
+                    category: 'Policy',
+                    description: 'SHA-256 hash of the attestation policy applied by the MAA service when evaluating this attestation. This allows relying parties to verify which policy rules were enforced when the token was issued.'
+                },
+                'x-ms-runtime': {
+                    title: 'Runtime Data',
+                    icon: '📦',
+                    category: 'Request Binding',
+                    description: 'Custom data provided by the application at attestation time and included in the signed token. This binds application-specific context (like timestamps or session IDs) to the hardware attestation, proving the data originated from inside the TEE.'
+                },
+                'x-ms-sevsnpvm-authorkeydigest': {
+                    title: 'Author Key Digest',
+                    icon: '✍️',
+                    category: 'SEV-SNP Identity',
+                    description: 'SHA-384 hash of the author signing key used to sign the guest firmware. All zeros indicates the guest was launched with the default (unsigned) author key. In production, this would identify the specific entity that authored the VM firmware.'
+                },
+                'x-ms-sevsnpvm-bootloader-svn': {
+                    title: 'Bootloader Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number (SVN) of the AMD SEV-SNP bootloader. This version number is monotonically increasing — higher values indicate newer security patches. Used in release policies to ensure the platform has minimum required security patches.'
+                },
+                'x-ms-sevsnpvm-chip-family': {
+                    title: 'CPU Chip Family',
+                    icon: '🖥️',
+                    category: 'Hardware Identity',
+                    description: 'The AMD CPU family running this confidential VM. "Milan" is AMD\'s 3rd Gen EPYC processor series (Zen 3), one of the first to support SEV-SNP. Other values include "Genoa" (4th Gen EPYC, Zen 4) which offers enhanced security features.'
+                },
+                'x-ms-sevsnpvm-chipid': {
+                    title: 'Chip Unique ID',
+                    icon: '🔧',
+                    category: 'Hardware Identity',
+                    description: 'Unique cryptographic identifier of the specific AMD physical processor chip running this VM. This 64-byte value is derived from the chip\'s fused secrets and can be used to track workloads to specific physical hardware — important for compliance and audit scenarios.'
+                },
+                'x-ms-sevsnpvm-ciphertext-hiding-dram-enabled': {
+                    title: 'Ciphertext-Hiding DRAM',
+                    icon: '🛡️',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether the hardware protects against side-channel attacks that observe ciphertext patterns in DRAM. When enabled, even the encrypted memory patterns are obfuscated, providing protection against sophisticated physical attacks on memory.'
+                },
+                'x-ms-sevsnpvm-cxl-allowed': {
+                    title: 'CXL Memory Allowed',
+                    icon: '🔌',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether Compute Express Link (CXL) attached memory is allowed. CXL memory is external to the CPU and may have different security properties. When false, only CPU-attached DRAM is used, ensuring all memory is protected by the CPU\'s encryption engine.'
+                },
+                'x-ms-sevsnpvm-familyId': {
+                    title: 'VM Family ID',
+                    icon: '👨‍👩‍👧',
+                    category: 'SEV-SNP Identity',
+                    description: 'A 16-byte identifier set by the hypervisor to group related VMs into a "family." VMs in the same family can optionally share migration keys. Used for VM lifecycle management in confidential computing environments.'
+                },
+                'x-ms-sevsnpvm-guestsvn': {
+                    title: 'Guest Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number of the guest VM firmware. This allows relying parties to enforce minimum guest versions in key release policies, ensuring the guest has all required security patches before secrets are released.'
+                },
+                'x-ms-sevsnpvm-hostdata': {
+                    title: 'Host Data (Security Policy Hash)',
+                    icon: '🔒',
+                    category: 'Container Identity',
+                    description: 'SHA-256 hash of the confidential computing security policy (ccePolicy) set by the host at VM launch time. This is the CRITICAL binding between the container\'s security policy and the hardware attestation. Key release policies compare this value to ensure only containers with the approved security policy can access secrets.',
+                    detail: '🔑 This value is used in SKR key release policies to bind keys to specific container configurations'
+                },
+                'x-ms-sevsnpvm-idkeydigest': {
+                    title: 'ID Key Digest',
+                    icon: '🔑',
+                    category: 'SEV-SNP Identity',
+                    description: 'SHA-384 hash of the AMD ID signing key that signed the attestation report. This identifies the specific AMD key used to certify the attestation — verifiable against AMD\'s published key certificates to prove the report came from genuine AMD hardware.'
+                },
+                'x-ms-sevsnpvm-imageId': {
+                    title: 'VM Image ID',
+                    icon: '💿',
+                    category: 'SEV-SNP Identity',
+                    description: 'A 16-byte identifier set by the hypervisor to identify the guest VM image. Used to track which specific VM image version is running, useful for compliance and version management.'
+                },
+                'x-ms-sevsnpvm-is-debuggable': {
+                    title: 'Debug Mode Status',
+                    icon: '🐛',
+                    category: 'Security State',
+                    description: 'Indicates whether the VM is running in debug mode. Debug mode allows hypervisor access to VM memory, COMPLETELY bypassing confidential computing protections. Must be FALSE for any production workload — key release policies should always reject debuggable VMs.',
+                    detail: value === false ? '✅ Debug mode disabled — memory is protected' : '⚠️ DEBUG MODE ENABLED — memory is NOT protected!'
+                },
+                'x-ms-sevsnpvm-launchmeasurement': {
+                    title: 'Launch Measurement',
+                    icon: '📏',
+                    category: 'Container Identity',
+                    description: 'SHA-384 hash of the entire VM\'s initial memory contents at launch, computed by the AMD hardware. This cryptographic measurement covers the firmware, kernel, and initial configuration — any modification to the launch environment produces a different hash. This is the hardware-rooted proof of what code is running.'
+                },
+                'x-ms-sevsnpvm-mem-aes256-xts-required': {
+                    title: 'AES-256-XTS Memory Required',
+                    icon: '🔐',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether AES-256-XTS encryption is required for memory encryption. When false, AES-128-XEX (the default for earlier SEV generations) may be used. AES-256-XTS provides stronger encryption with wider keys and the XTS mode designed for storage/memory encryption.'
+                },
+                'x-ms-sevsnpvm-microcode-svn': {
+                    title: 'Microcode Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number of the CPU microcode. Microcode updates patch CPU-level vulnerabilities (like speculative execution attacks). Higher values indicate more recent security patches. Release policies can enforce minimum microcode versions.'
+                },
+                'x-ms-sevsnpvm-migration-allowed': {
+                    title: 'VM Migration Allowed',
+                    icon: '🚚',
+                    category: 'Security State',
+                    description: 'Indicates whether live migration of the confidential VM is permitted. When false, the VM is pinned to its current physical host — its secrets cannot be transferred to another machine. This prevents attacks where a VM is migrated to compromised hardware.'
+                },
+                'x-ms-sevsnpvm-page-swap-disabled': {
+                    title: 'Page Swap Disabled',
+                    icon: '💾',
+                    category: 'Security State',
+                    description: 'Indicates whether the hypervisor is prevented from swapping VM memory pages to disk. When page swap is allowed (false), the hypervisor can move encrypted pages out to persistent storage, which may have different security properties than DRAM.'
+                },
+                'x-ms-sevsnpvm-rapl-disabled': {
+                    title: 'RAPL Power Analysis Disabled',
+                    icon: '⚡',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether Running Average Power Limit (RAPL) reporting is disabled. RAPL interfaces expose CPU power consumption data that could be used in side-channel attacks to infer information about the workload running inside the TEE (power analysis attacks).'
+                },
+                'x-ms-sevsnpvm-reportdata': {
+                    title: 'Report Data',
+                    icon: '📋',
+                    category: 'Request Binding',
+                    description: 'A 64-byte field set by the guest at attestation time, included in the hardware-signed report. Typically contains a hash of the attestation request data, binding the hardware attestation to the specific request. The first 32 bytes usually contain application data; the rest is zero-padded.'
+                },
+                'x-ms-sevsnpvm-reportid': {
+                    title: 'Report ID',
+                    icon: '🆔',
+                    category: 'SEV-SNP Identity',
+                    description: 'A unique identifier for this VM instance derived from the VM\'s identity key. Different from the chip ID — this identifies the specific VM instance on the chip, not the physical hardware. Useful for tracking individual VM attestation history.'
+                },
+                'x-ms-sevsnpvm-singlesocket': {
+                    title: 'Single Socket Platform',
+                    icon: '🖥️',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether the platform has only a single CPU socket. On multi-socket platforms, inter-socket links (like AMD Infinity Fabric) transmit encrypted memory data between CPUs, which has different attack surface than single-socket configurations.'
+                },
+                'x-ms-sevsnpvm-smt-allowed': {
+                    title: 'SMT (Hyperthreading) Allowed',
+                    icon: '🔀',
+                    category: 'Hardware Security Features',
+                    description: 'Indicates whether Simultaneous Multi-Threading (SMT/hyperthreading) is enabled. SMT shares CPU resources between threads, which can be exploited in side-channel attacks (e.g., CacheOut, MDS). Some high-security workloads disable SMT for stronger isolation, at the cost of performance.'
+                },
+                'x-ms-sevsnpvm-snpfw-svn': {
+                    title: 'SNP Firmware Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number of the AMD SEV-SNP firmware (also called the PSP firmware). This firmware runs on the AMD Platform Security Processor and manages the cryptographic operations for SEV-SNP. Critical for security — release policies should enforce minimum versions.'
+                },
+                'x-ms-sevsnpvm-tee-svn': {
+                    title: 'TEE Security Version',
+                    icon: '🔢',
+                    category: 'SEV-SNP Versions',
+                    description: 'Security Version Number of the TEE (Trusted Execution Environment) platform. Represents the overall security level of the confidential computing stack.'
+                },
+                'x-ms-sevsnpvm-uvm-endorsement': {
+                    title: 'UVM Endorsement',
+                    icon: '📝',
+                    category: 'Platform Endorsement',
+                    description: 'Microsoft\'s endorsement of the Utility VM (UVM) image. Contains the UVM\'s own guest SVN and launch measurement, signed by Microsoft. This allows relying parties to verify the UVM is a genuine Microsoft-published confidential computing image, not a modified one.'
+                },
+                'x-ms-sevsnpvm-uvm-endorsement-headers': {
+                    title: 'UVM Endorsement Headers',
+                    icon: '📋',
+                    category: 'Platform Endorsement',
+                    description: 'Metadata about the UVM endorsement signature. The "feed" identifies the endorsement source (e.g., "ContainerPlat-AMD-UVM" for Azure container platform). The "iss" is a DID (Decentralized Identifier) with the X.509 certificate chain that signed the endorsement, allowing cryptographic verification.'
+                },
+                'x-ms-sevsnpvm-vmpl': {
+                    title: 'VM Privilege Level',
+                    icon: '🏗️',
+                    category: 'Security State',
+                    description: 'The Virtual Machine Privilege Level (VMPL) at which the attestation was generated. VMPL 0 is the most privileged level (firmware), VMPL 1-3 have decreasing privileges. VMPL 0 indicates the attestation was generated by the most trusted component in the guest.',
+                    detail: value === 0 ? '✅ VMPL 0 — Attestation from most privileged level (firmware)' : null
+                },
+                'x-ms-ver': {
+                    title: 'Attestation Schema Version',
+                    icon: '📌',
+                    category: 'Metadata',
+                    description: 'Version of the MAA attestation token schema. "1.0" is the current schema version. Allows relying parties to parse tokens correctly as the schema evolves.'
+                }
+            };
+            return explanations[key] || null;
+        }
+        
+        function renderClaimExplanations(payload) {
+            // Group claims by category
+            const categoryOrder = [
+                'JWT Standard', 'Request Binding', 'Platform Identity', 'Policy',
+                'Container Identity', 'SEV-SNP Identity', 'Hardware Identity',
+                'SEV-SNP Versions', 'Security State', 'Hardware Security Features',
+                'Platform Endorsement', 'Metadata'
+            ];
+            const categoryColors = {
+                'JWT Standard': '#6c757d',
+                'Request Binding': '#0d6efd',
+                'Platform Identity': '#198754',
+                'Policy': '#6610f2',
+                'Container Identity': '#dc3545',
+                'SEV-SNP Identity': '#fd7e14',
+                'Hardware Identity': '#20c997',
+                'SEV-SNP Versions': '#0dcaf0',
+                'Security State': '#ffc107',
+                'Hardware Security Features': '#d63384',
+                'Platform Endorsement': '#6f42c1',
+                'Metadata': '#adb5bd'
+            };
+            
+            let grouped = {};
+            let unknownClaims = [];
+            
+            for (const [key, value] of Object.entries(payload)) {
+                const explanation = getClaimExplanation(key, value);
+                if (explanation) {
+                    const cat = explanation.category;
+                    if (!grouped[cat]) grouped[cat] = [];
+                    grouped[cat].push({ key, value, ...explanation });
+                } else {
+                    unknownClaims.push({ key, value });
+                }
+            }
+            
+            let html = '<div style="margin-top: 15px;">';
+            
+            for (const cat of categoryOrder) {
+                if (!grouped[cat]) continue;
+                const color = categoryColors[cat] || '#6c757d';
+                html += '<div style="margin-bottom: 20px;">';
+                html += '<h4 style="color: ' + color + '; border-bottom: 2px solid ' + color + '; padding-bottom: 6px; margin-bottom: 12px; font-size: 0.95em;">' + cat + '</h4>';
+                
+                for (const claim of grouped[cat]) {
+                    let displayValue = claim.value;
+                    if (typeof displayValue === 'object' && displayValue !== null) {
+                        displayValue = JSON.stringify(displayValue, null, 2);
+                    } else if (typeof displayValue === 'boolean') {
+                        displayValue = displayValue ? 'true' : 'false';
+                    }
+                    
+                    html += '<div style="margin-bottom: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid ' + color + ';">';
+                    html += '<div style="display: flex; align-items: center; margin-bottom: 6px;">';
+                    html += '<span style="font-size: 1.2em; margin-right: 8px;">' + claim.icon + '</span>';
+                    html += '<strong style="color: #212529;">' + escapeHtml(claim.title) + '</strong>';
+                    html += '</div>';
+                    html += '<code style="display: block; font-size: 0.8em; color: #495057; background: #e9ecef; padding: 4px 8px; border-radius: 4px; margin-bottom: 8px; word-break: break-all;">' + escapeHtml(claim.key) + '</code>';
+                    html += '<p style="margin: 0 0 8px 0; font-size: 0.85em; color: #495057; line-height: 1.5;">' + claim.description + '</p>';
+                    if (claim.detail) {
+                        html += '<p style="margin: 0 0 8px 0; font-size: 0.85em; color: #0d6efd; font-weight: 500;">' + escapeHtml(claim.detail) + '</p>';
+                    }
+                    html += '<div style="font-family: monospace; font-size: 0.78em; color: #333; background: #e9ecef; padding: 6px 10px; border-radius: 4px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">' + escapeHtml(String(displayValue)) + '</div>';
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            
+            // Show any unknown claims
+            if (unknownClaims.length > 0) {
+                html += '<div style="margin-bottom: 20px;">';
+                html += '<h4 style="color: #6c757d; border-bottom: 2px solid #6c757d; padding-bottom: 6px; margin-bottom: 12px; font-size: 0.95em;">Other Claims</h4>';
+                for (const claim of unknownClaims) {
+                    let displayValue = typeof claim.value === 'object' ? JSON.stringify(claim.value, null, 2) : String(claim.value);
+                    html += '<div style="margin-bottom: 8px; padding: 10px; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #6c757d;">';
+                    html += '<code style="font-size: 0.85em; color: #495057;">' + escapeHtml(claim.key) + '</code>';
+                    html += '<div style="font-family: monospace; font-size: 0.78em; margin-top: 4px; color: #333; background: #e9ecef; padding: 6px 10px; border-radius: 4px; word-break: break-all;">' + escapeHtml(displayValue) + '</div>';
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            
+            html += '</div>';
+            return html;
+        }
+        
+        // World map rendering function for salary by country
+        function renderSalaryWorldMap(salaryData) {
+            // Country coordinates for Natural Earth projection (approximate)
+            const countryCoords = {
+                'United States': { x: 185, y: 175 },
+                'United Kingdom': { x: 455, y: 120 },
+                'Canada': { x: 200, y: 110 },
+                'Australia': { x: 810, y: 355 },
+                'Germany': { x: 490, y: 130 },
+                'France': { x: 465, y: 145 },
+                'Italy': { x: 495, y: 155 },
+                'Spain': { x: 450, y: 165 },
+                'Netherlands': { x: 478, y: 122 },
+                'Sweden': { x: 500, y: 95 },
+                'Japan': { x: 855, y: 165 },
+                'China': { x: 765, y: 175 },
+                'India': { x: 705, y: 210 },
+                'Brazil': { x: 295, y: 320 },
+                'Mexico': { x: 165, y: 215 },
+                'Nigeria': { x: 485, y: 260 },
+                'South Africa': { x: 520, y: 365 },
+                'South Korea': { x: 835, y: 170 },
+                'Russia': { x: 680, y: 100 },
+                'Saudi Arabia': { x: 565, y: 215 }
+            };
+            
+            // Filter data with sufficient sample size (>= 5 employees)
+            const validData = salaryData.filter(d => d.count >= 5);
+            const smallSampleData = salaryData.filter(d => d.count < 5);
+            
+            // Calculate min/max for color scaling (only from valid data)
+            const salaries = validData.map(d => d.avg_salary);
+            const minSalary = salaries.length > 0 ? Math.min(...salaries) : 0;
+            const maxSalary = salaries.length > 0 ? Math.max(...salaries) : 100000;
+            
+            // Color scale from red (low) to green (high)
+            function getColor(salary) {
+                const ratio = (salary - minSalary) / (maxSalary - minSalary || 1);
+                const r = Math.round(220 * (1 - ratio));
+                const g = Math.round(180 * ratio + 40);
+                const b = Math.round(60 + 40 * ratio);
+                return `rgb(${r}, ${g}, ${b})`;
+            }
+            
+            // Build SVG map with realistic world outline
+            let svg = `<svg viewBox="0 0 960 480" style="width: 100%; height: 100%; border-radius: 8px;">`;
+            
+            // Ocean background
+            svg += `<rect width="960" height="480" fill="#c6e2ff"/>`;
+            
+            // Realistic continent paths (simplified Natural Earth style)
+            // North America
+            svg += `<path d="M40,40 L85,25 L130,35 L165,28 L210,45 L255,60 L270,50 L285,68 L275,95 L260,115 L270,140 L255,165 L240,175 L220,165 L195,190 L180,215 L155,225 L130,215 L115,235 L95,220 L75,235 L55,255 L45,240 L58,215 L48,195 L35,175 L28,150 L20,120 L25,85 L35,60 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Greenland
+            svg += `<path d="M320,25 L365,18 L395,35 L410,65 L395,95 L365,105 L335,95 L315,65 L318,40 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Central America & Caribbean
+            svg += `<path d="M155,225 L175,235 L195,250 L210,265 L195,275 L165,268 L145,255 L135,238 L145,228 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // South America
+            svg += `<path d="M210,265 L245,255 L280,265 L310,285 L335,320 L345,365 L335,410 L305,440 L265,455 L235,445 L225,410 L240,370 L255,340 L260,305 L245,285 L215,275 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Europe
+            svg += `<path d="M430,75 L455,65 L485,70 L520,60 L555,75 L545,95 L560,115 L545,135 L520,145 L495,165 L465,175 L445,165 L425,145 L430,120 L445,105 L435,90 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // British Isles
+            svg += `<path d="M440,95 L455,88 L465,98 L460,118 L448,125 L438,115 L442,102 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Scandinavia
+            svg += `<path d="M485,40 L510,35 L530,55 L515,85 L495,95 L480,75 L485,55 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Africa
+            svg += `<path d="M445,175 L485,165 L525,175 L565,195 L595,235 L605,285 L590,335 L565,385 L525,410 L485,400 L455,365 L435,315 L425,265 L430,215 L445,185 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Middle East
+            svg += `<path d="M545,165 L580,155 L615,175 L605,210 L575,225 L555,210 L545,185 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Russia/Northern Asia
+            svg += `<path d="M555,45 L620,35 L700,40 L780,55 L850,75 L880,65 L895,85 L870,105 L820,95 L760,105 L700,95 L640,105 L590,95 L555,115 L545,85 L555,60 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Central/South Asia
+            svg += `<path d="M615,135 L665,125 L720,140 L765,155 L785,180 L770,220 L735,250 L695,255 L655,240 L625,210 L605,175 L615,150 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Southeast Asia
+            svg += `<path d="M770,220 L800,215 L825,240 L815,275 L785,290 L755,275 L765,245 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // China/East Asia
+            svg += `<path d="M720,140 L765,130 L815,145 L855,140 L875,165 L860,195 L825,210 L785,195 L755,175 L735,155 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Japan
+            svg += `<path d="M865,145 L880,135 L895,150 L885,175 L870,185 L858,170 L865,155 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Indonesia
+            svg += `<path d="M785,290 L820,285 L855,295 L875,310 L855,325 L815,320 L785,305 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // Australia
+            svg += `<path d="M775,330 L825,315 L875,330 L905,365 L895,410 L855,435 L805,430 L765,400 L755,360 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            // New Zealand
+            svg += `<path d="M905,415 L920,405 L935,420 L925,445 L910,450 L900,435 Z" fill="#b8d4b8" stroke="#6b8e6b" stroke-width="1"/>`;
+            
+            // Add graticule lines (latitude/longitude grid)
+            for (let lat = 60; lat <= 420; lat += 60) {
+                svg += `<line x1="20" y1="${lat}" x2="940" y2="${lat}" stroke="#89b3d9" stroke-width="0.3" stroke-dasharray="5,5"/>`;
+            }
+            for (let lon = 80; lon <= 880; lon += 80) {
+                svg += `<line x1="${lon}" y1="20" x2="${lon}" y2="460" stroke="#89b3d9" stroke-width="0.3" stroke-dasharray="5,5"/>`;
+            }
+            
+            // Add data points for countries with sufficient sample size
+            validData.forEach(d => {
+                const coords = countryCoords[d.country];
+                if (coords) {
+                    const color = getColor(d.avg_salary);
+                    const radius = Math.max(14, Math.min(32, 12 + (d.count / 8)));
+                    
+                    // Drop shadow
+                    svg += `<circle cx="${coords.x + 2}" cy="${coords.y + 2}" r="${radius}" fill="rgba(0,0,0,0.2)"/>`;
+                    
+                    // Circle for country
+                    svg += `<circle cx="${coords.x}" cy="${coords.y}" r="${radius}" fill="${color}" stroke="#fff" stroke-width="2" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));">`;
+                    svg += `<title>${d.country}&#10;Avg Salary: $${d.avg_salary.toLocaleString()}&#10;Employees: ${d.count}&#10;Range: $${d.min_salary.toLocaleString()} - $${d.max_salary.toLocaleString()}</title>`;
+                    svg += `</circle>`;
+                    
+                    // Salary label
+                    svg += `<text x="${coords.x}" y="${coords.y + 4}" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff" stroke="#333" stroke-width="0.3" style="pointer-events: none;">$${Math.round(d.avg_salary/1000)}k</text>`;
+                }
+            });
+            
+            // Add markers for countries with small sample size
+            smallSampleData.forEach(d => {
+                const coords = countryCoords[d.country];
+                if (coords) {
+                    // Small gray circle with question mark
+                    svg += `<circle cx="${coords.x}" cy="${coords.y}" r="10" fill="#999" stroke="#666" stroke-width="1.5" opacity="0.7">`;
+                    svg += `<title>${d.country}&#10;Sample size too small (${d.count} employee${d.count !== 1 ? 's' : ''})&#10;Minimum 5 required for reliable average</title>`;
+                    svg += `</circle>`;
+                    svg += `<text x="${coords.x}" y="${coords.y + 4}" text-anchor="middle" font-size="12" font-weight="bold" fill="#fff" style="pointer-events: none;">?</text>`;
+                }
+            });
+            
+            svg += `</svg>`;
+            
+            document.getElementById('salaryWorldMap').innerHTML = svg;
+            
+            // Build legend
+            let legendHtml = '<div style="display: flex; justify-content: center; align-items: center; gap: 20px; flex-wrap: wrap;">';
+            legendHtml += '<div style="display: flex; align-items: center; gap: 5px;">';
+            legendHtml += '<div style="width: 20px; height: 20px; background: rgb(220, 40, 60); border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></div>';
+            legendHtml += '<span style="font-size: 12px;">Lower ($' + minSalary.toLocaleString() + ')</span>';
+            legendHtml += '</div>';
+            legendHtml += '<div style="width: 120px; height: 14px; background: linear-gradient(90deg, rgb(220,40,60), rgb(40,220,100)); border-radius: 7px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);"></div>';
+            legendHtml += '<div style="display: flex; align-items: center; gap: 5px;">';
+            legendHtml += '<div style="width: 20px; height: 20px; background: rgb(40, 220, 100); border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></div>';
+            legendHtml += '<span style="font-size: 12px;">Higher ($' + maxSalary.toLocaleString() + ')</span>';
+            legendHtml += '</div>';
+            legendHtml += '<div style="display: flex; align-items: center; gap: 5px; margin-left: 15px; padding-left: 15px; border-left: 1px solid #ccc;">';
+            legendHtml += '<div style="width: 20px; height: 20px; background: #999; border-radius: 50%; border: 1px solid #666; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: bold; font-size: 12px;">?</div>';
+            legendHtml += '<span style="font-size: 12px;">Sample &lt;5</span>';
+            legendHtml += '</div>';
+            legendHtml += '</div>';
+            legendHtml += '<div style="margin-top: 10px; font-size: 11px; color: #666; text-align: center;">Circle size indicates employee count. Hover for details. Countries with fewer than 5 employees show "?" (sample size too small).</div>';
+            
+            document.getElementById('salaryMapLegend').innerHTML = legendHtml;
+        }
+        
+        // Update features list from /info response
+        function updateFeaturesFromInfo(features, isVerified) {
+            const featuresList = document.getElementById('featuresList');
+            let html = '';
+            features.forEach(feature => {
+                const isNegative = feature.includes('NOT') || feature.includes('FAILED');
+                const className = isNegative ? 'unverified' : (isVerified ? 'verified' : 'pending');
+                const icon = isNegative ? '✗' : (isVerified ? '✓' : '○');
+                html += `<li class="${className}"><span class="status-icon">${icon}</span> ${escapeHtml(feature)}</li>`;
+            });
+            featuresList.innerHTML = html;
+        }
+        
+        // Function to show attestation failure in the header and page
+        function showAttestationFailure(errorMessage, data) {
+            const header = document.querySelector('.header');
+            const headerH1 = header.querySelector('h1');
+            const headerP = header.querySelector('p');
+            
+            header.style.background = 'linear-gradient(135deg, #dc3545 0%, #a71d2a 100%)';
+            headerH1.innerHTML = '⚠️ Standard Azure Container Instances';
+            headerP.textContent = 'NOT running on confidential hardware - Attestation Failed';
+        }
+        
+        function requestAttestation() {
+            const btn = document.getElementById('attestBtn');
+            const resultDiv = document.getElementById('attestResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = 'Requesting Attestation<span class="loading"></span>';
+            
+            resultDiv.innerHTML = '<p>Contacting Microsoft Azure Attestation service...</p>';
+            
+            fetch('/attest/maa', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    maa_endpoint: 'sharedeus.eus.attest.azure.net',
+                    runtime_data: btoa(JSON.stringify({
+                        timestamp: new Date().toISOString(),
+                        demo: 'Confidential ACI Attestation Demo'
+                    }))
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().catch(() => {
+                        throw new Error('Server returned error: ' + response.status);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = 'Request Attestation Token';
+                
+                if (data.status === 'success') {
+                    // Parse the JWT token
+                    try {
+                        const parts = data.attestation_token.split('.');
+                        const payload = JSON.parse(atob(parts[1]));
+                        
+                        // Update security features based on attestation claims
+                        updateSecurityFeatures(true, payload);
+                        
+                        let html = '<div style="margin-top: 20px;">';
+                        html += '<p><span class="status-badge status-success">Attestation Successful</span></p>';
+                        html += '<p style="margin: 15px 0;"><strong>MAA Endpoint:</strong> ' + data.maa_endpoint + '</p>';
+                        html += '<p style="margin: 15px 0;"><strong>Token Claims:</strong></p>';
+                        html += '<div class="output-box"><pre>' + JSON.stringify(payload, null, 2) + '</pre></div>';
+                        
+                        // Add "Detailed Explanation" expandable section
+                        html += '<details style="margin-top: 15px; border: 2px solid #0d6efd; border-radius: 8px; overflow: hidden;">';
+                        html += '<summary style="padding: 12px 16px; background: linear-gradient(135deg, #0d6efd 0%, #0056b3 100%); color: white; cursor: pointer; font-weight: bold; font-size: 0.95em; display: flex; align-items: center; gap: 8px;">📖 Detailed Explanation of Each Claim</summary>';
+                        html += '<div style="padding: 16px; background: white;">';
+                        html += renderClaimExplanations(payload);
+                        html += '</div></details>';
+                        
+                        html += '</div>';
+                        
+                        resultDiv.innerHTML = html;
+                    } catch (e) {
+                        // Token received but couldn't parse - partial success
+                        updateSecurityFeatures(false, null, 'Could not parse attestation token');
+                        resultDiv.innerHTML = 
+                            '<p><span class="status-badge status-warning">Attestation Token Received (Parse Error)</span></p>' +
+                            '<div class="output-box"><pre>' + data.attestation_token + '</pre></div>';
+                    }
+                } else {
+                    // Attestation failed - update header and page to show failure
+                    updateSecurityFeatures(false, null, data.message || 'Attestation failed');
+                    showAttestationFailure(data.message || 'Attestation failed', data);
+                    
+                    let errorHtml = '<div style="margin-top: 20px;">';
+                    errorHtml += '<p><span class="status-badge status-error">Attestation Failed</span></p>';
+                    errorHtml += '<p style="margin: 15px 0;"><strong>Error:</strong> ' + escapeHtml(data.message || 'Unknown error') + '</p>';
+                    
+                    // Show failure reason if available
+                    if (data.failure_reason) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
+                        errorHtml += '<p style="color: #721c24; font-weight: bold;">🔍 Failure Reason:</p>';
+                        errorHtml += '<p style="margin-top: 10px; color: #721c24;">' + escapeHtml(data.failure_reason) + '</p>';
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show diagnosis if available
+                    if (data.diagnosis) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">';
+                        errorHtml += '<p style="color: #856404; font-weight: bold;">💡 Diagnosis:</p>';
+                        if (data.diagnosis.likely_cause) {
+                            errorHtml += '<p style="margin-top: 10px; color: #856404;"><strong>Likely Cause:</strong> ' + escapeHtml(data.diagnosis.likely_cause) + '</p>';
+                        }
+                        if (data.diagnosis.solution) {
+                            errorHtml += '<p style="margin-top: 5px; color: #856404;"><strong>Solution:</strong> ' + escapeHtml(data.diagnosis.solution) + '</p>';
+                        }
+                        if (data.diagnosis.command) {
+                            errorHtml += '<p style="margin-top: 10px;"><code style="background: #333; color: #0f0; padding: 8px 12px; border-radius: 4px; display: inline-block;">' + escapeHtml(data.diagnosis.command) + '</code></p>';
+                        }
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show sidecar response if available
+                    if (data.sidecar_response) {
+                        errorHtml += '<div style="margin: 15px 0;">';
+                        errorHtml += '<p><strong>Sidecar Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
+                        errorHtml += '<div class="output-box" style="background: #2d2d2d; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + 
+                            escapeHtml(data.sidecar_response) + '</pre></div></div>';
+                    }
+                    
+                    if (data.note) {
+                        errorHtml += '<p style="margin: 15px 0; padding: 10px; background: #e2e3e5; border-radius: 5px; color: #383d41;"><em>ℹ️ ' + escapeHtml(data.note) + '</em></p>';
+                    }
+                    
+                    // Show service logs if available
+                    if (data.logs) {
+                        // Minimize logs for non-confidential (snooper) containers
+                        var detailsAttr = isConfidentialContainer ? 'open' : '';
+                        errorHtml += '<details ' + detailsAttr + ' style="margin: 20px 0; border: 1px solid #6c757d; border-radius: 8px; overflow: hidden;">';
+                        errorHtml += '<summary style="padding: 15px; background: #343a40; color: #fff; cursor: pointer; font-weight: bold;">📋 Service Logs</summary>';
+                        errorHtml += '<div style="padding: 15px; background: #1e1e1e;">';
+                        
+                        // SEV-SNP Device Status - FIRST (most important for diagnosing failures)
+                        if (data.logs.sev_device) {
+                            const sevDevice = data.logs.sev_device;
+                            const sevAvailable = sevDevice.available;
+                            const sevColor = sevAvailable ? '#28a745' : '#dc3545';
+                            const sevIcon = sevAvailable ? '✅' : '❌';
+                            
+                            errorHtml += '<div style="margin-bottom: 15px; padding: 15px; border-radius: 8px; background: ' + (sevAvailable ? '#d4edda' : '#f8d7da') + '; border-left: 4px solid ' + sevColor + ';">';
+                            errorHtml += '<h4 style="color: ' + sevColor + '; margin-bottom: 10px;">' + sevIcon + ' AMD SEV-SNP Device Status</h4>';
+                            
+                            if (sevAvailable) {
+                                errorHtml += '<p style="color: #155724;"><strong>Device Found:</strong> ' + escapeHtml(sevDevice.device_path) + '</p>';
+                                if (sevDevice.device_info && typeof sevDevice.device_info === 'object') {
+                                    errorHtml += '<p style="color: #155724;"><strong>Type:</strong> ' + escapeHtml(sevDevice.device_info.type) + '</p>';
+                                    errorHtml += '<p style="color: #155724;"><strong>Accessible:</strong> ' + (sevDevice.device_info.accessible ? 'Yes' : 'No') + '</p>';
+                                }
+                            } else {
+                                errorHtml += '<p style="color: #721c24;"><strong>Device Not Found</strong></p>';
+                                if (sevDevice.dev_listing && sevDevice.dev_listing.length > 0) {
+                                    errorHtml += '<p style="color: #721c24;"><strong>Related devices in /dev:</strong> ' + escapeHtml(sevDevice.dev_listing.join(', ')) + '</p>';
+                                } else {
+                                    errorHtml += '<p style="color: #721c24;"><strong>Related devices in /dev:</strong> None found (no sev, tpm, or sgx devices)</p>';
+                                }
+                            }
+                            
+                            errorHtml += '<p style="margin-top: 10px; color: ' + (sevAvailable ? '#155724' : '#721c24') + ';"><em>' + escapeHtml(sevDevice.explanation) + '</em></p>';
+                            errorHtml += '</div>';
+                        }
+                        
+                        // SKR logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #17a2b8; margin-bottom: 10px;">🔐 SKR Service Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto;"><pre>' + escapeHtml(data.logs.skr || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // SKR error logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #dc3545; margin-bottom: 10px;">❌ SKR Error Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + escapeHtml(data.logs.skr_error || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // Flask logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #28a745; margin-bottom: 10px;">🌐 Flask App Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto;"><pre>' + escapeHtml(data.logs.flask || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // Flask error logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #dc3545; margin-bottom: 10px;">❌ Flask Error Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + escapeHtml(data.logs.flask_error || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // Supervisord log
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #ffc107; margin-bottom: 10px;">⚙️ Supervisord Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto;"><pre>' + escapeHtml(data.logs.supervisord || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        errorHtml += '</div></details>';
+                    }
+                    
+                    errorHtml += '</div>';
+                    resultDiv.innerHTML = errorHtml;
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = 'Request Attestation Token';
+                // Attestation request failed - also update header
+                showAttestationFailure(error.message, null);
+                updateSecurityFeatures(false, null, error.message);
+                resultDiv.innerHTML = 
+                    '<p><span class="status-badge status-error">Request Failed</span></p>' +
+                    '<p style="margin: 15px 0;"><strong>Error:</strong> ' + error.message + '</p>' +
+                    '<p style="margin: 15px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;">' +
+                    '<em>💡 This demo requires deployment with the attestation sidecar. ' +
+                    'Deploy using azure-aci-custom-demo.ps1 with Confidential SKU to enable attestation.</em></p>';
+            });
+        }
+        
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Function to update security features based on attestation result
+        function updateSecurityFeatures(verified, payload, errorMessage) {
+            const featuresList = document.getElementById('featuresList');
+            const statusEl = document.getElementById('securityStatus');
+            const features = featuresList.querySelectorAll('li');
+            
+            if (verified && payload) {
+                // Attestation successful - check specific claims
+                statusEl.innerHTML = '<span style="color: #28a745;">✓ Attestation verified successfully</span>';
+                statusEl.style.color = '#28a745';
+                
+                features.forEach(li => {
+                    li.className = 'verified';
+                    li.querySelector('.status-icon').textContent = '✓';
+                });
+                
+                // Check specific claims from the attestation payload
+                const claims = {
+                    tee: payload['x-ms-isolation-tee'] || payload['x-ms-sevsnpvm-is-debuggable'] === false,
+                    memory: payload['x-ms-sevsnpvm-vmpl'] !== undefined || payload['x-ms-isolation-tee'],
+                    confidentiality: payload['x-ms-compliance-status'] === 'azure-compliant-cvm' || payload['x-ms-isolation-tee'],
+                    policy: payload['x-ms-sevsnpvm-hostdata'] !== undefined,
+                    attestation: true, // We got a valid token
+                    protection: payload['x-ms-sevsnpvm-is-debuggable'] === false || payload['x-ms-isolation-tee']
+                };
+                
+                features.forEach(li => {
+                    const feature = li.dataset.feature;
+                    if (claims[feature] === false) {
+                        li.className = 'unverified';
+                        li.querySelector('.status-icon').textContent = '✗';
+                    }
+                });
+            } else {
+                // Attestation failed
+                statusEl.innerHTML = '<span style="color: #dc3545;">✗ Attestation failed: ' + (errorMessage || 'Unknown error') + '</span>';
+                statusEl.style.color = '#dc3545';
+                
+                features.forEach(li => {
+                    li.className = 'unverified';
+                    li.querySelector('.status-icon').textContent = '✗';
+                });
+            }
+        }
+        
+        function testSecureKeyRelease() {
+            const btn = document.getElementById('skrBtn');
+            const resultDiv = document.getElementById('skrResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = '🔐 Releasing Key<span class="loading"></span>';
+            
+            resultDiv.innerHTML = '<p>Requesting secure key release from Azure Key Vault...</p>';
+            
+            fetch('/skr/release', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '🔐 Test Secure Key Release';
+                
+                if (data.status === 'success') {
+                    let html = '<div style="margin-top: 20px;">';
+                    html += '<div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">';
+                    html += '<span style="font-size: 3em; color: #28a745;">✓</span>';
+                    html += '<div>';
+                    html += '<p><span class="status-badge status-success">Secure Key Release Successful</span></p>';
+                    html += '<p style="margin-top: 10px; color: #155724;">The key was successfully released by Azure Key Vault to this verified confidential container.</p>';
+                    html += '</div>';
+                    html += '</div>';
+                    
+                    // Show SKR details
+                    html += '<div style="padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745; margin-bottom: 20px;">';
+                    html += '<h4 style="color: #155724; margin-bottom: 10px;">🔑 Key Release Details</h4>';
+                    html += '<p style="color: #155724;"><strong>Key Vault:</strong> ' + escapeHtml(data.akv_endpoint || 'N/A') + '</p>';
+                    html += '<p style="color: #155724;"><strong>Key Name:</strong> ' + escapeHtml(data.key_name || 'N/A') + '</p>';
+                    html += '<p style="color: #155724;"><strong>MAA Endpoint:</strong> ' + escapeHtml(data.maa_endpoint || 'N/A') + '</p>';
+                    html += '</div>';
+                    
+                    // Show Release Policy (new security binding info)
+                    if (data.release_policy) {
+                        html += '<div style="padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0078d4; margin-bottom: 20px;">';
+                        html += '<h4 style="color: #0078d4; margin-bottom: 10px;">🛡️ Key Release Policy Verified</h4>';
+                        html += '<p style="color: #004085;"><strong>Attestation Authority:</strong> ' + escapeHtml(data.release_policy.maa_endpoint || 'N/A') + '</p>';
+                        if (data.release_policy.required_claims) {
+                            html += '<p style="color: #004085; margin-top: 10px;"><strong>Required Claims Verified:</strong></p>';
+                            html += '<ul style="margin-left: 20px; color: #004085;">';
+                            data.release_policy.required_claims.forEach(claim => {
+                                html += '<li style="margin: 5px 0;"><code style="background: #cce5ff; padding: 2px 6px; border-radius: 3px;">' + escapeHtml(claim.claim) + '</code>';
+                                html += ' = <strong>' + escapeHtml(claim.value.substring(0, 24) + (claim.value.length > 24 ? '...' : '')) + '</strong>';
+                                html += '<br><small style="color: #6c757d;">' + escapeHtml(claim.description) + '</small></li>';
+                            });
+                            html += '</ul>';
+                        }
+                        if (data.security_binding) {
+                            html += '<p style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px; color: #856404;"><strong>🔐 Security Binding:</strong> ' + escapeHtml(data.security_binding) + '</p>';
+                        }
+                        html += '</div>';
+                    }
+                    
+                    // Show the released key
+                    html += '<p style="margin: 15px 0;"><strong>Released Key (JWK format):</strong></p>';
+                    html += '<div class="output-box" style="border-left: 4px solid #28a745;"><pre>' + JSON.stringify(data.key, null, 2) + '</pre></div>';
+                    
+                    html += '</div>';
+                    resultDiv.innerHTML = html;
+                    
+                    // Enable the real-time encryption UI
+                    enableEncryptionUI();
+                } else {
+                    // SKR failed
+                    let errorHtml = '<div style="margin-top: 20px;">';
+                    errorHtml += '<div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">';
+                    errorHtml += '<span style="font-size: 3em; color: #dc3545;">✗</span>';
+                    errorHtml += '<div>';
+                    errorHtml += '<p><span class="status-badge status-error">Secure Key Release Failed</span></p>';
+                    errorHtml += '<p style="margin-top: 10px; color: #721c24;">' + escapeHtml(data.message || 'Unknown error') + '</p>';
+                    errorHtml += '</div>';
+                    errorHtml += '</div>';
+                    
+                    // Show SKR configuration
+                    errorHtml += '<div style="padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #6c757d; margin-bottom: 20px;">';
+                    errorHtml += '<h4 style="color: #495057; margin-bottom: 10px;">🔧 SKR Configuration</h4>';
+                    errorHtml += '<p><strong>Key Vault:</strong> ' + escapeHtml(data.akv_endpoint || 'Not configured') + '</p>';
+                    errorHtml += '<p><strong>Key Name:</strong> ' + escapeHtml(data.key_name || 'Not configured') + '</p>';
+                    errorHtml += '<p><strong>MAA Endpoint:</strong> ' + escapeHtml(data.maa_endpoint || 'Not configured') + '</p>';
+                    errorHtml += '</div>';
+                    
+                    // Show failure reason if available
+                    if (data.failure_reason) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
+                        errorHtml += '<p style="color: #721c24; font-weight: bold;">🔍 Failure Reason:</p>';
+                        errorHtml += '<p style="margin-top: 10px; color: #721c24;">' + escapeHtml(data.failure_reason) + '</p>';
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show diagnosis if available
+                    if (data.diagnosis) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">';
+                        errorHtml += '<p style="color: #856404; font-weight: bold;">💡 Diagnosis:</p>';
+                        if (data.diagnosis.likely_cause) {
+                            errorHtml += '<p style="margin-top: 10px; color: #856404;"><strong>Likely Cause:</strong> ' + escapeHtml(data.diagnosis.likely_cause) + '</p>';
+                        }
+                        if (data.diagnosis.solution) {
+                            errorHtml += '<p style="margin-top: 5px; color: #856404;"><strong>Solution:</strong> ' + escapeHtml(data.diagnosis.solution) + '</p>';
+                        }
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show sidecar response if available
+                    if (data.sidecar_response) {
+                        errorHtml += '<div style="margin: 15px 0;">';
+                        errorHtml += '<p><strong>SKR Sidecar Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
+                        errorHtml += '<div class="output-box" style="background: #2d2d2d; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + 
+                            escapeHtml(data.sidecar_response) + '</pre></div></div>';
+                    }
+                    
+                    // Show service logs if available
+                    if (data.logs) {
+                        // Minimize logs for non-confidential (snooper) containers
+                        var detailsAttr = isConfidentialContainer ? 'open' : '';
+                        errorHtml += '<details ' + detailsAttr + ' style="margin: 20px 0; border: 1px solid #6c757d; border-radius: 8px; overflow: hidden;">';
+                        errorHtml += '<summary style="padding: 15px; background: #343a40; color: #fff; cursor: pointer; font-weight: bold;">📋 Service Logs</summary>';
+                        errorHtml += '<div style="padding: 15px; background: #1e1e1e;">';
+                        
+                        // SEV-SNP Device Status
+                        if (data.logs.sev_device) {
+                            const sevDevice = data.logs.sev_device;
+                            const sevAvailable = sevDevice.available;
+                            const sevColor = sevAvailable ? '#28a745' : '#dc3545';
+                            const sevIcon = sevAvailable ? '✅' : '❌';
+                            
+                            errorHtml += '<div style="margin-bottom: 15px; padding: 15px; border-radius: 8px; background: ' + (sevAvailable ? '#d4edda' : '#f8d7da') + '; border-left: 4px solid ' + sevColor + ';">';
+                            errorHtml += '<h4 style="color: ' + sevColor + '; margin-bottom: 10px;">' + sevIcon + ' AMD SEV-SNP Device Status</h4>';
+                            
+                            if (sevAvailable) {
+                                errorHtml += '<p style="color: #155724;"><strong>Device Found:</strong> ' + escapeHtml(sevDevice.device_path) + '</p>';
+                            } else {
+                                errorHtml += '<p style="color: #721c24;"><strong>Device Not Found</strong></p>';
+                                errorHtml += '<p style="color: #721c24;"><em>SKR requires AMD SEV-SNP hardware (Confidential ACI)</em></p>';
+                            }
+                            
+                            errorHtml += '<p style="margin-top: 10px; color: ' + (sevAvailable ? '#155724' : '#721c24') + ';"><em>' + escapeHtml(sevDevice.explanation) + '</em></p>';
+                            errorHtml += '</div>';
+                        }
+                        
+                        // SKR logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #17a2b8; margin-bottom: 10px;">🔐 SKR Service Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto;"><pre>' + escapeHtml(data.logs.skr || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        // SKR error logs
+                        errorHtml += '<div style="margin-bottom: 15px;">';
+                        errorHtml += '<h4 style="color: #dc3545; margin-bottom: 10px;">❌ SKR Error Log</h4>';
+                        errorHtml += '<div class="output-box" style="max-height: 200px; overflow-y: auto; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + escapeHtml(data.logs.skr_error || '(not available)') + '</pre></div>';
+                        errorHtml += '</div>';
+                        
+                        errorHtml += '</div></details>';
+                    }
+                    
+                    errorHtml += '</div>';
+                    resultDiv.innerHTML = errorHtml;
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = '🔐 Test Secure Key Release';
+                resultDiv.innerHTML = 
+                    '<p><span class="status-badge status-error">Request Failed</span></p>' +
+                    '<p style="margin: 15px 0;"><strong>Error:</strong> ' + escapeHtml(error.message) + '</p>' +
+                    '<p style="margin: 15px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;">' +
+                    '<em>💡 Secure Key Release requires the SKR sidecar and Key Vault configuration. ' +
+                    'Deploy using -SKR parameter to enable this feature.</em></p>';
+            });
+        }
+        
+        // Debounce timer for real-time encryption
+        let encryptionTimer = null;
+        
+        function enableEncryptionUI() {
+            // Enable the encryption text box and update status
+            const statusDiv = document.getElementById('encryptionStatus');
+            const plaintextInput = document.getElementById('plaintextInput');
+            const encryptionInfo = document.getElementById('encryptionInfo');
+            
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.borderLeftColor = '#28a745';
+            statusDiv.innerHTML = '<p style="color: #155724;"><strong>✅ Key released successfully!</strong> You can now encrypt text in real-time.</p>';
+            
+            plaintextInput.disabled = false;
+            plaintextInput.placeholder = 'Type your secret message here...';
+            plaintextInput.focus();
+            
+            encryptionInfo.style.display = 'block';
+            
+            // Update max plaintext length (assuming 4096-bit key = 446 bytes max for RSA-OAEP-SHA256)
+            document.getElementById('maxPlaintextLength').textContent = '446';
+            
+            // Show the Company Secure Data Entry section after SKR success
+            checkCompanyDataAccess();
+        }
+        
+        function encryptRealtime() {
+            const plaintextInput = document.getElementById('plaintextInput');
+            const ciphertextOutput = document.getElementById('ciphertextOutput');
+            const plaintextLengthSpan = document.getElementById('plaintextLength');
+            const ciphertextLengthSpan = document.getElementById('ciphertextLength');
+            
+            const plaintext = plaintextInput.value;
+            plaintextLengthSpan.textContent = plaintext.length;
+            
+            // Clear previous timer
+            if (encryptionTimer) {
+                clearTimeout(encryptionTimer);
+            }
+            
+            if (!plaintext) {
+                ciphertextOutput.value = '';
+                ciphertextLengthSpan.textContent = '0';
+                return;
+            }
+            
+            // Debounce: wait 200ms after user stops typing
+            encryptionTimer = setTimeout(() => {
+                ciphertextOutput.value = 'Encrypting...';
+                ciphertextOutput.style.borderColor = '#ffc107';
+                
+                fetch('/encrypt', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ plaintext: plaintext })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        ciphertextOutput.value = data.ciphertext;
+                        ciphertextOutput.style.borderColor = '#28a745';
+                        ciphertextLengthSpan.textContent = data.ciphertext_length;
+                    } else {
+                        ciphertextOutput.value = 'Error: ' + (data.message || 'Encryption failed');
+                        ciphertextOutput.style.borderColor = '#dc3545';
+                        ciphertextLengthSpan.textContent = '0';
+                    }
+                })
+                .catch(error => {
+                    ciphertextOutput.value = 'Error: ' + error.message;
+                    ciphertextOutput.style.borderColor = '#dc3545';
+                    ciphertextLengthSpan.textContent = '0';
+                });
+            }, 200);
+        }
+        
+        // Check key status on page load
+        function checkKeyStatus() {
+            fetch('/skr/key-status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.released) {
+                        enableEncryptionUI();
+                    }
+                })
+                .catch(() => {
+                    // Ignore errors - key just not available yet
+                });
+        }
+        
+        function requestRawAttestation() {
+            const btn = document.getElementById('rawBtn');
+            const resultDiv = document.getElementById('attestResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = 'Getting Report<span class="loading"></span>';
+            
+            resultDiv.innerHTML = '<p>Retrieving raw attestation report...</p>';
+            
+            fetch('/attest/raw', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    runtime_data: btoa('Raw Report - ' + new Date().toISOString())
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().catch(() => {
+                        throw new Error('Server returned error: ' + response.status);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = 'Get Raw Attestation Report';
+                
+                if (data.status === 'success') {
+                    resultDiv.innerHTML = 
+                        '<div style="margin-top: 20px;">' +
+                        '<p><span class="status-badge status-success">Raw Report Retrieved</span></p>' +
+                        '<div class="output-box"><pre>' + data.attestation_report + '</pre></div>' +
+                        '</div>';
+                } else {
+                    let errorHtml = '<div style="margin-top: 20px;">';
+                    errorHtml += '<p><span class="status-badge status-error">Raw Attestation Failed</span></p>';
+                    errorHtml += '<p style="margin: 15px 0;"><strong>Error:</strong> ' + escapeHtml(data.message || 'Unknown error') + '</p>';
+                    
+                    // Show failure reason if available
+                    if (data.failure_reason) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
+                        errorHtml += '<p style="color: #721c24; font-weight: bold;">🔍 Failure Reason:</p>';
+                        errorHtml += '<p style="margin-top: 10px; color: #721c24;">' + escapeHtml(data.failure_reason) + '</p>';
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show diagnosis if available
+                    if (data.diagnosis) {
+                        errorHtml += '<div style="margin: 15px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">';
+                        errorHtml += '<p style="color: #856404; font-weight: bold;">💡 Diagnosis:</p>';
+                        if (data.diagnosis.likely_cause) {
+                            errorHtml += '<p style="margin-top: 10px; color: #856404;"><strong>Likely Cause:</strong> ' + escapeHtml(data.diagnosis.likely_cause) + '</p>';
+                        }
+                        if (data.diagnosis.detail) {
+                            errorHtml += '<p style="margin-top: 5px; color: #856404;"><strong>Detail:</strong> ' + escapeHtml(data.diagnosis.detail) + '</p>';
+                        }
+                        if (data.diagnosis.solution) {
+                            errorHtml += '<p style="margin-top: 5px; color: #856404;"><strong>Solution:</strong> ' + escapeHtml(data.diagnosis.solution) + '</p>';
+                        }
+                        errorHtml += '</div>';
+                    }
+                    
+                    // Show sidecar response if available
+                    if (data.sidecar_response) {
+                        errorHtml += '<div style="margin: 15px 0;">';
+                        errorHtml += '<p><strong>Sidecar Response (Status ' + (data.sidecar_status_code || 'unknown') + '):</strong></p>';
+                        errorHtml += '<div class="output-box" style="background: #2d2d2d; border-left: 3px solid #dc3545;"><pre style="color: #f8d7da;">' + 
+                            escapeHtml(data.sidecar_response) + '</pre></div></div>';
+                    }
+                    
+                    if (data.note) {
+                        errorHtml += '<p style="margin: 15px 0; padding: 10px; background: #e2e3e5; border-radius: 5px; color: #383d41;"><em>ℹ️ ' + escapeHtml(data.note) + '</em></p>';
+                    }
+                    
+                    errorHtml += '</div>';
+                    resultDiv.innerHTML = errorHtml;
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = 'Get Raw Attestation Report';
+                resultDiv.innerHTML = 
+                    '<p><span class="status-badge status-error">Request Failed</span></p>' +
+                    '<p style="margin: 15px 0;"><strong>Error:</strong> ' + error.message + '</p>' +
+                    '<p style="margin: 15px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;">' +
+                    '<em>💡 This demo requires deployment with the attestation sidecar. ' +
+                    'Deploy using azure-aci-custom-demo.ps1 with Confidential SKU to enable attestation.</em></p>';
+            });
+        }
+        
+        // =====================================================
+        // Company Secure Data Entry Functions
+        // =====================================================
+        
+        function checkCompanyDataAccess() {
+            // Check if SKR was successful and show/hide company data section
+            fetch('/company/info')
+                .then(response => response.json())
+                .then(data => {
+                    const section = document.getElementById('companyDataSection');
+                    const companyNameEl = document.getElementById('companyName');
+                    
+                    if (data.key_released && data.company) {
+                        section.style.display = 'block';
+                        companyNameEl.textContent = 'Company: ' + data.company.toUpperCase();
+                    } else {
+                        section.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.log('Company info check failed:', error);
+                });
+        }
+        
+        let csvPopulated = false;
+        
+        function autoPopulateFromCsv() {
+            if (csvPopulated) return; // Only run once
+            csvPopulated = true;
+            
+            const btn = document.getElementById('populateDbBtn');
+            const resultDiv = document.getElementById('populateResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = '&#128203; Auto-importing CSV...';
+            btn.style.opacity = '0.6';
+            resultDiv.innerHTML = '<p style="color: #6610f2;"><em>Automatically reading CSV file from inside TEE, encrypting records...</em></p>';
+            
+            fetch('/company/populate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Keep button disabled after auto-import
+                btn.innerHTML = '&#128203; CSV Imported';
+                btn.style.background = '#6c757d';
+                
+                if (data.status === 'success') {
+                    let html = '<div style="padding: 15px; background: #e2d9f3; border-radius: 8px; border-left: 4px solid #6610f2;">';
+                    html += '<p style="color: #4a0e78;"><strong>&#10004; ' + escapeHtml(data.message) + '</strong></p>';
+                    html += '<p style="color: #4a0e78; margin-top: 10px;">Source: <strong>' + escapeHtml(data.source_file) + '</strong></p>';
+                    html += '<p style="color: #4a0e78;">Records added: <strong>' + data.records_added + '</strong></p>';
+                    html += '<p style="color: #4a0e78;">Total records in consolidated file: <strong>' + data.total_records + '</strong></p>';
+                    html += '<p style="color: #4a0e78;">Destination: <strong>' + escapeHtml(data.destination) + '</strong></p>';
+                    html += '<p style="color: #4a0e78; font-size: 0.9em; margin-top: 10px;">&#128274; ' + escapeHtml(data.note) + '</p>';
+                    html += '</div>';
+                    resultDiv.innerHTML = html;
+                } else {
+                    let html = '<div style="padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
+                    html += '<p style="color: #721c24;"><strong>&#10006; ' + escapeHtml(data.message) + '</strong></p>';
+                    html += '</div>';
+                    resultDiv.innerHTML = html;
+                }
+            })
+            .catch(error => {
+                btn.innerHTML = '&#128203; Import Failed';
+                btn.style.background = '#dc3545';
+                resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Error:</strong> ' + escapeHtml(error.message) + '</p>';
+            });
+        }
+        
+        function populateFromCsv() {
+            // Manual trigger - just call auto-populate
+            autoPopulateFromCsv();
+        }
+        
+        function saveCompanyData() {
+            const nameField = document.getElementById('dataFieldName').value;
+            const phoneField = document.getElementById('dataFieldPhone').value;
+            const resultDiv = document.getElementById('saveDataResult');
+            const btn = document.getElementById('saveDataBtn');
+            
+            if (!nameField && !phoneField) {
+                resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Error:</strong> Please enter at least a name or phone number.</p>';
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.innerHTML = '&#128190; Encrypting & Saving...';
+            resultDiv.innerHTML = '<p style="color: #0078d4;"><em>Encrypting data with company key...</em></p>';
+            
+            fetch('/company/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: nameField,
+                    phone: phoneField
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '&#128190; Save Encrypted Data';
+                
+                if (data.status === 'success') {
+                    let html = '<div style="padding: 15px; background: #d1e7dd; border-radius: 8px; border-left: 4px solid #198754;">';
+                    html += '<p style="color: #0f5132;"><strong>&#10004; ' + escapeHtml(data.message) + '</strong></p>';
+                    html += '<p style="color: #0f5132; margin-top: 10px;">Company: <strong>' + escapeHtml(data.company) + '</strong></p>';
+                    html += '<p style="color: #0f5132;">Total records: <strong>' + data.record_count + '</strong></p>';
+                    html += '<p style="color: #0f5132; font-size: 0.9em; margin-top: 10px;">&#128274; ' + escapeHtml(data.note) + '</p>';
+                    html += '</div>';
+                    resultDiv.innerHTML = html;
+                    
+                    // Clear the input fields
+                    document.getElementById('dataFieldName').value = '';
+                    document.getElementById('dataFieldPhone').value = '';
+                } else {
+                    let html = '<div style="padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">';
+                    html += '<p style="color: #721c24;"><strong>&#10006; ' + escapeHtml(data.message) + '</strong></p>';
+                    html += '</div>';
+                    resultDiv.innerHTML = html;
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = '&#128190; Save Encrypted Data';
+                resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Error:</strong> ' + escapeHtml(error.message) + '</p>';
+            });
+        }
+        
+        // Global storage for company records (for decrypt toggle)
+        var storedCompanyRecords = [];
+        var storedCompanyInfo = {};
+        var isShowingDecrypted = false;
+        
+        function listCompanyData() {
+            const btn = document.getElementById('listDataBtn');
+            const viewerDiv = document.getElementById('companyDataViewer');
+            const contentDiv = document.getElementById('companyDataContent');
+            
+            btn.disabled = true;
+            btn.innerHTML = '&#128196; Loading...';
+            viewerDiv.style.display = 'block';
+            contentDiv.innerHTML = '<p style="color: #0078d4;"><em>Loading encrypted company data...</em></p>';
+            
+            fetch('/company/list')
+                .then(response => response.json())
+                .then(data => {
+                    btn.disabled = false;
+                    btn.innerHTML = '&#128196; List Saved Data';
+                    
+                    if (data.status === 'success') {
+                        // Store records for decrypt toggle
+                        storedCompanyRecords = data.records || [];
+                        storedCompanyInfo = {
+                            company: data.company,
+                            blob_name: data.blob_name,
+                            full_blob_url: data.full_blob_url,
+                            record_count: data.record_count,
+                            total_records_in_file: data.total_records_in_file,
+                            note: data.note
+                        };
+                        
+                        // Show encrypted view by default
+                        renderCompanyDataTable(false);
+                    } else {
+                        contentDiv.innerHTML = '<p style="color: #dc3545;"><strong>Error:</strong> ' + escapeHtml(data.message) + '</p>';
+                    }
+                })
+                .catch(error => {
+                    btn.disabled = false;
+                    btn.innerHTML = '&#128196; List Saved Data';
+                    contentDiv.innerHTML = '<p style="color: #dc3545;"><strong>Error:</strong> ' + escapeHtml(error.message) + '</p>';
+                });
+        }
+        
+        function renderCompanyDataTable(showDecrypted) {
+            const contentDiv = document.getElementById('companyDataContent');
+            isShowingDecrypted = showDecrypted;
+            
+            // Header with full blob URL
+            let html = '<div style="margin-bottom: 15px; padding: 12px; background: #e2e3e5; border-radius: 6px;">';
+            html += '<div style="margin-bottom: 8px;"><strong>Company:</strong> ' + escapeHtml(storedCompanyInfo.company || '') + '</div>';
+            html += '<div style="margin-bottom: 8px;"><strong>Storage URL:</strong></div>';
+            html += '<div style="background: #fff; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 0.85em; word-break: break-all; margin-bottom: 8px;">';
+            html += '<a href="' + escapeHtml(storedCompanyInfo.full_blob_url || '') + '" target="_blank" style="color: #0078d4;">' + escapeHtml(storedCompanyInfo.full_blob_url || storedCompanyInfo.blob_name || '') + '</a>';
+            html += '</div>';
+            html += '<div><strong>Records:</strong> ' + (storedCompanyInfo.record_count || 0) + ' of ' + (storedCompanyInfo.total_records_in_file || 0) + ' total';
+            if (showDecrypted) {
+                html += ' | <span style="color: #6f42c1; font-weight: bold;">&#128275; DECRYPTED VIEW</span>';
+            }
+            html += '</div></div>';
+            
+            if (storedCompanyRecords && storedCompanyRecords.length > 0) {
+                // Scrollable table container
+                html += '<div style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 6px;">';
+                html += '<table id="companyRecordsTable" style="width: 100%; border-collapse: collapse; background: white;">';
+                html += '<thead style="position: sticky; top: 0; z-index: 1;"><tr style="background: ' + (showDecrypted ? '#6f42c1' : '#495057') + '; color: white;">';
+                html += '<th style="padding: 10px; text-align: left;">ID</th>';
+                html += '<th style="padding: 10px; text-align: left;">Timestamp</th>';
+                html += '<th style="padding: 10px; text-align: left;">Name' + (showDecrypted ? '' : ' (Encrypted)') + '</th>';
+                html += '<th style="padding: 10px; text-align: left;">Phone' + (showDecrypted ? '' : ' (Encrypted)') + '</th>';
+                html += '</tr></thead><tbody>';
+                
+                // Get current company to highlight own records
+                var currentCompany = storedCompanyInfo.company ? storedCompanyInfo.company.toLowerCase() : '';
+                
+                storedCompanyRecords.forEach(function(record, index) {
+                    var nameDisplay = '';
+                    var phoneDisplay = '';
+                    var unableToDecrypt = false;
+                    var recordCompany = record.company || 'unknown';
+                    var isOwnRecord = recordCompany.toLowerCase() === currentCompany;
+                    
+                    if (showDecrypted) {
+                        // Show decrypted values (stored during decrypt operation)
+                        var nameVal = record.name_decrypted || '';
+                        var phoneVal = record.phone_decrypted || '';
+                        
+                        // Check if this record couldn't be decrypted
+                        var nameEncrypted = (nameVal === '(encrypted - no key available)');
+                        var phoneEncrypted = (phoneVal === '(encrypted - no key available)');
+                        
+                        if (nameEncrypted || phoneEncrypted) {
+                            // At least one field couldn't be decrypted - show as single row
+                            unableToDecrypt = true;
+                        } else {
+                            nameDisplay = nameVal ? escapeHtml(nameVal) : '<em style="color:#999;">empty</em>';
+                            phoneDisplay = phoneVal ? escapeHtml(phoneVal) : '<em style="color:#999;">empty</em>';
+                        }
+                    } else {
+                        // Show encrypted (truncated)
+                        nameDisplay = '<code style="font-size: 0.75em; word-break: break-all;">' + truncateText(record.name_encrypted, 40) + '</code>';
+                        phoneDisplay = '<code style="font-size: 0.75em; word-break: break-all;">' + truncateText(record.phone_encrypted, 40) + '</code>';
+                    }
+                    
+                    if (unableToDecrypt) {
+                        // Show single row spanning name and phone columns - other company's data
+                        html += '<tr style="border-bottom: 1px solid #dee2e6; background: #f8d7da;">';
+                        html += '<td style="padding: 10px; font-weight: bold; color: #495057;">' + (record.line_number || (index + 1)) + '</td>';
+                        html += '<td style="padding: 10px; font-size: 0.85em; color: #6c757d;">' + escapeHtml(record.timestamp || 'N/A') + '</td>';
+                        html += '<td colspan="2" style="padding: 10px; text-align: center;"><em style="color: #dc3545; font-weight: bold;">&#128274; Unable to Decrypt Contents</em></td>';
+                        html += '</tr>';
+                    } else {
+                        // Show normal row - own company's data
+                        var rowBg = showDecrypted ? (isOwnRecord ? '#f8f5ff' : '#f8d7da') : (isOwnRecord ? '#d4edda' : 'white');
+                        html += '<tr style="border-bottom: 1px solid #dee2e6; background: ' + rowBg + ';">';
+                        html += '<td style="padding: 10px; font-weight: bold; color: #495057;">' + (record.line_number || (index + 1)) + '</td>';
+                        html += '<td style="padding: 10px; font-size: 0.85em;">' + escapeHtml(record.timestamp || 'N/A') + '</td>';
+                        html += '<td style="padding: 10px;">' + nameDisplay + '</td>';
+                        html += '<td style="padding: 10px;">' + phoneDisplay + '</td>';
+                        html += '</tr>';
+                    }
+                });
+                
+                html += '</tbody></table>';
+                html += '</div>'; // Close scrollable container
+                
+                if (showDecrypted) {
+                    html += '<p style="margin-top: 15px; padding: 10px; background: #e2d9f3; border-radius: 6px; color: #6f42c1; font-size: 0.9em;">';
+                    html += '&#128275; <strong>Decrypted:</strong> Plaintext values shown. Release button to return to encrypted view.';
+                    html += '</p>';
+                } else {
+                    html += '<p style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 6px; color: #856404; font-size: 0.9em;">';
+                    html += '&#128274; <strong>Note:</strong> ' + escapeHtml(storedCompanyInfo.note || 'Data is encrypted with company-specific key.');
+                    html += '</p>';
+                }
+            } else {
+                html += '<p style="color: #6c757d;"><em>No records found.</em></p>';
+            }
+            
+            contentDiv.innerHTML = html;
+        }
+        
+        // Track whether we're currently showing decrypted view
+        var isDecrypted = false;
+        
+        function toggleDecryptView() {
+            if (storedCompanyRecords.length === 0) return;
+            
+            if (isDecrypted) {
+                // Currently decrypted, switch to encrypted view
+                showEncryptedView();
+            } else {
+                // Currently encrypted, switch to decrypted view
+                showDecryptedView();
+            }
+        }
+        
+        function showDecryptedView() {
+            if (storedCompanyRecords.length === 0) return;
+            
+            const btn = document.getElementById('decryptToggleBtn');
+            btn.disabled = true;
+            btn.innerHTML = '&#128275; Decrypting...';
+            btn.style.background = '#5a32a3';
+            
+            // Decrypt all records
+            var decryptPromises = [];
+            
+            storedCompanyRecords.forEach(function(record, index) {
+                if (record.name_encrypted) {
+                    decryptPromises.push(
+                        decryptField(record.name_encrypted).then(function(plaintext) {
+                            storedCompanyRecords[index].name_decrypted = plaintext;
+                        }).catch(function() {
+                            storedCompanyRecords[index].name_decrypted = '(encrypted - no key available)';
+                        })
+                    );
+                } else {
+                    storedCompanyRecords[index].name_decrypted = '';
+                }
+                if (record.phone_encrypted) {
+                    decryptPromises.push(
+                        decryptField(record.phone_encrypted).then(function(plaintext) {
+                            storedCompanyRecords[index].phone_decrypted = plaintext;
+                        }).catch(function() {
+                            storedCompanyRecords[index].phone_decrypted = '(encrypted - no key available)';
+                        })
+                    );
+                } else {
+                    storedCompanyRecords[index].phone_decrypted = '';
+                }
+            });
+            
+            Promise.all(decryptPromises).then(function() {
+                isDecrypted = true;
+                btn.disabled = false;
+                btn.innerHTML = '&#128274; Press to Encrypt';
+                btn.style.background = '#28a745';
+                renderCompanyDataTable(true);
+            });
+        }
+        
+        function showEncryptedView() {
+            const btn = document.getElementById('decryptToggleBtn');
+            isDecrypted = false;
+            btn.innerHTML = '&#128275; Press to Decrypt';
+            btn.style.background = '#6f42c1';
+            
+            if (storedCompanyRecords.length > 0) {
+                renderCompanyDataTable(false);
+            }
+        }
+        
+        function decryptField(ciphertext) {
+            return fetch('/decrypt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ciphertext: ciphertext })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    return data.plaintext;
+                } else {
+                    throw new Error(data.message);
+                }
+            });
+        }
+        
+        function truncateText(text, maxLen) {
+            if (!text) return 'null';
+            if (text.length <= maxLen) return escapeHtml(text);
+            return escapeHtml(text.substring(0, maxLen)) + '...';
+        }
+        
+        // Cross-company key access attempt
+        var otherCompanyConfig = null;
+        
+        function attemptOtherCompanyKey() {
+            const btn = document.getElementById('attemptOtherKeyBtn');
+            const resultDiv = document.getElementById('crossCompanyResult');
+            
+            btn.disabled = true;
+            btn.innerHTML = '&#128683; Attempting Access...';
+            
+            resultDiv.innerHTML = '<div style="padding: 15px; background: #e2e3e5; border-radius: 8px;">' +
+                '<p style="color: #495057;"><em>Attempting to access ' + 
+                (otherCompanyConfig ? otherCompanyConfig.name : 'other company') + 
+                '\'s key via SKR...</em></p></div>';
+            
+            fetch('/skr/release-other', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(response => response.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '&#128683; Attempt to Access Other Company\'s Key';
+                
+                if (data.status === 'access_denied') {
+                    // This is the EXPECTED behavior - access should be denied
+                    resultDiv.innerHTML = 
+                        '<div style="padding: 20px; background: #d4edda; border-radius: 8px; border: 2px solid #28a745;">' +
+                            '<h4 style="color: #155724; margin-bottom: 15px;">&#9989; Access Correctly Denied</h4>' +
+                            '<div style="background: #c3e6cb; padding: 15px; border-radius: 5px; margin-bottom: 15px;">' +
+                                '<p style="color: #155724; margin: 5px 0;"><strong>Our Company:</strong> ' + escapeHtml(data.our_company || 'Unknown') + '</p>' +
+                                '<p style="color: #155724; margin: 5px 0;"><strong>Attempted Key:</strong> ' + escapeHtml(data.attempted_key || 'Unknown') + '</p>' +
+                                '<p style="color: #155724; margin: 5px 0;"><strong>Target Key Vault:</strong> ' + escapeHtml(data.attempted_akv || 'Unknown') + '</p>' +
+                            '</div>' +
+                            '<p style="color: #155724;"><strong>This proves:</strong> Even though we are running in a trusted confidential container with TEE protection, we cannot access another company\'s cryptographic keys. The Azure Key Vault correctly rejected our managed identity.</p>' +
+                            '<div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px; font-family: monospace; font-size: 12px; word-break: break-all;">' +
+                                '<strong>Error:</strong> ' + escapeHtml(data.error || 'Access denied') +
+                            '</div>' +
+                        '</div>';
+                } else if (data.status === 'unexpected_success') {
+                    // This should NEVER happen - would indicate a security issue
+                    resultDiv.innerHTML = 
+                        '<div style="padding: 20px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545;">' +
+                            '<h4 style="color: #721c24; margin-bottom: 15px;">&#9888; SECURITY ALERT - Unexpected Success!</h4>' +
+                            '<p style="color: #721c24;"><strong>Warning:</strong> We were able to access another company\'s key. This indicates a misconfiguration in Key Vault access policies!</p>' +
+                        '</div>';
+                } else {
+                    resultDiv.innerHTML = 
+                        '<div style="padding: 20px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545;">' +
+                            '<h4 style="color: #721c24; margin-bottom: 15px;">&#10060; Error</h4>' +
+                            '<p style="color: #721c24;">' + escapeHtml(data.message || 'Unknown error occurred') + '</p>' +
+                        '</div>';
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = '&#128683; Attempt to Access Other Company\'s Key';
+                resultDiv.innerHTML = 
+                    '<div style="padding: 20px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545;">' +
+                        '<h4 style="color: #721c24; margin-bottom: 15px;">&#10060; Request Failed</h4>' +
+                        '<p style="color: #721c24;">' + escapeHtml(error.message || 'Failed to contact server') + '</p>' +
+                    '</div>';
+            });
+        }
+        
+        // Global flag for container type
+        var isConfidentialContainer = true; // Default, updated on page load
+        var partnerConfigs = null; // For Woodgrove Bank partner analysis
+        
+        // Company branding configuration
+        var companyBranding = {
+            woodgrove: {
+                gradient: 'linear-gradient(135deg, #198754 0%, #146c43 100%)',
+                bodyGradient: 'linear-gradient(135deg, #20c997 0%, #198754 100%)',
+                icon: '🏦',
+                title: 'Woodgrove Bank',
+                subtitle: 'Secure Financial Analytics Platform',
+                faviconColor: '#198754',
+                faviconLabel: 'W'
+            },
+            contoso: {
+                gradient: 'linear-gradient(135deg, #6c757d 0%, #495057 100%)',
+                bodyGradient: 'linear-gradient(135deg, #adb5bd 0%, #6c757d 100%)',
+                icon: '🏢',
+                title: 'Contoso Corporation',
+                subtitle: 'Enterprise Data Protection',
+                faviconColor: '#0078d4',
+                faviconLabel: 'C'
+            },
+            fabrikam: {
+                gradient: 'linear-gradient(135deg, #e83e8c 0%, #c2185b 100%)',
+                bodyGradient: 'linear-gradient(135deg, #f8bbd9 0%, #e83e8c 100%)',
+                icon: '👗',
+                title: 'Fabrikam Fashion',
+                subtitle: 'Online Retail Data Protection',
+                faviconColor: '#e83e8c',
+                faviconLabel: 'F'
+            }
+        };
+
+        function setCompanyFavicon(color, label) {
+            var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+                '<rect width="32" height="32" rx="6" fill="' + color + '"/>' +
+                '<text x="16" y="23" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="20" font-weight="bold" fill="white">' + label + '</text>' +
+                '</svg>';
+            var encoded = 'data:image/svg+xml,' + encodeURIComponent(svg);
+            var link = document.querySelector('link[rel="icon"]');
+            if (!link) {
+                link = document.createElement('link');
+                link.rel = 'icon';
+                document.head.appendChild(link);
+            }
+            link.type = 'image/svg+xml';
+            link.href = encoded;
+        }
+        
+        function applyCompanyBranding(companyName) {
+            const header = document.querySelector('.header');
+            const headerH1 = header.querySelector('h1');
+            const headerP = header.querySelector('p');
+            
+            let branding = null;
+            const name = (companyName || '').toLowerCase();
+            
+            if (name.includes('woodgrove')) {
+                branding = companyBranding.woodgrove;
+            } else if (name.includes('contoso')) {
+                branding = companyBranding.contoso;
+            } else if (name.includes('fabrikam')) {
+                branding = companyBranding.fabrikam;
+            }
+            
+            if (branding) {
+                header.style.background = branding.gradient;
+                headerH1.innerHTML = branding.icon + ' ' + branding.title;
+                headerP.textContent = branding.subtitle;
+                document.body.style.background = branding.bodyGradient;
+                document.title = branding.title + ' - Confidential Computing';
+                setCompanyFavicon(branding.faviconColor, branding.faviconLabel);
+            }
+        }
+        
+        function initializePageConfig() {
+            // Fetch SKR config to get company name and container type
+            fetch('/skr/config')
+                .then(response => response.json())
+                .then(data => {
+                    // Update company name in encryption section
+                    if (data.company_name) {
+                        document.getElementById('encryptionCompanyName').textContent = data.company_name;
+                        // Apply company-specific branding
+                        applyCompanyBranding(data.company_name);
+                    }
+                    
+                    // Store container type for later use
+                    isConfidentialContainer = data.is_confidential;
+                    
+                    // Check if this is Woodgrove Bank and show partner analysis section
+                    const isWoodgrove = data.is_woodgrove || (data.key_name && data.key_name.toLowerCase().includes('woodgrove'));
+                    if (isWoodgrove && data.partner_configs) {
+                        const partnerAnalysisSection = document.getElementById('partnerAnalysisSection');
+                        if (partnerAnalysisSection) {
+                            partnerAnalysisSection.style.display = 'block';
+                            partnerConfigs = data.partner_configs;
+                        }
+                    }
+                    
+                    // Update cross-company section (for Contoso/Fabrikam only, not Woodgrove)
+                    const crossCompanySection = document.getElementById('crossCompanySection');
+                    const crossCompanyInfo = document.getElementById('crossCompanyInfo');
+                    
+                    // Show for confidential containers that have other_company config (Contoso or Fabrikam), but NOT for Woodgrove
+                    if (data.other_company && data.other_company.name && !isWoodgrove) {
+                        // Show cross-company section for confidential containers
+                        crossCompanySection.style.display = 'block';
+                        otherCompanyConfig = data.other_company;
+                        
+                        crossCompanyInfo.innerHTML = 
+                            '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">' +
+                                '<div style="padding: 15px; background: #d4edda; border-radius: 8px;">' +
+                                    '<h5 style="color: #155724; margin-bottom: 10px;">&#127919; Our Company</h5>' +
+                                    '<p style="color: #155724; margin: 5px 0;"><strong>Name:</strong> ' + escapeHtml(data.company_name) + '</p>' +
+                                    '<p style="color: #155724; margin: 5px 0;"><strong>Key:</strong> ' + escapeHtml(data.key_name) + '</p>' +
+                                    '<p style="color: #155724; margin: 5px 0; font-size: 11px;"><strong>Key Vault:</strong> ' + escapeHtml(data.akv_endpoint) + '</p>' +
+                                '</div>' +
+                                '<div style="padding: 15px; background: #f8d7da; border-radius: 8px;">' +
+                                    '<h5 style="color: #721c24; margin-bottom: 10px;">&#128683; Other Company</h5>' +
+                                    '<p style="color: #721c24; margin: 5px 0;"><strong>Name:</strong> ' + escapeHtml(data.other_company.name) + '</p>' +
+                                    '<p style="color: #721c24; margin: 5px 0;"><strong>Key:</strong> ' + escapeHtml(data.other_company.key_name) + '</p>' +
+                                    '<p style="color: #721c24; margin: 5px 0; font-size: 11px;"><strong>Key Vault:</strong> ' + escapeHtml(data.other_company.akv_endpoint) + '</p>' +
+                                '</div>' +
+                            '</div>';
+                    } else {
+                        // Hide for non-confidential containers
+                        crossCompanySection.style.display = 'none';
+                    }
+                    
+                    console.log('Container config:', {
+                        company: data.company_name,
+                        isConfidential: data.is_confidential,
+                        otherCompany: data.other_company,
+                        isWoodgrove: data.is_woodgrove,
+                        partnerConfigs: data.partner_configs
+                    });
+                })
+                .catch(error => {
+                    console.log('Could not load SKR config:', error);
+                });
+        }
+        
+        // Partner Analysis Functions (Woodgrove Bank only)
+        async function startPartnerAnalysis() {
+            const btn = document.getElementById('startPartnerAnalysisBtn');
+            const resultDiv = document.getElementById('partnerAnalysisResult');
+            const summaryDiv = document.getElementById('demographicsSummary');
+            
+            if (!partnerConfigs) {
+                resultDiv.innerHTML = '<p style="color: #dc3545;">Partner configurations not available.</p>';
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.innerHTML = '&#128202; Analyzing Partner Data<span class="loading"></span>';
+            resultDiv.innerHTML = '<p>Starting partner demographic analysis...</p>';
+            
+            let contosoData = [];
+            let fabrikamData = [];
+            let contosoKey = null;
+            let fabrikamKey = null;
+            
+            // Step 1: Release Contoso key
+            updateKeyStatus('contoso', 'loading', 'Requesting key release...');
+            try {
+                const contosoResponse = await fetch('/skr/release-partner', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ partner: 'contoso' })
+                });
+                const contosoResult = await contosoResponse.json();
+                
+                if (contosoResult.status === 'success') {
+                    contosoKey = contosoResult.key;
+                    updateKeyStatus('contoso', 'success', 'Key released successfully');
+                } else {
+                    updateKeyStatus('contoso', 'error', contosoResult.message || 'Failed to release key');
+                }
+            } catch (e) {
+                updateKeyStatus('contoso', 'error', 'Error: ' + e.message);
+            }
+            
+            // Step 2: Release Fabrikam key
+            updateKeyStatus('fabrikam', 'loading', 'Requesting key release...');
+            try {
+                const fabrikamResponse = await fetch('/skr/release-partner', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ partner: 'fabrikam' })
+                });
+                const fabrikamResult = await fabrikamResponse.json();
+                
+                if (fabrikamResult.status === 'success') {
+                    fabrikamKey = fabrikamResult.key;
+                    updateKeyStatus('fabrikam', 'success', 'Key released successfully');
+                } else {
+                    updateKeyStatus('fabrikam', 'error', fabrikamResult.message || 'Failed to release key');
+                }
+            } catch (e) {
+                updateKeyStatus('fabrikam', 'error', 'Error: ' + e.message);
+            }
+            
+            // Step 3: Stream decryption progress using SSE
+            resultDiv.innerHTML = '<p>Connecting to analysis stream...</p>';
+            
+            // Show progress section
+            const progressSection = document.getElementById('progressSection');
+            progressSection.style.display = 'block';
+            
+            const eventSource = new EventSource('/partner/analyze-stream');
+            
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'status') {
+                    document.getElementById('progressStatus').textContent = data.message;
+                    if (data.phase === 'fetch') {
+                        resultDiv.innerHTML = '<p>📥 ' + escapeHtml(data.message) + '</p>';
+                    } else if (data.phase === 'decrypt') {
+                        resultDiv.innerHTML = '<p>🔐 ' + escapeHtml(data.message) + '</p>';
+                    } else if (data.phase === 'analyze') {
+                        resultDiv.innerHTML = '<p>📊 ' + escapeHtml(data.message) + '</p>';
+                    }
+                }
+                else if (data.type === 'fetch') {
+                    resultDiv.innerHTML += '<p style="color: #495057; font-size: 13px;">✓ Found ' + data.count + ' encrypted records from ' + escapeHtml(data.partner) + '</p>';
+                }
+                else if (data.type === 'progress') {
+                    document.getElementById('progressBar').style.width = data.percent + '%';
+                    document.getElementById('progressPercent').textContent = data.percent + '%';
+                    document.getElementById('progressDecrypted').textContent = data.decrypted + ' / ' + data.total + ' records';
+                    document.getElementById('progressTime').textContent = 'Elapsed: ' + data.elapsed + 's | Remaining: ~' + data.remaining + 's';
+                    document.getElementById('progressPartner').textContent = '🔐 Decrypting ' + escapeHtml(data.current_partner) + ' records...';
+                    document.getElementById('progressStatus').textContent = 'Decrypting records...';
+                }
+                else if (data.type === 'complete') {
+                    eventSource.close();
+                    
+                    // Hide progress section
+                    progressSection.style.display = 'none';
+                    
+                    // Show demographics summary
+                    summaryDiv.style.display = 'block';
+                    
+                    // Staff counts
+                    document.getElementById('statContosoRecords').textContent = data.contoso_count || 0;
+                    document.getElementById('statFabrikamRecords').textContent = data.fabrikam_count || 0;
+                    document.getElementById('statTotalRecords').textContent = data.total_count || 0;
+                    
+                    // Average salaries
+                    if (data.avg_salaries) {
+                        document.getElementById('avgSalaryContoso').textContent = '$' + (data.avg_salaries.Contoso || 0).toLocaleString();
+                        document.getElementById('avgSalaryFabrikam').textContent = '$' + (data.avg_salaries.Fabrikam || 0).toLocaleString();
+                        document.getElementById('avgSalaryCombined').textContent = '$' + (data.avg_salaries.Combined || 0).toLocaleString();
+                    }
+                    
+                    // Generation breakdown
+                    if (data.generations && data.generations.length > 0) {
+                        let genHtml = '<div style="display: flex; flex-wrap: wrap; gap: 10px;">';
+                        const genColors = {
+                            'Gen Alpha': '#ff6b6b',
+                            'Gen Z': '#4ecdc4',
+                            'Millennials': '#45b7d1',
+                            'Gen X': '#96ceb4',
+                            'Baby Boomers': '#ffeaa7',
+                            'Silent Generation': '#dfe6e9'
+                        };
+                        data.generations.forEach(g => {
+                            const color = genColors[g.generation] || '#dee2e6';
+                            genHtml += '<div style="padding: 10px 15px; background: ' + color + '; border-radius: 8px; text-align: center;">';
+                            genHtml += '<div style="font-size: 20px; font-weight: bold;">' + g.count + '</div>';
+                            genHtml += '<div style="font-size: 11px;">' + escapeHtml(g.generation) + '</div>';
+                            genHtml += '</div>';
+                        });
+                        genHtml += '</div>';
+                        document.getElementById('generationBreakdown').innerHTML = genHtml;
+                    }
+                    
+                    // Generation breakdown by company with percentages
+                    if (data.generations_by_company) {
+                        const genColors = {
+                            'Gen Alpha': '#ff6b6b',
+                            'Gen Z': '#4ecdc4',
+                            'Millennials': '#45b7d1',
+                            'Gen X': '#96ceb4',
+                            'Baby Boomers': '#ffeaa7',
+                            'Silent Generation': '#dfe6e9'
+                        };
+                        
+                        // Render Contoso generations
+                        if (data.generations_by_company.Contoso) {
+                            let contosoHtml = '';
+                            data.generations_by_company.Contoso.forEach(g => {
+                                const color = genColors[g.generation] || '#dee2e6';
+                                contosoHtml += '<div style="margin-bottom: 8px;">';
+                                contosoHtml += '<div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 2px;">';
+                                contosoHtml += '<span>' + escapeHtml(g.generation) + '</span>';
+                                contosoHtml += '<span><strong>' + g.percent + '%</strong> (' + g.count + ')</span>';
+                                contosoHtml += '</div>';
+                                contosoHtml += '<div style="background: #e0e0e0; border-radius: 4px; height: 20px; overflow: hidden;">';
+                                contosoHtml += '<div style="background: ' + color + '; height: 100%; width: ' + g.percent + '%; transition: width 0.5s;"></div>';
+                                contosoHtml += '</div></div>';
+                            });
+                            document.getElementById('contosoGenerations').innerHTML = contosoHtml;
+                        }
+                        
+                        // Render Fabrikam generations
+                        if (data.generations_by_company.Fabrikam) {
+                            let fabrikamHtml = '';
+                            data.generations_by_company.Fabrikam.forEach(g => {
+                                const color = genColors[g.generation] || '#dee2e6';
+                                fabrikamHtml += '<div style="margin-bottom: 8px;">';
+                                fabrikamHtml += '<div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 2px;">';
+                                fabrikamHtml += '<span>' + escapeHtml(g.generation) + '</span>';
+                                fabrikamHtml += '<span><strong>' + g.percent + '%</strong> (' + g.count + ')</span>';
+                                fabrikamHtml += '</div>';
+                                fabrikamHtml += '<div style="background: #e0e0e0; border-radius: 4px; height: 20px; overflow: hidden;">';
+                                fabrikamHtml += '<div style="background: ' + color + '; height: 100%; width: ' + g.percent + '%; transition: width 0.5s;"></div>';
+                                fabrikamHtml += '</div></div>';
+                            });
+                            document.getElementById('fabrikamGenerations').innerHTML = fabrikamHtml;
+                        }
+                    }
+                    
+                    // Salary by country world map
+                    if (data.salary_by_country && data.salary_by_country.length > 0) {
+                        renderSalaryWorldMap(data.salary_by_country);
+                    }
+                    
+                    // Eye colors
+                    if (data.eye_colors) {
+                        const most = data.eye_colors.most_common;
+                        const least = data.eye_colors.least_common;
+                        document.getElementById('eyeColorMost').textContent = most.color + ' (' + most.count + ')';
+                        document.getElementById('eyeColorLeast').textContent = least.color + ' (' + least.count + ')';
+                    }
+                    
+                    // Favorite colors
+                    if (data.top_3_favorite_colors && data.top_3_favorite_colors.length > 0) {
+                        let favHtml = '';
+                        const medals = ['🥇', '🥈', '🥉'];
+                        data.top_3_favorite_colors.forEach((fc, idx) => {
+                            favHtml += '<div style="padding: 12px 20px; background: #f8f9fa; border-radius: 8px; text-align: center; border: 2px solid #dee2e6;">';
+                            favHtml += '<div style="font-size: 20px;">' + medals[idx] + '</div>';
+                            favHtml += '<div style="font-size: 16px; font-weight: bold; color: #495057;">' + escapeHtml(fc.color) + '</div>';
+                            favHtml += '<div style="font-size: 12px; color: #6c757d;">' + fc.count + ' people</div>';
+                            favHtml += '</div>';
+                        });
+                        document.getElementById('favoriteColors').innerHTML = favHtml;
+                    }
+                    
+                    // Top 10 countries with cities
+                    if (data.top_10_countries && data.top_10_countries.length > 0) {
+                        let countryHtml = '<table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden;">';
+                        countryHtml += '<thead><tr style="background: #1a472a; color: white;">';
+                        countryHtml += '<th style="padding: 12px; text-align: left;">Rank</th>';
+                        countryHtml += '<th style="padding: 12px; text-align: left;">Country</th>';
+                        countryHtml += '<th style="padding: 12px; text-align: center;">Staff</th>';
+                        countryHtml += '<th style="padding: 12px; text-align: left;">Top 3 Cities</th>';
+                        countryHtml += '</tr></thead><tbody>';
+                        
+                        data.top_10_countries.forEach((c, idx) => {
+                            const bgColor = idx % 2 === 0 ? '#f8f9fa' : 'white';
+                            const citiesStr = c.top_cities.map(city => city.city + ' (' + city.count + ')').join(', ');
+                            countryHtml += '<tr style="background: ' + bgColor + ';">';
+                            countryHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6; font-weight: bold;">#' + (idx + 1) + '</td>';
+                            countryHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6;">🌍 ' + escapeHtml(c.country) + '</td>';
+                            countryHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6; text-align: center; font-weight: bold;">' + c.count + '</td>';
+                            countryHtml += '<td style="padding: 10px; border-bottom: 1px solid #dee2e6; font-size: 12px; color: #6c757d;">' + escapeHtml(citiesStr) + '</td>';
+                            countryHtml += '</tr>';
+                        });
+                        
+                        countryHtml += '</tbody></table>';
+                        document.getElementById('countriesTable').innerHTML = countryHtml;
+                    }
+                    
+                    // Show success message
+                    let resultMessage = '<p style="color: #155724;"><strong>✓ Partner analysis complete!</strong> Successfully decrypted and analyzed ' + data.total_count + ' records in ' + data.total_time + ' seconds.</p>';
+                    
+                    // Show any errors that occurred
+                    if (data.errors && data.errors.length > 0) {
+                        resultMessage += '<p style="color: #856404; font-size: 12px;"><strong>Notes:</strong><br>' + data.errors.map(e => '• ' + escapeHtml(e)).join('<br>') + '</p>';
+                    }
+                    
+                    resultDiv.innerHTML = resultMessage;
+                    
+                    // Reset button
+                    btn.disabled = false;
+                    btn.innerHTML = '&#128202; Start Partner Demographic Analysis';
+                }
+                else if (data.type === 'error') {
+                    eventSource.close();
+                    progressSection.style.display = 'none';
+                    resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Analysis failed:</strong> ' + escapeHtml(data.message) + '</p>';
+                    if (data.errors) {
+                        resultDiv.innerHTML += '<p style="color: #856404; font-size: 12px;">' + data.errors.map(e => '• ' + escapeHtml(e)).join('<br>') + '</p>';
+                    }
+                    btn.disabled = false;
+                    btn.innerHTML = '&#128202; Start Partner Demographic Analysis';
+                }
+            };
+            
+            eventSource.onerror = function(event) {
+                eventSource.close();
+                progressSection.style.display = 'none';
+                resultDiv.innerHTML = '<p style="color: #dc3545;"><strong>Connection error:</strong> Lost connection to server.</p>';
+                btn.disabled = false;
+                btn.innerHTML = '&#128202; Start Partner Demographic Analysis';
+            };
+        }
+        
+        function updateKeyStatus(company, status, message) {
+            const iconEl = document.getElementById(company + 'StatusIcon');
+            const textEl = document.getElementById(company + 'StatusText');
+            const containerEl = document.getElementById(company + 'KeyStatus');
+            
+            if (status === 'loading') {
+                iconEl.textContent = '⏳';
+                containerEl.style.borderColor = '#ffc107';
+                containerEl.style.background = '#fff3cd';
+            } else if (status === 'success') {
+                iconEl.textContent = '✅';
+                containerEl.style.borderColor = '#28a745';
+                containerEl.style.background = '#d4edda';
+            } else if (status === 'error') {
+                iconEl.textContent = '❌';
+                containerEl.style.borderColor = '#dc3545';
+                containerEl.style.background = '#f8d7da';
+            }
+            
+            textEl.textContent = message;
+        }
+        
+        // Page timer - tracks time since last refresh
+        var pageLoadTime = Date.now();
+        
+        function updatePageTimer() {
+            var elapsed = Math.floor((Date.now() - pageLoadTime) / 1000);
+            var hours = Math.floor(elapsed / 3600);
+            var minutes = Math.floor((elapsed % 3600) / 60);
+            var seconds = elapsed % 60;
+            
+            var timerText;
+            if (hours > 0) {
+                timerText = String(hours).padStart(2, '0') + ':' + 
+                           String(minutes).padStart(2, '0') + ':' + 
+                           String(seconds).padStart(2, '0');
+            } else {
+                timerText = String(minutes).padStart(2, '0') + ':' + 
+                           String(seconds).padStart(2, '0');
+            }
+            
+            document.getElementById('pageTimer').textContent = timerText;
+        }
+        
+        // Update timer every second
+        setInterval(updatePageTimer, 1000);
+        updatePageTimer(); // Initial call
+        
+        // Page initialization
+        document.addEventListener('DOMContentLoaded', function() {
+            initializePageConfig();
+            // Check company data access after a short delay (to allow SKR status to load)
+            setTimeout(checkCompanyDataAccess, 1000);
+            
+            // Auto-populate from CSV when "Protect Data" section is expanded
+            const companyDataSection = document.getElementById('companyDataSection');
+            if (companyDataSection) {
+                companyDataSection.addEventListener('toggle', function() {
+                    if (this.open) {
+                        autoPopulateFromCsv();
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,219 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "containerGroupName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name for the container group"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    },
+    "appImage": {
+      "type": "string",
+      "metadata": {
+        "description": "Container image for the combined application (Flask + SKR)"
+      }
+    },
+    "registryServer": {
+      "type": "string",
+      "metadata": {
+        "description": "Container registry server"
+      }
+    },
+    "registryUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "Container registry username"
+      }
+    },
+    "registryPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Container registry password"
+      }
+    },
+    "skrKeyName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the SKR-protected key in Key Vault"
+      }
+    },
+    "skrMaaEndpoint": {
+      "type": "string",
+      "defaultValue": "sharedeus.eus.attest.azure.net",
+      "metadata": {
+        "description": "MAA endpoint for Secure Key Release attestation"
+      }
+    },
+    "skrAkvEndpoint": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure Key Vault endpoint for Secure Key Release"
+      }
+    },
+    "identityResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resource ID of the user-assigned managed identity"
+      }
+    },
+    "securityPolicyHash": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "SHA256 hash of the container security policy"
+      }
+    },
+    "dbHost": {
+      "type": "string",
+      "metadata": {
+        "description": "PostgreSQL Flexible Server FQDN"
+      }
+    },
+    "dbName": {
+      "type": "string",
+      "defaultValue": "financedemo",
+      "metadata": {
+        "description": "PostgreSQL database name"
+      }
+    },
+    "dbUser": {
+      "type": "string",
+      "metadata": {
+        "description": "PostgreSQL admin username"
+      }
+    },
+    "dbPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "PostgreSQL admin password"
+      }
+    },
+    "subnetId": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource ID of the ACI delegated subnet"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2023-05-01",
+      "name": "[parameters('containerGroupName')]",
+      "location": "[parameters('location')]",
+      "identity": "[if(empty(parameters('identityResourceId')), null(), createObject('type', 'UserAssigned', 'userAssignedIdentities', createObject(parameters('identityResourceId'), createObject())))]",
+      "properties": {
+        "sku": "Confidential",
+        "confidentialComputeProperties": {
+          "ccePolicy": ""
+        },
+        "containers": [
+          {
+            "name": "finance-postgres-demo",
+            "properties": {
+              "image": "[parameters('appImage')]",
+              "ports": [
+                {
+                  "protocol": "TCP",
+                  "port": 80
+                },
+                {
+                  "protocol": "TCP",
+                  "port": 443
+                }
+              ],
+              "environmentVariables": [
+                {
+                  "name": "SKR_KEY_NAME",
+                  "value": "[parameters('skrKeyName')]"
+                },
+                {
+                  "name": "SKR_MAA_ENDPOINT",
+                  "value": "[parameters('skrMaaEndpoint')]"
+                },
+                {
+                  "name": "SKR_AKV_ENDPOINT",
+                  "value": "[parameters('skrAkvEndpoint')]"
+                },
+                {
+                  "name": "SECURITY_POLICY_HASH",
+                  "value": "[parameters('securityPolicyHash')]"
+                },
+                {
+                  "name": "DB_HOST",
+                  "value": "[parameters('dbHost')]"
+                },
+                {
+                  "name": "DB_NAME",
+                  "value": "[parameters('dbName')]"
+                },
+                {
+                  "name": "DB_USER",
+                  "value": "[parameters('dbUser')]"
+                },
+                {
+                  "name": "DB_PASSWORD",
+                  "secureValue": "[parameters('dbPassword')]"
+                }
+              ],
+              "resources": {
+                "requests": {
+                  "memoryInGB": 4,
+                  "cpu": 2
+                }
+              }
+            }
+          }
+        ],
+        "imageRegistryCredentials": [
+          {
+            "server": "[parameters('registryServer')]",
+            "username": "[parameters('registryUsername')]",
+            "password": "[parameters('registryPassword')]"
+          }
+        ],
+        "subnetIds": [
+          {
+            "id": "[parameters('subnetId')]"
+          }
+        ],
+        "ipAddress": {
+          "ports": [
+            {
+              "protocol": "TCP",
+              "port": 80
+            },
+            {
+              "protocol": "TCP",
+              "port": 443
+            }
+          ],
+          "type": "Private"
+        },
+        "osType": "Linux",
+        "restartPolicy": "Always"
+      }
+    }
+  ],
+  "outputs": {
+    "containerGroupId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))]"
+    },
+    "privateIp": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.ip]"
+    }
+  }
+}
