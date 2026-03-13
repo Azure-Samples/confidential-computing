@@ -14,9 +14,6 @@ A demonstration of Azure Confidential Container Instances (ACI) with AMD SEV-SNP
 
 ![Multi-Party Topology](MultiPartyTopology.svg)
 
-## Demo App Overview
-![Demo App Topology](../demo-app/demo-app-topology.jpg)
-
 ## Overview
 
 This project deploys **three containers** running identical code to demonstrate multi-party confidential computing:
@@ -50,7 +47,6 @@ This project deploys **three containers** running identical code to demonstrate 
 The demo deploys:
 - **3 Confidential Containers** (Contoso, Fabrikam Fashion, Woodgrove Bank) - Running on AMD SEV-SNP hardware with TEE protection
 - **3 Key Vaults** - Separate Premium HSM-backed vaults for each company's encryption keys
-- **Shared Blob Storage** - Contains encrypted data from all parties
 
 > **📄 Security Policy Deep Dive:** See [SECURITY-POLICY.md](SECURITY-POLICY.md) for an annotated example of the Confidential Computing Enforcement Policy (ccePolicy) that cryptographically binds each container's identity.
 
@@ -185,7 +181,7 @@ Deploys three containers:
 
 ## What You'll See
 
-After deployment, a browser opens with a 3-pane side-by-side comparison view:
+After deployment, a browser opens with a 3-tabs for a comparison view:
 
 ```
 +------------------+------------------+------------------+
@@ -195,7 +191,7 @@ After deployment, a browser opens with a 3-pane side-by-side comparison view:
 | ✅ Attestation   | ✅ Attestation   | ✅ Attestation   |
 | ✅ Key Release   | ✅ Key Release   | ✅ Key Release   |
 | ✅ Encryption    | ✅ Encryption    | ✅ Partner Keys  |
-| ✅ Own data      | ✅ Own data      | ✅ Partner data  |
+| ✅ Own data      | ✅ Own data      | ✅ Partner data + AI chatbot  |
 +------------------+------------------+------------------+
 ```
 
