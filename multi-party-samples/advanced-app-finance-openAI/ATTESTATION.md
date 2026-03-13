@@ -301,17 +301,77 @@ The web UI dynamically updates security feature indicators based on attestation 
 
 The Woodgrove Bank dashboard includes an AI Chat Assistant powered by Azure OpenAI. This section documents how data isolation is maintained when chat queries are processed.
 
-### What the LLM Sees
+### OpenAI Integration Architecture
 
-The chat system prompt contains **only pre-computed aggregate analytics** — never raw transaction records. Specifically:
+The chat feature uses a **single-turn, stateless** design:
 
-| Data Sent to LLM | Examples | Contains PII? |
-|-------------------|----------|---------------|
-| Category totals | "groceries: $1.2M across 4,200 txns" | No |
-| Hourly/daily patterns | "peak hour: 14:00 with 890 txns" | No |
-| Country aggregates | "US: $800K, UK: $200K" | No |
-| Cross-tabulations | "groceries peak at 12:00" | No |
-| Loan summary stats | "avg loan: $15K, median: $12K" | No |
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Confidential Container (TEE)                      │
+│                                                                      │
+│  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐   │
+│  │  Encrypted    │───>│  Decrypt + Compute│───>│  Analytics Cache │   │
+│  │  Partner Data │    │  (in TEE memory)  │    │  (aggregates     │   │
+│  └──────────────┘    └──────────────────┘    │   only, no PII)  │   │
+│                                               └────────┬─────────┘   │
+│                                                        │             │
+│  ┌──────────────┐    ┌──────────────────┐              │             │
+│  │  User asks    │───>│  Build system     │<────────────┘             │
+│  │  question     │    │  prompt + call    │                           │
+│  └──────────────┘    │  Azure OpenAI     │                           │
+│                       └────────┬─────────┘                           │
+└────────────────────────────────┼─────────────────────────────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │    Azure OpenAI         │
+                    │    (gpt-4o-mini)        │
+                    │                         │
+                    │  Receives:              │
+                    │  • System prompt with   │
+                    │    aggregate JSON only  │
+                    │  • User question        │
+                    │                         │
+                    │  Never receives:        │
+                    │  • Raw records          │
+                    │  • Encryption keys      │
+                    │  • Attestation tokens   │
+                    │  • Customer PII         │
+                    └─────────────────────────┘
+```
+
+### What Gets Sent to OpenAI
+
+Each chat request sends exactly **one** `chat.completions.create` call with two messages:
+
+**System message** — built by `_build_chat_system_prompt()` — contains:
+- A persona: "You are Woodgrove Bank's financial analytics assistant"
+- Guardrails: only answer from provided data, never fabricate, keep answers concise, reference specific numbers
+- The cached analytics summary serialized as JSON (see table below)
+
+**User message** — the question verbatim (max 500 characters)
+
+**Parameters:** `model=gpt-4o-mini`, `max_tokens=800`, `temperature=0.3`, `api_version=2024-06-01`
+
+### Cached Analytics Summary Structure
+
+The `_cached_chat_summary` dict contains 15 keys of aggregate data:
+
+| Key | Type | Description | Contains PII? |
+|-----|------|-------------|---------------|
+| `total_transactions` | int | Total record count (e.g. 1000) | No |
+| `contoso_count` | int | Contoso record count | No |
+| `fabrikam_count` | int | Fabrikam record count | No |
+| `spend_by_category` | dict | Category totals (e.g. `{"Groceries": 45230.50}`) | No |
+| `transactions_by_hour` | dict | Hourly counts (e.g. `{"14": 890}`) | No |
+| `grocery_by_hour` | dict | Grocery spending by hour | No |
+| `peak_grocery_hour` | int | Hour with highest grocery spend | No |
+| `loan_insights` | dict | Avg/count for mortgage, car, student loans | No |
+| `spending_by_country` | list | Top 10 countries with city breakdowns | No |
+| `age_group_insights` | dict | Generational spending averages | No |
+| `top_merchants` | list | Top 15 merchants by volume | No |
+| `transactions_by_day` | dict | Day-of-week patterns | No |
+| `partner_spend` | dict | `{"Contoso": ..., "Fabrikam": ..., "Combined": ...}` | No |
+| `cross_tabulations` | dict | Category-by-hour, category-by-country peaks | No |
 
 ### What the LLM Never Sees
 
@@ -320,6 +380,7 @@ The chat system prompt contains **only pre-computed aggregate analytics** — ne
 - Attestation tokens or security policy hashes
 - Storage connection strings or partner URLs
 - Individual customer data from Contoso or Fabrikam
+- SKR tokens or TEE memory contents
 
 ### Data Flow
 
@@ -327,20 +388,36 @@ The chat system prompt contains **only pre-computed aggregate analytics** — ne
 Raw partner data (encrypted in Azure Storage)
     ↓ Decrypted inside TEE via SKR keys
     ↓ Aggregate analytics computed in-memory
-    ↓ Structured summary cached (no raw records)
-    ↓ Summary sent as system prompt to Azure OpenAI
-    ↓ LLM response returned to user
+    ↓ Structured summary cached (15 keys, no raw records)
+    ↓ Summary serialized as JSON in system prompt
+    ↓ Single chat.completions.create call to Azure OpenAI
+    ↓ LLM response returned to user (plain text answer)
 ```
+
+No conversation history is maintained — each question is independent and stateless.
 
 ### Rate Limiting
 
 The `/partner/chat` endpoint enforces a rate limit of **10 requests per 60 seconds** per client to prevent abuse of the Azure OpenAI API.
 
+### OpenAI Connectivity Diagnostics
+
+The SSE analytics stream includes an automatic Phase 10 that verifies OpenAI connectivity:
+
+| Check | Method | What It Tests |
+|-------|--------|---------------|
+| DNS | `socket.getaddrinfo` | Hostname resolves to IP(s) |
+| TCP | `socket.create_connection` | Port 443 is reachable |
+| API health | `requests.GET /openai/deployments/{name}` | Deployment exists and responds |
+| Completion | `AzureOpenAI.chat.completions.create` | End-to-end LLM call works |
+
+Results are displayed in the dashboard log with ✓/✗/⚠ indicators. A standalone `/partner/openai-diag` endpoint provides the same diagnostics on demand.
+
 ## Files Reference
 
 | File | Purpose |
 |------|---------|
-| `Deploy-MultiParty.ps1` | Main script for build, deploy, cleanup || `SECURITY-POLICY.md` | Annotated ccePolicy (Rego) with real example and security analysis || `app.py` | Flask routes, forwards attestation requests to SKR |
+| `Deploy-MultiFinanceAI.ps1` | Main script for build, deploy, cleanup || `SECURITY-POLICY.md` | Annotated ccePolicy (Rego) with real example and security analysis || `app.py` | Flask routes, forwards attestation requests to SKR |
 | `supervisord.conf` | Process supervisor config for Flask + SKR |
 | `templates/index.html` | Interactive UI with JavaScript for attestation |
 | `deployment-template-original.json` | ARM template with Confidential SKU |

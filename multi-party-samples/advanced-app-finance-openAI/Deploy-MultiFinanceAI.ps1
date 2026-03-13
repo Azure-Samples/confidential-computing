@@ -45,19 +45,19 @@
     Optional description tag to add to the resource group.
 
 .EXAMPLE
-    .\Deploy-MultiFinance.ps1 -Prefix "jd01" -Build
+    .\Deploy-MultiFinanceAI.ps1 -Prefix "jd01" -Build
     Build and push the container image with prefix "jd01"
 
 .EXAMPLE
-    .\Deploy-MultiFinance.ps1 -Prefix "dev" -Deploy
+    .\Deploy-MultiFinanceAI.ps1 -Prefix "dev" -Deploy
     Deploy all three containers with prefix "dev"
 
 .EXAMPLE
-    .\Deploy-MultiFinance.ps1 -Prefix "team42" -Build -Deploy
+    .\Deploy-MultiFinanceAI.ps1 -Prefix "team42" -Build -Deploy
     Build and deploy in one command with prefix "team42"
 
 .EXAMPLE
-    .\Deploy-MultiFinance.ps1 -Cleanup
+    .\Deploy-MultiFinanceAI.ps1 -Cleanup
     Delete all Azure resources (reads configuration from acr-config.json)
 #>
 
@@ -1692,10 +1692,10 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
     Write-Host "  Woodgrove-Bank: Confidential (AMD SEV-SNP) - CAN attest + cross-company access" -ForegroundColor Green
     Write-Host ""
     Write-Host "Usage:" -ForegroundColor Yellow
-    Write-Host "  .\Deploy-MultiFinance.ps1 -Prefix <code> -Build         # Build container image"
-    Write-Host "  .\Deploy-MultiFinance.ps1 -Prefix <code> -Deploy        # Deploy all 3 containers"
-    Write-Host "  .\Deploy-MultiFinance.ps1 -Prefix <code> -Build -Deploy # Build and deploy"
-    Write-Host "  .\Deploy-MultiFinance.ps1 -Prefix <code> -Cleanup       # Delete all resources"
+    Write-Host "  .\Deploy-MultiFinanceAI.ps1 -Prefix <code> -Build         # Build container image"
+    Write-Host "  .\Deploy-MultiFinanceAI.ps1 -Prefix <code> -Deploy        # Deploy all 3 containers"
+    Write-Host "  .\Deploy-MultiFinanceAI.ps1 -Prefix <code> -Build -Deploy # Build and deploy"
+    Write-Host "  .\Deploy-MultiFinanceAI.ps1 -Prefix <code> -Cleanup       # Delete all resources"
     Write-Host ""
     Write-Host "Required Parameter:" -ForegroundColor Yellow
     Write-Host "  -Prefix <code>  A short, unique identifier (3-8 lowercase alphanumeric chars)"
@@ -1733,9 +1733,9 @@ if (($Build -or $Deploy) -and -not $Prefix) {
     Write-Host "to prefix all Azure resources. This helps identify who owns the resources."
     Write-Host ""
     Write-Host "Examples:" -ForegroundColor Cyan
-    Write-Host "  .\Deploy-MultiFinance.ps1 -Prefix jd01 -Build      # Use your initials + number"
-    Write-Host "  .\Deploy-MultiFinance.ps1 -Prefix dev -Build       # Use a project code"
-    Write-Host "  .\Deploy-MultiFinance.ps1 -Prefix team42 -Build    # Use your team identifier"
+    Write-Host "  .\Deploy-MultiFinanceAI.ps1 -Prefix jd01 -Build      # Use your initials + number"
+    Write-Host "  .\Deploy-MultiFinanceAI.ps1 -Prefix dev -Build       # Use a project code"
+    Write-Host "  .\Deploy-MultiFinanceAI.ps1 -Prefix team42 -Build    # Use your team identifier"
     Write-Host ""
     Write-Host "The prefix must be:" -ForegroundColor Gray
     Write-Host "  - 3 to 8 characters long"

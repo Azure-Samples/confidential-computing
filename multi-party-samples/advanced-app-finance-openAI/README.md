@@ -52,8 +52,6 @@ The demo deploys:
 - **3 Key Vaults** - Separate Premium HSM-backed vaults for each company's encryption keys
 - **Shared Blob Storage** - Contains encrypted data from all parties
 
-> **Deployment Modes:** By default, containers deploy directly to ACI. With the `-AKS` parameter, containers deploy as pods on AKS virtual nodes that run as ACI container groups — providing Kubernetes orchestration while preserving the full ACI attestation stack. See [AKS Virtual Node Deployment](#aks-virtual-node-deployment--aks) for details.
-
 > **📄 Security Policy Deep Dive:** See [SECURITY-POLICY.md](SECURITY-POLICY.md) for an annotated example of the Confidential Computing Enforcement Policy (ccePolicy) that cryptographically binds each container's identity.
 
 ## Encrypted Data Flow
@@ -93,14 +91,6 @@ Woodgrove Bank demonstrates **trusted multi-party analytics**:
 - **Docker Desktop** - [Download Docker Desktop](https://www.docker.com/products/docker-desktop/) (required for confidential container policy generation)
 - **PowerShell** - Version 7.0+ recommended ([PowerShell 7+ download](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell))
 
-#### Additional Prerequisites for AKS Virtual Node Deployment (`-AKS`)
-
-When using the `-AKS` parameter, the following additional tools are required:
-
-- **kubectl** - Kubernetes CLI ([Install via `az aks install-cli`](https://learn.microsoft.com/cli/azure/aks#az-aks-install-cli))
-- **Helm** - Kubernetes package manager ([Install Helm](https://helm.sh/docs/intro/install/))
-- **Git** - Required to clone the virtual nodes Helm chart repository
-
 ### Azure CLI Extensions
 
 ```powershell
@@ -116,7 +106,7 @@ az confcom --version
 ### Step 1: Build the Container Image
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build
+.\Deploy-MultiFinanceAI.ps1 -Prefix <yourcode> -Build
 ```
 
 > **Prefix**: Use a short, unique identifier (3-8 chars) like your initials (`jd01`), team code (`team42`), or project name (`demo`). This helps identify resource ownership in shared subscriptions.
@@ -134,7 +124,7 @@ This creates:
 ### Step 2: Deploy All Containers
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy
+.\Deploy-MultiFinanceAI.ps1 -Prefix <yourcode> -Deploy
 ```
 
 Deploys three containers:
@@ -147,116 +137,14 @@ Deploys three containers:
 ### Combined Build and Deploy
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
+.\Deploy-MultiFinanceAI.ps1 -Prefix <yourcode> -Build -Deploy
 ```
 
 ### Cleanup All Resources
 
 ```powershell
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Cleanup
+.\Deploy-MultiFinanceAI.ps1 -Prefix <yourcode> -Cleanup
 ```
-
----
-
-## AKS Virtual Node Deployment (`-AKS`)
-
-> **This is a significantly more complex deployment path** compared to direct ACI. Use `-AKS` when you need Kubernetes orchestration while retaining the full ACI confidential computing attestation stack (AMD SEV-SNP TEE + SKR + MAA).
-
-### Why AKS with Virtual Nodes?
-
-The `-AKS` parameter deploys containers as **AKS pods that run on [virtual nodes](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes)**, which transparently schedule workloads as Azure Container Instance (ACI) container groups. This provides:
-
-- **Kubernetes orchestration** — Use `kubectl` to manage pods, view logs, and control the lifecycle
-- **Full ACI attestation** — Pods run as confidential ACI container groups with AMD SEV-SNP hardware protection
-- **Same security model** — Secure Key Release, MAA attestation, and hardware-based isolation are identical to the direct ACI path
-- **Private networking** — Pods communicate over a private VNet (no public FQDNs); external access is via an nginx reverse proxy with a LoadBalancer IP
-
-### AKS Quick Start
-
-```powershell
-# Full pipeline: build image + create AKS cluster + deploy pods
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy -AKS
-```
-
-Or in separate steps:
-
-```powershell
-# Step 1: Build image, create ACR, Key Vaults (same as direct ACI)
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -AKS
-
-# Step 2: Deploy pods on virtual nodes
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy -AKS
-```
-
-### AKS Architecture
-
-The `-AKS` build phase (`-Build -AKS`) creates a 9-step infrastructure on top of the base build:
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        Resource Group                                 │
-│  ┌────────────────────────────────────┐                              │
-│  │  VNet (10.0.0.0/8)                 │                              │
-│  │  ├─ AKS Subnet (10.1.0.0/16)      │  ← Node pool (2x D4s_v4)    │
-│  │  └─ ACI Subnet (10.2.0.0/16)      │  ← Placeholder (addon)      │
-│  └────────────────────────────────────┘                              │
-│                    │ VNet Peering                                     │
-│  ┌────────────────────────────────────┐                              │
-│  │  MC_ Resource Group                │  (AKS-managed)               │
-│  │  ├─ MC VNet (172.16.0.0/16)       │                              │
-│  │  │  └─ ACI Subnet (delegated)     │  ← Pods run here             │
-│  │  ├─ NAT Gateway                    │  ← Outbound for ACI pods    │
-│  │  ├─ Managed Identities (×3)       │  ← Contoso/Fabrikam/Woodgrove│
-│  │  └─ aciconnectorlinux identity    │  ← VN2 uses this identity    │
-│  └────────────────────────────────────┘                              │
-│                                                                       │
-│  AKS Cluster: <prefix>-aks-vnodes                                     │
-│  ├─ 2 system nodes (Standard_D4s_v4)                                 │
-│  ├─ VN2 StatefulSet (vn2 namespace)   ← Virtual kubelet              │
-│  ├─ virtualnode2-0 (registered node)  ← Schedules pods as ACI CGs   │
-│  └─ nginx-proxy (LoadBalancer)        ← External access              │
-│     ├─ :80   → Woodgrove (172.16.x.x)                               │
-│     ├─ :8081 → Contoso  (172.16.x.x)                                │
-│     └─ :8082 → Fabrikam (172.16.x.x)                                │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-#### Key Concepts
-
-1. **Virtual Nodes v2 (VN2)** — A [virtual kubelet](https://virtual-kubelet.io/) implementation from [microsoft/virtualnodesOnAzureContainerInstances](https://github.com/microsoft/virtualnodesOnAzureContainerInstances) that registers as a Kubernetes node. Pods with `nodeSelector: virtualization: virtualnode2` are scheduled onto this virtual node, which creates them as ACI container groups.
-
-2. **aciconnectorlinux identity** — Created automatically by the AKS RP when the `virtual-node` addon is enabled. This managed identity has Contributor on the MC_ resource group, allowing VN2 to create ACI container groups there. The legacy addon is disabled after identity capture; only the identity and its role assignments persist.
-
-3. **MC_ Resource Group networking** — A separate VNet (`172.16.0.0/16`) is created in the MC_ resource group with a delegated ACI subnet and NAT gateway. This VNet is peered with the main VNet so ACI pods can communicate with AKS system pods.
-
-4. **5-Phase Deploy** — The deploy phase is more complex than direct ACI because pod IPs are needed for inter-container routing:
-   - **Phase 1:** Generate Contoso/Fabrikam pod YAMLs + confcom security policies
-   - **Phase 2:** Deploy Contoso/Fabrikam pods, wait for Running, capture pod IPs
-   - **Phase 3:** Generate Woodgrove YAML with partner pod IP URLs + confcom policy
-   - **Phase 4:** Create all 3 HSM keys with multi-party release policies
-   - **Phase 5:** Deploy Woodgrove pod + nginx reverse proxy with LoadBalancer
-
-5. **Nginx reverse proxy** — Virtual node pods are on a private subnet with no public FQDNs. An nginx deployment on a real AKS node with a LoadBalancer service exposes all three containers:
-
-   | Port | Container | Description |
-   |------|-----------|-------------|
-   | `:80` | **Woodgrove Bank** 🏦 | Analytics partner (default) |
-   | `:8081` | **Contoso** 🏢 | Corporate data provider |
-   | `:8082` | **Fabrikam Fashion** 👗 | Online retailer |
-
-   After deployment, access `http://<EXTERNAL-IP>` for Woodgrove, `http://<EXTERNAL-IP>:8081` for Contoso, and `http://<EXTERNAL-IP>:8082` for Fabrikam.
-
-#### Pod YAML and confcom
-
-In AKS mode, confcom uses `az confcom acipolicygen --virtual-node-yaml` instead of ARM template-based policy generation. The security policy is injected as a pod annotation (`microsoft.containerinstance.virtualnode.ccepolicy`) and the SHA256 hash is used for key release policy binding — identical to the direct ACI flow.
-
-### Further Reading (Microsoft Documentation)
-
-- [Virtual nodes in AKS](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes) — Overview of virtual node concepts
-- [Create and configure an AKS cluster to use virtual nodes (CLI)](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes-cli) — Step-by-step CLI guide
-- [Confidential containers on ACI](https://learn.microsoft.com/en-us/azure/container-instances/container-instances-confidential-overview) — AMD SEV-SNP on ACI
-- [Confidential containers on AKS](https://learn.microsoft.com/en-us/azure/aks/confidential-containers-overview) — AKS confidential computing overview
-- [Virtual Nodes v2 Helm chart (GitHub)](https://github.com/microsoft/virtualnodesOnAzureContainerInstances) — The VN2 source repository
 
 ## Command Reference
 
@@ -265,7 +153,6 @@ In AKS mode, confcom uses `az confcom acipolicygen --virtual-node-yaml` instead 
 | `-Prefix <code>` | **REQUIRED.** Short unique identifier (3-8 chars, e.g., `jd01`, `dev`, `team42`) |
 | `-Build` | Build and push container image to ACR (creates RG, ACR, Key Vaults) |
 | `-Deploy` | Deploy all 3 containers (Contoso, Fabrikam Fashion, Woodgrove Bank) |
-| `-AKS` | Deploy to AKS with confidential virtual nodes instead of direct ACI. See [AKS Virtual Node Deployment](#aks-virtual-node-deployment--aks) |
 | `-Cleanup` | Delete all Azure resources in the resource group |
 | `-SkipBrowser` | Don't open Microsoft Edge browser after deployment |
 | `-RegistryName <name>` | Custom ACR name (default: random 8-character string) |
@@ -278,33 +165,22 @@ In AKS mode, confcom uses `az confcom acipolicygen --virtual-node-yaml` instead 
 
 ```powershell
 # Show help and current configuration
-.\Deploy-MultiParty.ps1
+.\Deploy-MultiFinanceAI.ps1
 
 # Build with your initials as prefix
-.\Deploy-MultiParty.ps1 -Prefix jd01 -Build
+.\Deploy-MultiFinanceAI.ps1 -Prefix jd01 -Build
 
 # Build with custom registry name
-.\Deploy-MultiParty.ps1 -Prefix dev -Build -RegistryName "myregistry"
+.\Deploy-MultiFinanceAI.ps1 -Prefix dev -Build -RegistryName "myregistry"
 
 # Deploy and skip browser
-.\Deploy-MultiParty.ps1 -Prefix team42 -Deploy -SkipBrowser
+.\Deploy-MultiFinanceAI.ps1 -Prefix team42 -Deploy -SkipBrowser
 
 # Full workflow: build and deploy
-.\Deploy-MultiParty.ps1 -Prefix acme -Build -Deploy
+.\Deploy-MultiFinanceAI.ps1 -Prefix acme -Build -Deploy
 
 # Delete all resources
-.\Deploy-MultiParty.ps1 -Prefix acme -Cleanup
-
-# --- AKS Virtual Node Examples ---
-
-# Full AKS pipeline: build + create cluster + deploy pods
-.\Deploy-MultiParty.ps1 -Prefix jd01 -Build -Deploy -AKS
-
-# Build image + create AKS cluster (no deploy yet)
-.\Deploy-MultiParty.ps1 -Prefix dev -Build -AKS
-
-# Deploy pods to an existing AKS cluster
-.\Deploy-MultiParty.ps1 -Prefix dev -Deploy -AKS
+.\Deploy-MultiFinanceAI.ps1 -Prefix acme -Cleanup
 ```
 
 ## What You'll See
@@ -322,24 +198,6 @@ After deployment, a browser opens with a 3-pane side-by-side comparison view:
 | ✅ Own data      | ✅ Own data      | ✅ Partner data  |
 +------------------+------------------+------------------+
 ```
-
-### AKS Browser Access
-
-In AKS mode, get the nginx proxy external IP and open each container:
-
-```powershell
-kubectl get svc nginx-proxy
-# NAME          TYPE           EXTERNAL-IP   PORT(S)
-# nginx-proxy   LoadBalancer   <IP>          80,8081,8082
-```
-
-| Container | URL |
-|-----------|-----|
-| **Woodgrove Bank** 🏦 | `http://<EXTERNAL-IP>` |
-| **Contoso** 🏢 | `http://<EXTERNAL-IP>:8081` |
-| **Fabrikam Fashion** 👗 | `http://<EXTERNAL-IP>:8082` |
-
-> In direct ACI mode, each container has its own public FQDN shown at deploy time.
 
 ### Woodgrove Bank Special Features
 
@@ -439,7 +297,7 @@ This is acceptable for a demo with synthetic data, but in production each party 
 
 | File | Description |
 |------|-------------|
-| `Deploy-MultiParty.ps1` | Main deployment script (supports both direct ACI and `-AKS` virtual node modes) |
+| `Deploy-MultiFinanceAI.ps1` | Main deployment script |
 | `app.py` | Flask application with all API endpoints |
 | `Dockerfile` | Multi-stage build with SKR sidecar |
 | `templates/index.html` | Interactive web UI |
@@ -448,11 +306,6 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `deployment-template-original.json` | ARM template for Confidential SKU (direct ACI) |
 | `deployment-template-woodgrove-base.json` | ARM template for Woodgrove with partner env vars (direct ACI) |
 | `deployment-template-standard.json` | ARM template for Standard SKU |
-| `pod-contoso.yaml` | Generated pod YAML for Contoso (AKS mode, created at deploy time) |
-| `pod-fabrikam.yaml` | Generated pod YAML for Fabrikam (AKS mode, created at deploy time) |
-| `pod-woodgrove.yaml` | Generated pod YAML for Woodgrove (AKS mode, created at deploy time) |
-| `nginx-proxy.yaml` | Nginx reverse proxy deployment for AKS LoadBalancer access |
-| `svc-contoso.yaml` | ClusterIP Service for Contoso pod (AKS mode) |
 | `MultiPartyTopology.svg` | High-level topology diagram |
 | `MultiPartyArchitecture.svg` | Detailed architecture diagram |
 | `DataFlowDiagram.svg` | Encrypted data flow diagram showing TEE decryption |
@@ -464,19 +317,49 @@ The Woodgrove Bank dashboard includes an **AI Chat Assistant** powered by Azure 
 
 ### How It Works
 
-1. **Analytics run first** — Partner data is decrypted inside the TEE, and aggregate statistics are computed
-2. **Summary cached** — A structured summary of all analytics (no raw records) is cached in memory
-3. **Chat queries** — The cached summary is sent as system context to Azure OpenAI; the LLM answers questions based only on aggregate data
-4. **Data isolation** — The LLM never sees raw transaction records, individual customer data, or encryption keys. Only pre-computed aggregates leave the TEE boundary via the chat endpoint.
+1. **Analytics run first (no OpenAI involved)** — The SSE streaming pipeline decrypts 1000 records from Contoso + Fabrikam inside the confidential container, then computes all financial analytics (spending by category, hourly patterns, loan insights, top merchants, country breakdowns, age groups, cross-tabulations)
+2. **Summary cached** — At the end of the analytics pipeline, a structured summary dict is cached in memory. This contains only aggregate/statistical data: totals, averages, distributions, and counts — **not** individual transaction records
+3. **User asks a question** — The frontend POSTs to `/partner/chat` with the question (max 500 chars, rate-limited to 10 calls/minute)
+4. **Single API call to Azure OpenAI** — A `chat.completions.create` call is made with two messages:
+   - **System message** — Contains a persona ("You are Woodgrove Bank's financial analytics assistant"), guardrails (only answer from provided data, never fabricate, keep answers concise), and the cached analytics summary serialized as JSON
+   - **User message** — The question verbatim
+5. **Stateless** — Each question is a single-turn call. No conversation history is maintained between questions. Parameters: `gpt-4o-mini`, `max_tokens=800`, `temperature=0.3`
+
+### What Gets Sent to OpenAI
+
+The system prompt includes **only pre-computed aggregates** from the analytics cache:
+
+| Data Category | Example Sent | Never Sent |
+|--------------|-------------|------------|
+| Transaction counts | `total_transactions: 1000` | Individual transaction records |
+| Spend by category | `{"Groceries": 45230.50, "Electronics": 23100.00}` | Card numbers, merchant IDs |
+| Hourly patterns | `{"14": 890, "15": 720}` | Individual timestamps |
+| Loan insights | `{"avg_mortgage_payment": 1850.00}` | Individual loan records |
+| Country aggregates | `{"US": {"total_spend": 800000}}` | Individual customer locations |
+| Partner totals | `{"Contoso": ..., "Fabrikam": ..., "Combined": ...}` | Per-customer spending |
+| Cross-tabulations | `{"groceries_peak_hour": 12}` | Raw correlation data |
+
+The LLM **never** sees: raw transaction records, encryption keys, attestation tokens, security policy hashes, storage connection strings, partner URLs, or individual customer data from Contoso or Fabrikam.
 
 ### Provisioning
 
-The `-Build` phase of `Deploy-MultiFinance.ps1` automatically:
+The `-Build` phase of `Deploy-MultiFinanceAI.ps1` automatically:
 - Creates an Azure OpenAI account (`{prefix}-openai-finance`)
 - Deploys the `gpt-4o-mini` model with GlobalStandard SKU
 - Stores the API key in the Woodgrove Key Vault
 
 No manual Azure OpenAI setup is required.
+
+### OpenAI Connectivity Diagnostics
+
+The dashboard includes built-in diagnostics for verifying the OpenAI connection. After every analytics run, Phase 10 of the SSE stream automatically tests:
+
+1. **DNS resolution** — Resolves the OpenAI endpoint hostname, reports resolved IPs and timing
+2. **TCP connectivity** — Opens a socket to the endpoint on port 443, reports connect time
+3. **API health** — Sends an authenticated `GET` to the deployment endpoint, reports HTTP status
+4. **Live completion test** — Sends a minimal prompt ("Reply with exactly: OK") to verify end-to-end LLM functionality, reports model, reply, timing, and token usage
+
+Results appear in the on-page log with ✓/✗/⚠ indicators. A standalone `/partner/openai-diag` endpoint is also available for on-demand diagnostics.
 
 ### Disabling Chat
 
@@ -505,6 +388,7 @@ If the `AZURE_OPENAI_ENDPOINT` environment variable is empty or unset, the chat 
 | `/debug/test-partner-decrypt` | POST | Test single-record partner decryption with detailed errors |
 | `/partner/chat` | POST | Ask a natural language question about analytics results (requires Azure OpenAI) |
 | `/partner/chat-status` | GET | Check if AI Chat is available (OpenAI configured + analytics cached) |
+| `/partner/openai-diag` | GET | Run full OpenAI connectivity diagnostics (DNS, TCP, API health, completion test) |
 
 ## Troubleshooting
 
@@ -524,7 +408,7 @@ Failed to generate security policy
 ```
 acr-config.json not found. Run with -Build first.
 ```
-**Solution:** Run `.\Deploy-MultiParty.ps1 -Build` before deploying.
+**Solution:** Run `.\Deploy-MultiFinanceAI.ps1 -Build` before deploying.
 
 ### Attestation fails on confidential container
 ```
@@ -544,42 +428,6 @@ SKR sidecar not available
 ```
 **Solution:** Ensure the Woodgrove container is deployed with the correct template that includes partner Key Vault environment variables.
 
-### AKS: VN2 pod stuck in CrashLoopBackOff
-```
-kubectl get pods -n vn2
-```
-**Solution:** Check the VN2 pod logs for identity issues:
-```powershell
-kubectl logs virtualnode2-0 -n vn2 -c proxycri
-kubectl logs virtualnode2-0 -n vn2 -c init-container
-```
-Common causes: the ConfigMap `vn2-azure-creds` has a stale `userAssignedIdentityID` or the aciconnectorlinux identity was deleted. Re-run `-Build -AKS` to recreate.
-
-### AKS: Pods stuck in Pending
-```
-kubectl describe pod <pod-name>
-```
-**Solution:** Verify the virtual node is registered:
-```powershell
-kubectl get nodes -l virtualization=virtualnode2
-```
-If missing, check the VN2 StatefulSet in the `vn2` namespace. The node must show as `Ready` before pods can be scheduled.
-
-### AKS: LinkedAuthorizationFailed
-```
-LinkedAuthorizationFailed ... does not have authorization to perform action 'Microsoft.ManagedIdentity/userAssignedIdentities/assign/action'
-```
-**Solution:** Managed identities must be created in the MC_ resource group (not the main RG) because the aciconnectorlinux identity only has Contributor on MC_. Re-run `-Build -AKS` to create identities in the correct resource group.
-
-### AKS: Key purge permission denied
-```
-Forbidden ... does not have keys/purge permission
-```
-**Solution:** Add purge permission to your Key Vault access policy:
-```powershell
-az keyvault set-policy --name <vault-name> --object-id <your-object-id> --key-permissions get create delete purge release
-```
-
 ## Additional Documentation
 
 - [ATTESTATION.md](ATTESTATION.md) - Technical details about attestation
@@ -594,10 +442,6 @@ az keyvault set-policy --name <vault-name> --object-id <your-object-id> --key-pe
 - [Microsoft Azure Attestation](https://learn.microsoft.com/en-us/azure/attestation/overview)
 - [AMD SEV-SNP](https://www.amd.com/en/developer/sev.html)
 - [az confcom Extension](https://learn.microsoft.com/en-us/cli/azure/confcom)
-- [AKS Virtual Nodes](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes) — Virtual node concepts and architecture
-- [AKS Virtual Nodes CLI Guide](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes-cli) — Step-by-step setup
-- [AKS Confidential Containers Overview](https://learn.microsoft.com/en-us/azure/aks/confidential-containers-overview) — Confidential computing on AKS
-- [Virtual Nodes v2 (GitHub)](https://github.com/microsoft/virtualnodesOnAzureContainerInstances) — VN2 Helm chart source
 
 ## ⚠️ Disclaimer
 

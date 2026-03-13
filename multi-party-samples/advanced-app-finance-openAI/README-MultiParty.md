@@ -186,13 +186,13 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 
 ```powershell
 # Build the container image (first time only)
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build
+.\Deploy-MultiFinanceAI.ps1 -Prefix <yourcode> -Build
 
 # Deploy all 3 containers
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy
+.\Deploy-MultiFinanceAI.ps1 -Prefix <yourcode> -Deploy
 
 # Or build and deploy in one command
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
+.\Deploy-MultiFinanceAI.ps1 -Prefix <yourcode> -Build -Deploy
 ```
 
 > **Note:** Replace `<yourcode>` with a short unique identifier (3-8 chars) like your initials or team code.
@@ -201,7 +201,7 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 
 ```powershell
 # Delete all Azure resources (containers, Key Vault keys)
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Cleanup
+.\Deploy-MultiFinanceAI.ps1 -Prefix <yourcode> -Cleanup
 ```
 
 ## What You'll See
@@ -299,7 +299,7 @@ This means:
 
 | File | Description |
 |------|-------------|
-| `Deploy-MultiParty.ps1` | Main deployment script with -Prefix, -Build, -Deploy, -Cleanup |
+| `Deploy-MultiFinanceAI.ps1` | Main deployment script with -Prefix, -Build, -Deploy, -Cleanup |
 | `app.py` | Flask application with all API endpoints |
 | `Dockerfile` | Multi-stage build with SKR sidecar |
 | `templates/index.html` | Interactive web UI with all demo features |
