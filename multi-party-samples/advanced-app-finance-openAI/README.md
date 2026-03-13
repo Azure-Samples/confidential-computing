@@ -2,7 +2,7 @@
 # Multi-Party Confidential Computing Demo
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** February 2026
+**Last Updated:** March 2026
 
 ## 🤖 AI-Generated Content
 
