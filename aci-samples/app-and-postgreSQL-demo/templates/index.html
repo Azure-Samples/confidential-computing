@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Woodgrove Bank - Confidential PostgreSQL Analytics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a1a; color: #e0e0e0; min-height: 100vh; }
+
+        .header { background: linear-gradient(135deg, #1a1a3e 0%, #2d1b4e 100%); padding: 24px 32px; border-bottom: 2px solid #7c3aed; }
+        .header h1 { font-size: 1.8rem; color: #fff; }
+        .header .subtitle { color: #a78bfa; margin-top: 4px; font-size: 0.95rem; }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+        /* Status Bar */
+        .status-bar { background: #1e1e3a; border-radius: 8px; padding: 16px 24px; margin-bottom: 20px; display: flex; align-items: center; gap: 16px; border: 1px solid #333; }
+        .status-indicator { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+        .status-indicator.green { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+        .status-indicator.yellow { background: #eab308; box-shadow: 0 0 8px #eab308; }
+        .status-indicator.red { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+        .status-indicator.blue { background: #3b82f6; box-shadow: 0 0 8px #3b82f6; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .status-text { font-size: 1rem; }
+
+        /* Progress */
+        .progress-section { display: none; margin-bottom: 20px; }
+        .progress-bar-container { background: #1e1e3a; border-radius: 8px; overflow: hidden; height: 8px; margin-bottom: 8px; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #7c3aed, #3b82f6); transition: width 0.3s; width: 0%; }
+        .progress-text { color: #888; font-size: 0.85rem; }
+
+        /* Buttons */
+        .controls { margin-bottom: 24px; display: flex; gap: 12px; flex-wrap: wrap; }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 600; transition: all 0.2s; }
+        .btn-primary { background: linear-gradient(135deg, #7c3aed, #6d28d9); color: #fff; }
+        .btn-primary:hover { background: linear-gradient(135deg, #8b5cf6, #7c3aed); transform: translateY(-1px); }
+        .btn-primary:disabled { background: #444; cursor: not-allowed; transform: none; }
+        .btn-secondary { background: #2a2a4a; color: #a78bfa; border: 1px solid #7c3aed; }
+
+        /* KPI Cards */
+        .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .kpi-card { background: #1e1e3a; border-radius: 8px; padding: 20px; border: 1px solid #333; }
+        .kpi-card .label { color: #888; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .kpi-card .value { font-size: 1.8rem; font-weight: 700; color: #fff; margin-top: 4px; }
+        .kpi-card .value.purple { color: #a78bfa; }
+        .kpi-card .value.green { color: #22c55e; }
+        .kpi-card .value.blue { color: #60a5fa; }
+
+        /* Charts */
+        .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px; margin-bottom: 24px; }
+        .chart-card { background: #1e1e3a; border-radius: 8px; padding: 20px; border: 1px solid #333; }
+        .chart-card h3 { color: #a78bfa; margin-bottom: 16px; font-size: 1rem; }
+        .chart-card canvas { max-height: 450px; }
+
+        /* Tables */
+        .data-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        .data-table th { text-align: left; padding: 10px 12px; color: #a78bfa; border-bottom: 2px solid #333; font-size: 0.85rem; text-transform: uppercase; }
+        .data-table td { padding: 10px 12px; border-bottom: 1px solid #222; font-size: 0.9rem; }
+        .data-table tr:hover { background: #252545; }
+
+        /* Analytics content (hidden until loaded) */
+        #analytics-content { display: none; }
+
+        /* Health Section */
+        .health-section { background: #1e1e3a; border-radius: 8px; padding: 24px; border: 1px solid #333; margin-top: 24px; }
+        .health-section h2 { color: #a78bfa; margin-bottom: 16px; font-size: 1.2rem; }
+        .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+        .health-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: #151530; border-radius: 6px; }
+        .health-item .label { font-size: 0.9rem; color: #ccc; flex: 1; }
+        .health-item .latency { font-size: 0.8rem; color: #888; }
+        .health-badge { padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .health-badge.ok { background: #052e16; color: #22c55e; }
+        .health-badge.error { background: #450a0a; color: #ef4444; }
+        .health-badge.warn { background: #422006; color: #eab308; }
+
+        .privacy-note { background: #052e16; border: 1px solid #22c55e33; border-radius: 8px; padding: 16px 20px; margin-top: 24px; color: #86efac; font-size: 0.9rem; }
+
+        /* Attestation Section */
+        .attest-section { background: #1e1e3a; border-radius: 8px; padding: 24px; border: 1px solid #333; margin-top: 24px; }
+        .attest-section h2 { color: #a78bfa; margin-bottom: 16px; font-size: 1.2rem; }
+        .attest-section p.desc { color: #888; margin-bottom: 16px; font-size: 0.9rem; line-height: 1.5; }
+        .attest-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+        .btn-attest { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 600; transition: all 0.2s; }
+        .btn-attest.maa { background: linear-gradient(135deg, #0d6efd, #0b5ed7); color: #fff; }
+        .btn-attest.maa:hover { background: linear-gradient(135deg, #3d8bfd, #0d6efd); transform: translateY(-1px); }
+        .btn-attest.skr { background: linear-gradient(135deg, #198754, #157347); color: #fff; }
+        .btn-attest.skr:hover { background: linear-gradient(135deg, #25a06a, #198754); transform: translateY(-1px); }
+        .btn-attest:disabled { background: #444; cursor: not-allowed; transform: none; }
+        .attest-result { margin-top: 16px; }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+        .status-badge.success { background: #052e16; color: #22c55e; }
+        .status-badge.error { background: #450a0a; color: #ef4444; }
+        .output-box { background: #0d0d20; border: 1px solid #333; border-radius: 8px; padding: 16px; margin-top: 12px; max-height: 400px; overflow-y: auto; }
+        .output-box pre { color: #a78bfa; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; }
+        .claim-category { margin-top: 16px; border: 1px solid #333; border-radius: 8px; overflow: hidden; }
+        .claim-category-header { padding: 12px 16px; font-weight: 600; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .claim-category-header .arrow { transition: transform 0.2s; display: inline-block; }
+        .claim-category-header[open] .arrow { transform: rotate(90deg); }
+        .claim-card { padding: 12px 16px; border-top: 1px solid #222; }
+        .claim-card .claim-title { font-weight: 600; color: #e0e0e0; font-size: 0.9rem; }
+        .claim-card .claim-key { font-family: 'Cascadia Code', monospace; font-size: 0.75rem; color: #888; margin-top: 2px; }
+        .claim-card .claim-desc { color: #aaa; font-size: 0.85rem; margin-top: 6px; line-height: 1.4; }
+        .claim-card .claim-detail { color: #60a5fa; font-size: 0.82rem; margin-top: 4px; font-style: italic; }
+        .claim-card .claim-value { font-family: 'Cascadia Code', monospace; font-size: 0.78rem; color: #a78bfa; margin-top: 6px; background: #0d0d20; padding: 6px 10px; border-radius: 4px; word-break: break-all; }
+        details.claim-category > summary { list-style: none; }
+        details.claim-category > summary::-webkit-details-marker { display: none; }
+        .skr-detail-box { padding: 16px; border-radius: 8px; margin-top: 12px; }
+        .skr-detail-box h4 { margin-bottom: 8px; }
+        .skr-detail-box p { margin: 4px 0; font-size: 0.9rem; }
+        .loading-dots::after { content: ''; animation: dots 1.5s steps(4, end) infinite; }
+        @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+
+        /* Log panel */
+        #log-panel { display: none; background: #0d0d20; border: 1px solid #333; border-radius: 8px; padding: 16px; margin-bottom: 20px; max-height: 300px; overflow-y: auto; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.8rem; color: #888; }
+        .log-entry { padding: 2px 0; }
+        .log-entry.info { color: #60a5fa; }
+        .log-entry.success { color: #22c55e; }
+        .log-entry.error { color: #ef4444; }
+
+        @media (max-width: 768px) {
+            .chart-grid { grid-template-columns: 1fr; }
+            .container { padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>&#x1f3e6; Woodgrove Bank &mdash; Confidential PostgreSQL Analytics</h1>
+    <div class="subtitle">AMD SEV-SNP TEE &bull; Azure Confidential Computing &bull; PostgreSQL Flexible Server (DC/EC Series)</div>
+</div>
+
+<div class="container">
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <div class="status-indicator green" id="status-dot"></div>
+        <div class="status-text" id="status-text">Ready &mdash; Click &ldquo;Load Analytics&rdquo; to query the database</div>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-section" id="progress-section">
+        <div class="progress-bar-container"><div class="progress-bar" id="progress-bar"></div></div>
+        <div class="progress-text" id="progress-text">Connecting...</div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <button class="btn btn-primary" id="btn-analyze" onclick="loadAnalytics()">&#x1f4ca; Load Analytics</button>
+        <button class="btn btn-secondary" onclick="toggleLog()">&#x1f4cb; Show Log</button>
+        <button class="btn btn-secondary" onclick="refreshHealth()">&#x2764;&#xfe0f; Refresh Health</button>
+    </div>
+
+    <!-- Log panel -->
+    <div id="log-panel"></div>
+
+    <!-- Analytics Content (hidden until loaded) -->
+    <div id="analytics-content">
+
+        <!-- KPI Cards -->
+        <div class="kpi-row">
+            <div class="kpi-card"><div class="label">Total Transactions</div><div class="value purple" id="kpi-total">-</div></div>
+            <div class="kpi-card"><div class="label">Data Source</div><div class="value blue" id="kpi-source">-</div></div>
+            <div class="kpi-card"><div class="label">Query Time</div><div class="value green" id="kpi-query-time">-</div></div>
+            <div class="kpi-card"><div class="label">Categories</div><div class="value" id="kpi-categories">-</div></div>
+        </div>
+
+        <!-- Loan Insights -->
+        <div class="kpi-row">
+            <div class="kpi-card"><div class="label">Avg Mortgage Payment</div><div class="value green" id="kpi-mortgage">-</div></div>
+            <div class="kpi-card"><div class="label">Avg Car Loan Payment</div><div class="value blue" id="kpi-carloan">-</div></div>
+            <div class="kpi-card"><div class="label">Avg Student Loan</div><div class="value purple" id="kpi-student">-</div></div>
+            <div class="kpi-card"><div class="label">Peak Grocery Hour</div><div class="value" id="kpi-grocery-peak">-</div></div>
+        </div>
+
+        <!-- Charts Row 1 -->
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h3>&#x1f4b3; Spending by Category</h3>
+                <canvas id="chart-category"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>&#x1f553; Transactions by Hour of Day</h3>
+                <canvas id="chart-hourly"></canvas>
+            </div>
+        </div>
+
+        <!-- Charts Row 2 -->
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h3>&#x1f6d2; Grocery Store Visits by Hour</h3>
+                <canvas id="chart-grocery"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>&#x1f4c5; Transactions by Day of Week</h3>
+                <canvas id="chart-dow"></canvas>
+            </div>
+        </div>
+
+        <!-- Charts Row 3 -->
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h3>&#x1f465; Spending by Age Group</h3>
+                <canvas id="chart-age"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>&#x1f30d; Spending by Country</h3>
+                <canvas id="chart-country"></canvas>
+            </div>
+        </div>
+
+        <!-- Top Merchants Table -->
+        <div class="chart-card" style="margin-bottom: 24px;">
+            <h3>&#x1f3ea; Top 10 Merchants</h3>
+            <table class="data-table">
+                <thead><tr><th>Merchant</th><th>Transactions</th><th>Total Spend</th></tr></thead>
+                <tbody id="table-merchants"></tbody>
+            </table>
+        </div>
+
+        <!-- Country Spending Table -->
+        <div class="chart-card" style="margin-bottom: 24px;">
+            <h3>&#x1f5fa;&#xfe0f; Spending by Country</h3>
+            <table class="data-table">
+                <thead><tr><th>Country</th><th>Transactions</th><th>Total Spend</th><th>Avg Transaction</th></tr></thead>
+                <tbody id="table-country"></tbody>
+            </table>
+        </div>
+
+        <!-- Privacy Note -->
+        <div class="privacy-note">
+            &#x1f512; <strong>Confidential Computing:</strong> All data remains inside an AMD SEV-SNP Trusted Execution Environment.
+            The PostgreSQL Flexible Server uses DC/EC series confidential compute SKUs.
+            Data is encrypted at rest, in transit, and in use. No plaintext data ever leaves the TEE boundary.
+        </div>
+    </div>
+
+    <!-- Attestation & Secure Key Release Section -->
+    <div class="attest-section" id="attest-section">
+        <h2>&#x1f6e1;&#xfe0f; Hardware Attestation &amp; Secure Key Release</h2>
+        <p class="desc">
+            Request a <strong>remote attestation token</strong> from Microsoft Azure Attestation (MAA) to cryptographically prove this container runs inside a genuine AMD SEV-SNP Trusted Execution Environment.
+            Then use <strong>Secure Key Release (SKR)</strong> to release an HSM-backed key that is bound to this container's security policy hash &mdash; the key can only be released to an attested, unmodified container.
+        </p>
+        <div class="attest-buttons">
+            <button class="btn-attest maa" id="attestBtn" onclick="requestAttestation()">&#x1f50d; Request MAA Attestation</button>
+            <button class="btn-attest skr" id="skrBtn" onclick="testSecureKeyRelease()">&#x1f510; Secure Key Release</button>
+        </div>
+        <div class="attest-result" id="attestResult"></div>
+        <div class="attest-result" id="skrResult"></div>
+    </div>
+
+    <!-- Health & Connectivity Section -->
+    <div class="health-section" id="health-section">
+        <h2>&#x2764;&#xfe0f; System Health &amp; Connectivity</h2>
+        <div class="health-grid" id="health-grid">
+            <div class="health-item">
+                <div class="label">Loading health data...</div>
+            </div>
+        </div>
+        <div style="margin-top: 12px; color: #666; font-size: 0.8rem;" id="health-timestamp">Last checked: never</div>
+    </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+const logPanel = document.getElementById('log-panel');
+function addLog(msg, level = 'info') {
+    const entry = document.createElement('div');
+    entry.className = 'log-entry ' + level;
+    entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    logPanel.appendChild(entry);
+    logPanel.scrollTop = logPanel.scrollHeight;
+}
+function toggleLog() {
+    logPanel.style.display = logPanel.style.display === 'none' ? 'block' : 'none';
+}
+
+// ---------------------------------------------------------------------------
+// Chart instances (for cleanup on reload)
+// ---------------------------------------------------------------------------
+let charts = {};
+function destroyCharts() {
+    Object.values(charts).forEach(c => c.destroy());
+    charts = {};
+}
+
+const chartColors = {
+    purple: '#a78bfa', blue: '#60a5fa', green: '#22c55e', yellow: '#eab308',
+    pink: '#ec4899', cyan: '#06b6d4', orange: '#f97316', red: '#ef4444',
+    lime: '#84cc16', teal: '#14b8a6',
+};
+const palette = Object.values(chartColors);
+
+const defaultChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#888' } } },
+    scales: {
+        x: { ticks: { color: '#888' }, grid: { color: '#222' } },
+        y: { ticks: { color: '#888' }, grid: { color: '#222' } }
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Status helpers
+// ---------------------------------------------------------------------------
+function setStatus(text, color) {
+    document.getElementById('status-text').textContent = text;
+    const dot = document.getElementById('status-dot');
+    dot.className = 'status-indicator ' + color;
+}
+function setProgress(pct, text) {
+    const section = document.getElementById('progress-section');
+    section.style.display = 'block';
+    document.getElementById('progress-bar').style.width = pct + '%';
+    document.getElementById('progress-text').textContent = text;
+}
+
+// ---------------------------------------------------------------------------
+// Load Analytics via SSE
+// ---------------------------------------------------------------------------
+function loadAnalytics() {
+    const btn = document.getElementById('btn-analyze');
+    btn.disabled = true;
+    setStatus('Querying PostgreSQL database...', 'blue');
+    addLog('Starting analytics query via SSE stream...', 'info');
+    destroyCharts();
+
+    const es = new EventSource('/db/analytics-stream');
+    es.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        if (data.phase === 'complete') {
+            es.close();
+            addLog(`Analytics loaded: ${data.total_transactions} transactions in ${data.query_time_ms}ms`, 'success');
+            setStatus(`Analytics loaded — ${data.total_transactions.toLocaleString()} transactions from ${data.data_source}`, 'green');
+            document.getElementById('progress-section').style.display = 'none';
+            renderAnalytics(data);
+            btn.disabled = false;
+        } else if (data.phase === 'error') {
+            es.close();
+            addLog('Error: ' + (data.error || 'Unknown'), 'error');
+            setStatus('Error loading analytics', 'red');
+            document.getElementById('progress-section').style.display = 'none';
+            btn.disabled = false;
+        } else {
+            setProgress(data.progress, data.phase);
+            addLog(data.phase, 'info');
+        }
+    };
+    es.onerror = function() {
+        es.close();
+        addLog('SSE connection error', 'error');
+        setStatus('Connection error', 'red');
+        document.getElementById('progress-section').style.display = 'none';
+        btn.disabled = false;
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Render Analytics
+// ---------------------------------------------------------------------------
+function renderAnalytics(data) {
+    document.getElementById('analytics-content').style.display = 'block';
+
+    // KPIs
+    document.getElementById('kpi-total').textContent = data.total_transactions.toLocaleString();
+    document.getElementById('kpi-source').textContent = data.data_source || 'PostgreSQL';
+    document.getElementById('kpi-query-time').textContent = data.query_time_ms + ' ms';
+    document.getElementById('kpi-categories').textContent = data.spend_by_category.length;
+
+    const li = data.loan_insights;
+    document.getElementById('kpi-mortgage').textContent = '$' + (li.avg_mortgage_payment || 0).toLocaleString(undefined, {minimumFractionDigits: 2});
+    document.getElementById('kpi-carloan').textContent = '$' + (li.avg_car_loan_payment || 0).toLocaleString(undefined, {minimumFractionDigits: 2});
+    document.getElementById('kpi-student').textContent = '$' + (li.avg_student_loan_payment || 0).toLocaleString(undefined, {minimumFractionDigits: 2});
+    document.getElementById('kpi-grocery-peak').textContent = data.peak_grocery_hour !== null ? data.peak_grocery_hour + ':00' : 'N/A';
+
+    // 1. Spend by Category (horizontal bar — logarithmic scale for wide value ranges)
+    const catData = data.spend_by_category.slice(0, 10);
+    charts.category = new Chart(document.getElementById('chart-category'), {
+        type: 'bar',
+        data: {
+            labels: catData.map(c => c.category),
+            datasets: [{
+                label: 'Total Spend',
+                data: catData.map(c => c.total_spend),
+                backgroundColor: palette.slice(0, catData.length),
+            }]
+        },
+        options: {
+            ...defaultChartOptions,
+            indexAxis: 'y',
+            scales: {
+                x: { type: 'logarithmic', ticks: { color: '#888', callback: v => '$' + v.toLocaleString() }, grid: { color: '#222' } },
+                y: { ticks: { color: '#888' }, grid: { color: '#222' } }
+            },
+            plugins: { ...defaultChartOptions.plugins, tooltip: { callbacks: { label: ctx => '$' + ctx.raw.toLocaleString(undefined, {minimumFractionDigits: 2}) } } }
+        }
+    });
+
+    // 2. Transactions by Hour (line)
+    charts.hourly = new Chart(document.getElementById('chart-hourly'), {
+        type: 'line',
+        data: {
+            labels: data.transactions_by_hour.map(h => h.hour + ':00'),
+            datasets: [{
+                label: 'Transactions',
+                data: data.transactions_by_hour.map(h => h.count),
+                borderColor: chartColors.purple,
+                backgroundColor: chartColors.purple + '33',
+                fill: true, tension: 0.3,
+            }]
+        },
+        options: defaultChartOptions
+    });
+
+    // 3. Grocery by Hour (bar with peak highlighted)
+    const groceryColors = data.grocery_by_hour.map(h =>
+        h.hour === data.peak_grocery_hour ? chartColors.green : chartColors.blue + '88'
+    );
+    charts.grocery = new Chart(document.getElementById('chart-grocery'), {
+        type: 'bar',
+        data: {
+            labels: data.grocery_by_hour.map(h => h.hour + ':00'),
+            datasets: [{
+                label: 'Grocery Visits',
+                data: data.grocery_by_hour.map(h => h.count),
+                backgroundColor: groceryColors,
+            }]
+        },
+        options: defaultChartOptions
+    });
+
+    // 4. Day of Week (bar)
+    charts.dow = new Chart(document.getElementById('chart-dow'), {
+        type: 'bar',
+        data: {
+            labels: data.transactions_by_day.map(d => d.day),
+            datasets: [{
+                label: 'Transactions',
+                data: data.transactions_by_day.map(d => d.count),
+                backgroundColor: palette.slice(0, 7),
+            }]
+        },
+        options: defaultChartOptions
+    });
+
+    // 5. Age Group (bar)
+    charts.age = new Chart(document.getElementById('chart-age'), {
+        type: 'bar',
+        data: {
+            labels: data.age_group_insights.map(a => a.age_group),
+            datasets: [{
+                label: 'Total Spend',
+                data: data.age_group_insights.map(a => a.total_spend),
+                backgroundColor: chartColors.purple + 'aa',
+            }, {
+                label: 'Avg Transaction',
+                data: data.age_group_insights.map(a => a.avg_transaction),
+                backgroundColor: chartColors.green + 'aa',
+            }]
+        },
+        options: defaultChartOptions
+    });
+
+    // 6. Country Spending (horizontal bar — logarithmic scale for wide value ranges)
+    const countryData = data.spending_by_country.slice(0, 10);
+    charts.country = new Chart(document.getElementById('chart-country'), {
+        type: 'bar',
+        data: {
+            labels: countryData.map(c => c.country),
+            datasets: [{
+                label: 'Total Spend',
+                data: countryData.map(c => c.total_spend),
+                backgroundColor: palette.slice(0, countryData.length),
+            }]
+        },
+        options: {
+            ...defaultChartOptions,
+            indexAxis: 'y',
+            scales: {
+                x: { type: 'logarithmic', ticks: { color: '#888', callback: v => '$' + v.toLocaleString() }, grid: { color: '#222' } },
+                y: { ticks: { color: '#888' }, grid: { color: '#222' } }
+            },
+            plugins: { ...defaultChartOptions.plugins, tooltip: { callbacks: { label: ctx => '$' + ctx.raw.toLocaleString(undefined, {minimumFractionDigits: 2}) } } }
+        }
+    });
+
+    // Top Merchants Table
+    const merchantTbody = document.getElementById('table-merchants');
+    merchantTbody.innerHTML = data.top_merchants.map(m =>
+        `<tr><td>${m.merchant}</td><td>${m.transaction_count}</td><td>$${m.total_spend.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>`
+    ).join('');
+
+    // Country Spending Table
+    const countryTbody = document.getElementById('table-country');
+    countryTbody.innerHTML = data.spending_by_country.map(c =>
+        `<tr><td>${c.country}</td><td>${c.transaction_count}</td><td>$${c.total_spend.toLocaleString(undefined, {minimumFractionDigits: 2})}</td><td>$${c.avg_transaction.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>`
+    ).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Attestation & Secure Key Release
+// ---------------------------------------------------------------------------
+function getClaimExplanation(key, value) {
+    const explanations = {
+        // JWT Standard
+        'exp': { icon: '⏰', title: 'Token Expiration', desc: 'Unix timestamp after which this attestation token is no longer valid. Prevents replay attacks by ensuring tokens have a limited lifetime.', category: 'JWT Standard' },
+        'iat': { icon: '📅', title: 'Token Issued At', desc: 'When Microsoft Azure Attestation (MAA) created and signed this token.', category: 'JWT Standard' },
+        'iss': { icon: '🏛️', title: 'Token Issuer', desc: 'The MAA endpoint URL that issued this token. Relying parties verify the issuer matches the expected attestation provider.', category: 'JWT Standard' },
+        'jti': { icon: '🆔', title: 'JWT Token ID', desc: 'Unique identifier for this specific token. Each attestation request produces a new token with a unique ID to prevent replay.', category: 'JWT Standard' },
+        'nbf': { icon: '⏳', title: 'Not Valid Before', desc: 'Earliest time at which this token should be considered valid.', category: 'JWT Standard' },
+
+        // Request Binding
+        'nonce': { icon: '🎲', title: 'Attestation Nonce', desc: 'Random value from the client request. Proves this token was generated in response to THIS specific request, not a previous one.', category: 'Request Binding' },
+        'x-ms-runtime': { icon: '📦', title: 'Runtime Data', desc: 'Custom data from the application included in the signed token. Binds application context to hardware attestation.', category: 'Request Binding' },
+        'x-ms-sevsnpvm-reportdata': { icon: '📋', title: 'Report Data', desc: '64-byte field set by the guest at attestation time. Included in the hardware-signed SNP report.', category: 'Request Binding' },
+
+        // Platform Identity
+        'x-ms-attestation-type': { icon: '🔐', title: 'Attestation Type', desc: '"sevsnpvm" confirms AMD SEV-SNP hardware attestation was used — the gold standard for confidential computing verification.', category: 'Platform Identity' },
+        'x-ms-compliance-status': { icon: '✅', title: 'Compliance Status', desc: '"azure-compliant-uvm" means Microsoft has verified the Utility VM image meets Azure security standards.', category: 'Platform Identity' },
+        'x-ms-policy-hash': { icon: '📜', title: 'MAA Policy Hash', desc: 'Hash of the attestation policy that was enforced when generating this token. Ensures consistent policy evaluation.', category: 'Platform Identity' },
+
+        // Container Identity — CRITICAL
+        'x-ms-sevsnpvm-hostdata': { icon: '🔒', title: 'Host Data (Security Policy Hash)', desc: 'SHA256 hash of the container security policy (ccePolicy). This is the CRITICAL binding point — it uniquely identifies the approved container code and configuration. Any modification to the container image, environment variables, or configuration would change this hash.', detail: '🔑 This value is used in SKR key release policies to bind encryption keys to this specific container. Only a container with this exact policy hash can release the HSM key.', category: 'Container Identity' },
+        'x-ms-sevsnpvm-launchmeasurement': { icon: '📏', title: 'Launch Measurement', desc: 'SHA384 hash of the VM\'s initial memory contents at launch. Hardware-rooted proof of what code is running — tamper-evident and unforgeable.', category: 'Container Identity' },
+
+        // SEV-SNP Identity
+        'x-ms-sevsnpvm-idkeydigest': { icon: '🔑', title: 'ID Key Digest', desc: 'SHA384 hash of AMD\'s ID signing key for this processor. Can be verified against AMD\'s published root certificates.', category: 'SEV-SNP Identity' },
+        'x-ms-sevsnpvm-authorkeydigest': { icon: '✍️', title: 'Author Key Digest', desc: 'Hash of the author signing key. All zeros indicates the default (unsigned) author key was used.', category: 'SEV-SNP Identity' },
+        'x-ms-sevsnpvm-reportid': { icon: '🏷️', title: 'Report ID', desc: 'Unique identifier for this VM instance within the SNP platform. Each VM gets a distinct report ID.', category: 'SEV-SNP Identity' },
+        'x-ms-sevsnpvm-imageId': { icon: '🖼️', title: 'VM Image ID', desc: '16-byte identifier set by the hypervisor for this VM image.', category: 'SEV-SNP Identity' },
+        'x-ms-sevsnpvm-familyId': { icon: '👨\u200d👩\u200d👧\u200d👦', title: 'VM Family ID', desc: 'Groups related VMs together, allowing migration and key sharing within the same family.', category: 'SEV-SNP Identity' },
+
+        // Hardware Identity
+        'x-ms-sevsnpvm-chip-family': { icon: '🖥️', title: 'CPU Chip Family', desc: 'AMD EPYC chip generation. "Milan" = 3rd Gen EPYC (Zen 3), "Genoa" = 4th Gen EPYC (Zen 4). Identifies the physical CPU platform.', category: 'Hardware Identity' },
+        'x-ms-sevsnpvm-chipid': { icon: '🔖', title: 'Chip Unique ID', desc: '64-byte cryptographic identifier unique to this physical processor chip. Can verify the exact hardware running your workload.', category: 'Hardware Identity' },
+
+        // Version Claims (Security Patching)
+        'x-ms-sevsnpvm-bootloader-svn': { icon: '🔄', title: 'Bootloader SVN', desc: 'Security Version Number for the bootloader. Higher values indicate more recent security patches.', category: 'Version Claims' },
+        'x-ms-sevsnpvm-guestsvn': { icon: '🔄', title: 'Guest SVN', desc: 'Guest VM firmware security version number.', category: 'Version Claims' },
+        'x-ms-sevsnpvm-microcode-svn': { icon: '🔄', title: 'Microcode SVN', desc: 'CPU microcode patch level. Critical for mitigating CPU-level vulnerabilities.', category: 'Version Claims' },
+        'x-ms-sevsnpvm-snpfw-svn': { icon: '🔄', title: 'SNP Firmware SVN', desc: 'AMD SEV-SNP firmware version. Ensures the TEE platform firmware is up to date.', category: 'Version Claims' },
+        'x-ms-sevsnpvm-tee-svn': { icon: '🔄', title: 'TEE SVN', desc: 'Overall TEE platform security version number.', category: 'Version Claims' },
+
+        // Hardware Security Features
+        'x-ms-sevsnpvm-ciphertext-hiding-dram-enabled': { icon: '🛡️', title: 'Ciphertext Hiding (DRAM)', desc: 'When enabled, obfuscates encrypted memory patterns in DRAM to protect against physical side-channel attacks.', category: 'Security Features' },
+        'x-ms-sevsnpvm-mem-aes256-xts-required': { icon: '🔐', title: 'AES-256-XTS Required', desc: 'Whether stronger AES-256-XTS encryption is required for memory (vs AES-128-XTS).', category: 'Security Features' },
+        'x-ms-sevsnpvm-smt-allowed': { icon: '🧵', title: 'SMT (Hyperthreading)', desc: 'Whether Simultaneous Multi-Threading is allowed. SMT can enable certain side-channel attacks but improves performance.', category: 'Security Features' },
+        'x-ms-sevsnpvm-singlesocket': { icon: '💻', title: 'Single Socket', desc: 'Whether this is a single-socket platform. Multi-socket systems have different security considerations.', category: 'Security Features' },
+
+        // Security State — CRITICAL
+        'x-ms-sevsnpvm-is-debuggable': { icon: '🐛', title: 'Debuggable', desc: 'CRITICAL: Must be false. If true, the hypervisor can inspect TEE memory, completely bypassing confidential computing protections. A debuggable TEE offers NO confidentiality guarantees.', category: 'Security State' },
+        'x-ms-sevsnpvm-migration-allowed': { icon: '🚚', title: 'Migration Allowed', desc: 'Whether live VM migration is permitted. When false, the VM is pinned to the current physical host.', category: 'Security State' },
+
+        // Metadata
+        'x-ms-sevsnpvm-vmpl': { icon: '📊', title: 'VM Privilege Level', desc: 'Virtual Machine Privilege Level (0-3). Level 0 is most privileged (firmware), Level 1+ = guest OS/app.', category: 'Metadata' },
+        'x-ms-ver': { icon: 'ℹ️', title: 'Schema Version', desc: 'Attestation token schema version.', category: 'Metadata' },
+    };
+    return explanations[key] || { icon: '❓', title: key, desc: 'Custom or undocumented attestation claim.', category: 'Other' };
+}
+
+function renderClaimExplanations(payload) {
+    const categoryOrder = ['Platform Identity', 'Container Identity', 'Security State', 'Security Features', 'SEV-SNP Identity', 'Hardware Identity', 'Version Claims', 'Request Binding', 'JWT Standard', 'Metadata', 'Other'];
+    const categoryColors = {
+        'Platform Identity': '#7c3aed', 'Container Identity': '#0d6efd', 'Security State': '#ef4444',
+        'Security Features': '#f97316', 'SEV-SNP Identity': '#06b6d4', 'Hardware Identity': '#14b8a6',
+        'Version Claims': '#84cc16', 'Request Binding': '#eab308', 'JWT Standard': '#6b7280',
+        'Metadata': '#6b7280', 'Other': '#6b7280',
+    };
+    const categoryIcons = {
+        'Platform Identity': '🏛️', 'Container Identity': '🔒', 'Security State': '🚨',
+        'Security Features': '🛡️', 'SEV-SNP Identity': '🔑', 'Hardware Identity': '🖥️',
+        'Version Claims': '🔄', 'Request Binding': '🎯', 'JWT Standard': '📋', 'Metadata': 'ℹ️', 'Other': '❓',
+    };
+
+    // Group claims by category
+    const grouped = {};
+    for (const [key, value] of Object.entries(payload)) {
+        const info = getClaimExplanation(key, value);
+        const cat = info.category || 'Other';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push({ key, value, info });
+    }
+
+    let html = '';
+    for (const cat of categoryOrder) {
+        if (!grouped[cat] || grouped[cat].length === 0) continue;
+        const color = categoryColors[cat] || '#6b7280';
+        const icon = categoryIcons[cat] || '❓';
+        html += `<details class="claim-category" ${cat === 'Container Identity' || cat === 'Security State' || cat === 'Platform Identity' ? 'open' : ''}>`;
+        html += `<summary class="claim-category-header" style="background: linear-gradient(135deg, ${color}22, ${color}11);">`;
+        html += `<span class="arrow">▶</span> ${icon} ${cat} <span style="color: #888; font-weight: 400; margin-left: 8px;">(${grouped[cat].length} claims)</span></summary>`;
+        for (const { key, value, info } of grouped[cat]) {
+            const displayVal = typeof value === 'string' && value.length > 80 ? value.substring(0, 80) + '...' : JSON.stringify(value);
+            html += `<div class="claim-card">`;
+            html += `<div class="claim-title">${info.icon} ${info.title}</div>`;
+            html += `<div class="claim-key">${key}</div>`;
+            html += `<div class="claim-desc">${info.desc}</div>`;
+            if (info.detail) html += `<div class="claim-detail">${info.detail}</div>`;
+            html += `<div class="claim-value">${displayVal}</div>`;
+            html += `</div>`;
+        }
+        html += `</details>`;
+    }
+    return html;
+}
+
+function requestAttestation() {
+    const btn = document.getElementById('attestBtn');
+    const resultDiv = document.getElementById('attestResult');
+    btn.disabled = true;
+    btn.innerHTML = '&#x1f50d; Requesting Attestation<span class="loading-dots"></span>';
+    resultDiv.innerHTML = '';
+    addLog('Requesting MAA attestation token...', 'info');
+
+    fetch('/skr/config').then(r => r.json()).then(config => {
+        const maaEndpoint = config.maa_endpoint || 'sharedeus.eus.attest.azure.net';
+        return fetch('/attest/maa', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                maa_endpoint: maaEndpoint,
+                runtime_data: btoa(JSON.stringify({ timestamp: new Date().toISOString(), demo: 'Confidential PostgreSQL Finance Demo' }))
+            })
+        });
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '&#x1f50d; Request MAA Attestation';
+        if (data.status === 'success') {
+            addLog('Attestation successful! Parsing JWT claims...', 'success');
+            const parts = data.attestation_token.split('.');
+            let payload;
+            try {
+                payload = JSON.parse(atob(parts[1]));
+            } catch(e) {
+                payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+            }
+
+            let html = '<div style="margin-top: 16px;">';
+            html += '<p><span class="status-badge success">&#x2705; Attestation Successful</span></p>';
+            html += '<p style="margin: 12px 0; color: #888;"><strong style="color: #e0e0e0;">MAA Endpoint:</strong> ' + data.maa_endpoint + '</p>';
+            html += '<p style="margin: 12px 0; color: #888;"><strong style="color: #e0e0e0;">Raw Token Claims:</strong></p>';
+            html += '<div class="output-box"><pre>' + JSON.stringify(payload, null, 2) + '</pre></div>';
+            html += '<h3 style="margin-top: 20px; color: #a78bfa; font-size: 1rem;">&#x1f4d6; Detailed Claim Explanations</h3>';
+            html += renderClaimExplanations(payload);
+            html += '</div>';
+            resultDiv.innerHTML = html;
+
+            // Wire up details toggle arrow rotation
+            document.querySelectorAll('details.claim-category').forEach(d => {
+                d.addEventListener('toggle', () => {
+                    const arrow = d.querySelector('.arrow');
+                    if (arrow) arrow.style.transform = d.open ? 'rotate(90deg)' : 'rotate(0deg)';
+                });
+            });
+        } else {
+            addLog('Attestation failed: ' + (data.failure_reason || data.message), 'error');
+            let html = '<div style="margin-top: 16px;">';
+            html += '<p><span class="status-badge error">&#x274c; Attestation Failed</span></p>';
+            html += '<p style="margin: 12px 0; color: #ef4444;"><strong>Reason:</strong> ' + (data.failure_reason || data.message) + '</p>';
+            if (data.diagnosis) {
+                html += '<p style="margin: 8px 0; color: #eab308;"><strong>Likely Cause:</strong> ' + data.diagnosis.likely_cause + '</p>';
+                html += '<p style="margin: 8px 0; color: #22c55e;"><strong>Solution:</strong> ' + data.diagnosis.solution + '</p>';
+            }
+            if (data.sidecar_response) {
+                html += '<div class="output-box"><pre>' + data.sidecar_response + '</pre></div>';
+            }
+            html += '</div>';
+            resultDiv.innerHTML = html;
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '&#x1f50d; Request MAA Attestation';
+        addLog('Attestation request error: ' + err, 'error');
+        resultDiv.innerHTML = '<p><span class="status-badge error">&#x274c; Request Failed</span></p><p style="color: #ef4444; margin-top: 8px;">' + err + '</p>';
+    });
+}
+
+function testSecureKeyRelease() {
+    const btn = document.getElementById('skrBtn');
+    const resultDiv = document.getElementById('skrResult');
+    btn.disabled = true;
+    btn.innerHTML = '&#x1f510; Releasing Key<span class="loading-dots"></span>';
+    resultDiv.innerHTML = '';
+    addLog('Requesting Secure Key Release...', 'info');
+
+    fetch('/skr/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '&#x1f510; Secure Key Release';
+        if (data.status === 'success') {
+            addLog('Secure Key Release successful!', 'success');
+            let html = '<div style="margin-top: 16px;">';
+            html += '<p><span class="status-badge success">&#x2705; Secure Key Release Successful</span></p>';
+
+            // Key details
+            html += '<div class="skr-detail-box" style="background: #052e16; border: 1px solid #22c55e33;">';
+            html += '<h4 style="color: #22c55e;">&#x1f511; Key Release Details</h4>';
+            html += '<p><strong style="color: #e0e0e0;">Key Vault:</strong> <span style="color: #86efac;">' + (data.akv_endpoint || 'N/A') + '</span></p>';
+            html += '<p><strong style="color: #e0e0e0;">Key Name:</strong> <span style="color: #86efac;">' + (data.key_name || 'N/A') + '</span></p>';
+            html += '<p><strong style="color: #e0e0e0;">MAA Endpoint:</strong> <span style="color: #86efac;">' + (data.maa_endpoint || 'N/A') + '</span></p>';
+            html += '</div>';
+
+            // Release policy
+            if (data.release_policy) {
+                html += '<div class="skr-detail-box" style="background: #0c1929; border: 1px solid #3b82f633; margin-top: 12px;">';
+                html += '<h4 style="color: #60a5fa;">&#x1f6e1;&#xfe0f; Key Release Policy Verified</h4>';
+                html += '<p><strong style="color: #e0e0e0;">Attestation Authority:</strong> <span style="color: #93c5fd;">' + (data.release_policy.maa_endpoint || 'N/A') + '</span></p>';
+                if (data.release_policy.required_claims) {
+                    html += '<p style="margin-top: 8px;"><strong style="color: #e0e0e0;">Required Claims Verified:</strong></p>';
+                    html += '<ul style="margin: 8px 0; padding-left: 20px;">';
+                    data.release_policy.required_claims.forEach(claim => {
+                        const shortVal = claim.value && claim.value.length > 24 ? claim.value.substring(0, 24) + '...' : (claim.value || 'N/A');
+                        html += '<li style="margin: 6px 0;"><code style="color: #a78bfa;">' + claim.claim + '</code> = <strong style="color: #93c5fd;">' + shortVal + '</strong>';
+                        html += '<br><span style="color: #888; font-size: 0.85rem;">' + claim.description + '</span></li>';
+                    });
+                    html += '</ul>';
+                }
+                html += '</div>';
+            }
+
+            // Released key
+            if (data.key) {
+                html += '<p style="margin-top: 12px;"><strong style="color: #e0e0e0;">Released Key (JWK format):</strong></p>';
+                html += '<div class="output-box"><pre>' + JSON.stringify(data.key, null, 2) + '</pre></div>';
+            }
+
+            html += '</div>';
+            resultDiv.innerHTML = html;
+
+            // Update health to reflect released key
+            refreshHealth();
+        } else {
+            addLog('SKR failed: ' + (data.failure_reason || data.message), 'error');
+            let html = '<div style="margin-top: 16px;">';
+            html += '<p><span class="status-badge error">&#x274c; Secure Key Release Failed</span></p>';
+            html += '<p style="margin: 12px 0; color: #ef4444;"><strong>Reason:</strong> ' + (data.failure_reason || data.message) + '</p>';
+            if (data.sidecar_response) {
+                html += '<div class="output-box"><pre>' + data.sidecar_response + '</pre></div>';
+            }
+            html += '</div>';
+            resultDiv.innerHTML = html;
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '&#x1f510; Secure Key Release';
+        addLog('SKR request error: ' + err, 'error');
+        resultDiv.innerHTML = '<p><span class="status-badge error">&#x274c; Request Failed</span></p><p style="color: #ef4444; margin-top: 8px;">' + err + '</p>';
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Health Check
+// ---------------------------------------------------------------------------
+function refreshHealth() {
+    addLog('Refreshing health endpoints...', 'info');
+    fetch('/health/endpoints')
+        .then(r => r.json())
+        .then(data => renderHealth(data))
+        .catch(e => {
+            addLog('Health check failed: ' + e, 'error');
+            document.getElementById('health-grid').innerHTML = '<div class="health-item"><div class="label">Failed to load health data</div><span class="health-badge error">ERROR</span></div>';
+        });
+}
+
+function renderHealth(data) {
+    const grid = document.getElementById('health-grid');
+    let html = '';
+
+    // TEE status
+    html += healthItem('AMD SEV-SNP TEE', data.tee?.available ? 'ok' : 'warn',
+        data.tee?.available ? 'Confidential Hardware' : 'Standard (No TEE)');
+
+    // Sidecar
+    html += healthItem('SKR Sidecar', data.sidecar?.status || 'error',
+        data.sidecar?.latency_ms ? data.sidecar.latency_ms + ' ms' : '');
+
+    // SKR config
+    html += healthItem('Secure Key Release', data.skr?.key_released ? 'ok' : (data.skr?.configured ? 'warn' : 'error'),
+        data.skr?.key_released ? 'Key Released' : (data.skr?.configured ? 'Configured (not released)' : 'Not Configured'));
+
+    // Database
+    html += healthItem('PostgreSQL Database', data.database?.status || 'error',
+        data.database?.latency_ms ? data.database.latency_ms + ' ms (' + (data.database.transaction_count || 0) + ' rows)' : (data.database?.message || ''));
+
+    // Avg DB latency
+    if (data.database_avg_latency_ms) {
+        html += healthItem('Database Avg Latency (3 pings)', 'ok', data.database_avg_latency_ms + ' ms');
+    }
+
+    // API endpoints
+    if (data.api_endpoints) {
+        data.api_endpoints.forEach(ep => {
+            html += healthItem(ep.name + ' (' + ep.path + ')', ep.status,
+                ep.latency_ms ? ep.latency_ms + ' ms' : (ep.message || ''));
+        });
+    }
+
+    grid.innerHTML = html;
+    document.getElementById('health-timestamp').textContent = 'Last checked: ' + new Date().toLocaleTimeString();
+    addLog('Health check complete', 'success');
+}
+
+function healthItem(label, status, detail) {
+    const badgeClass = status === 'ok' ? 'ok' : (status === 'warn' ? 'warn' : 'error');
+    const badgeText = status === 'ok' ? 'OK' : (status === 'warn' ? 'WARN' : 'ERROR');
+    return `<div class="health-item">
+        <div class="label">${label}</div>
+        <div class="latency">${detail || ''}</div>
+        <span class="health-badge ${badgeClass}">${badgeText}</span>
+    </div>`;
+}
+
+// Auto-refresh health every 30 seconds
+setInterval(refreshHealth, 30000);
+
+// Initial health check on page load
+document.addEventListener('DOMContentLoaded', refreshHealth);
+</script>
+</body>
+</html>

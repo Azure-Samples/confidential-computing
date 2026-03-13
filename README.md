@@ -70,6 +70,11 @@ Azure Container Instances with AMD SEV-SNP confidential computing:
   - Side-by-side comparison mode (Confidential vs Standard SKU)
   - Real-time encryption with SKR-released keys
   - Live diagnostics and TEE hardware detection
+- **[App + PostgreSQL Demo](/aci-samples/app-and-postgreSQL-demo/README.md)** - Basic confidential container app with hardware-enforced AMD SEV-SNP security and container policy, connected to a DCa/ECa AMD PostgreSQL Flexible Server with confidential compute protections
+  - Single-container Flask dashboard with 5,000 financial transactions
+  - Application Gateway (L7) → Private VNet → Confidential ACI → PostgreSQL (DCa/ECa AMD)
+  - Remote attestation (MAA) with detailed claim explanations and Secure Key Release (SKR)
+  - 9 documented threat scenarios with specific mitigations
 
 ### [Multi-Party Samples](/multi-party-samples/README.md) ⭐ FEATURED
 Secure multi-party computation demonstrations with Azure Confidential Containers. Two versions available:
