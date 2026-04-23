@@ -30,6 +30,10 @@
 #       Connect-MgGraph -Tenant <TENANT_ID> -Scopes Application.ReadWrite.All
 #       New-MgServicePrincipal -AppId bf7b6499-ff71-4aa2-97a4-f372087be7f0 `
 #           -DisplayName "Confidential VM Orchestrator"
+#   - CVM backup preview feature registered per subscription (script handles this automatically):
+#       Register-AzProviderFeature -FeatureName "RestorePointSupportForConfidentialVMV2" `
+#           -ProviderNamespace "Microsoft.Compute"
+#   See: https://learn.microsoft.com/en-us/azure/backup/confidential-vm-backup
 #
 # Use at your own risk, no warranties implied, test in a non-production environment first.
 
@@ -123,10 +127,35 @@ Write-Host "====================================================================
 # ---------------------------------------------------------------------------
 # Azure context
 # ---------------------------------------------------------------------------
-Write-Host "`n[1/9] Setting Azure context..." -ForegroundColor Cyan
+Write-Host "`n[1/9] Setting Azure context and registering preview feature..." -ForegroundColor Cyan
 Set-AzContext -SubscriptionId $subsID | Out-Null
 $ownername = (Get-AzContext).Account.Id
 Write-Host "      Logged in as: $ownername" -ForegroundColor Green
+
+# Register the CVM backup preview feature (auto-approved; required per MS docs)
+# https://learn.microsoft.com/en-us/azure/backup/confidential-vm-backup#prerequisites
+Register-AzProviderFeature -FeatureName "RestorePointSupportForConfidentialVMV2" `
+    -ProviderNamespace "Microsoft.Compute" | Out-Null
+Register-AzResourceProvider -ProviderNamespace "Microsoft.RecoveryServices" | Out-Null
+Register-AzResourceProvider -ProviderNamespace "Microsoft.Compute" | Out-Null
+
+# Wait for feature registration (auto-approved, typically completes within seconds to minutes)
+$featureWaitSeconds = 0
+do {
+    if ($featureWaitSeconds -gt 0) { Start-Sleep -Seconds 10 }
+    $featureWaitSeconds += 10
+    $featureState = (Get-AzProviderFeature -FeatureName "RestorePointSupportForConfidentialVMV2" `
+        -ProviderNamespace "Microsoft.Compute").RegistrationState
+    Write-Host ("      Feature state: {0} ({1}s elapsed)" -f $featureState, $featureWaitSeconds)
+} while ($featureState -ne "Registered" -and $featureWaitSeconds -lt 300)
+
+if ($featureState -ne "Registered") {
+    Write-Host "      WARNING: Feature not yet 'Registered' (current state: $featureState)." -ForegroundColor Yellow
+    Write-Host "      CVM backup configuration may fail. Verify via:" -ForegroundColor Yellow
+    Write-Host "        Get-AzProviderFeature -FeatureName RestorePointSupportForConfidentialVMV2 -ProviderNamespace Microsoft.Compute" -ForegroundColor Yellow
+} else {
+    Write-Host "      Preview feature 'RestorePointSupportForConfidentialVMV2' is registered." -ForegroundColor Green
+}
 
 # ---------------------------------------------------------------------------
 # Resource Group
@@ -162,6 +191,14 @@ New-AzKeyVault -Name $akvname -Location $region -ResourceGroupName $resgrp `
 $cvmAgent = Get-AzADServicePrincipal -ApplicationId 'bf7b6499-ff71-4aa2-97a4-f372087be7f0'
 Set-AzKeyVaultAccessPolicy -VaultName $akvname -ResourceGroupName $resgrp `
     -ObjectId $cvmAgent.Id -PermissionsToKeys get,release | Out-Null
+
+# Grant Backup Management Service access to the Key Vault (required for CVM backup with CMK)
+# https://learn.microsoft.com/en-us/azure/backup/confidential-vm-backup#assign-permissions-for-confidential-vm-backup
+$backupMgmtSP = Get-AzADServicePrincipal -ApplicationId '262044b1-e2ce-469f-a196-69ab7ada62d3'
+Set-AzKeyVaultAccessPolicy -VaultName $akvname -ResourceGroupName $resgrp `
+    -ObjectId $backupMgmtSP.Id `
+    -PermissionsToKeys backup,get,list `
+    -PermissionsToSecrets backup,get,list | Out-Null
 
 # Create the CMK key with the default CVM release policy (SEV-SNP validated)
 Add-AzKeyVaultKey -VaultName $akvname -Name $keyname -Size $KeySize `
@@ -253,7 +290,8 @@ Write-Host "      Recovery Services Vault created." -ForegroundColor Green
 Write-Host "[8/9] Configuring Enhanced backup policy (every 4 hours)..." -ForegroundColor Cyan
 
 $schedulePolicy = Get-AzRecoveryServicesBackupSchedulePolicyObject `
-    -WorkloadType AzureVM -BackupManagementType AzureVM -PolicySubType Enhanced
+    -WorkloadType AzureVM -BackupManagementType AzureVM -PolicySubType Enhanced `
+    -ScheduleRunFrequency Hourly
 
 # Set hourly schedule with a 4-hour interval covering the full 24-hour window
 $backupWindowHours = 24   # full-day coverage so no backup window is missed
@@ -265,7 +303,8 @@ $schedulePolicy.HourlySchedule.ScheduleWindowDuration  = $backupWindowHours
 
 # Retention: keep daily recovery points for $backupRetentionDays days
 $retentionPolicy = Get-AzRecoveryServicesBackupRetentionPolicyObject `
-    -WorkloadType AzureVM -BackupManagementType AzureVM -PolicySubType Enhanced
+    -WorkloadType AzureVM -BackupManagementType AzureVM -PolicySubType Enhanced `
+    -ScheduleRunFrequency Hourly
 $retentionPolicy.DailySchedule.DurationCountInDays = $backupRetentionDays
 
 # Create the policy
@@ -276,6 +315,12 @@ $backupPolicy = New-AzRecoveryServicesBackupProtectionPolicy `
     -RetentionPolicy $retentionPolicy `
     -SchedulePolicy $schedulePolicy `
     -VaultId $rsv.ID
+
+# Set snapshot (instant restore) retention – 7 days recommended; max is 17 days for 4-hour interval
+# https://learn.microsoft.com/en-us/azure/backup/backup-azure-vms-enhanced-policy
+$backupPolicy = Get-AzRecoveryServicesBackupProtectionPolicy -Name $backupPolicyName -VaultId $rsv.ID
+$backupPolicy.SnapshotRetentionInDays = 7
+Set-AzRecoveryServicesBackupProtectionPolicy -Policy $backupPolicy -VaultId $rsv.ID | Out-Null
 
 # Enable protection on the CVM
 Enable-AzRecoveryServicesBackupProtection `

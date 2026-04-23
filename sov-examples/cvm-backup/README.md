@@ -39,7 +39,7 @@ This example deploys a **Windows Server 2022 Confidential Virtual Machine (CVM)*
 
 ## Prerequisites
 
-- [Azure PowerShell](https://learn.microsoft.com/en-us/powershell/azure/install-azure-powershell) (Az module, latest version)
+- [Azure PowerShell](https://learn.microsoft.com/en-us/powershell/azure/install-azure-powershell) (Az module, latest version — Az 14.0.0 or later recommended)
 - An Azure subscription with quota for **DCasv6-series** (or ECasv6/ECadsv6) Confidential VMs in Korea Central
 - The **Confidential VM Orchestrator** service principal must exist in your tenant (run once per tenant):
 
@@ -48,6 +48,15 @@ This example deploys a **Windows Server 2022 Confidential Virtual Machine (CVM)*
   New-MgServicePrincipal -AppId bf7b6499-ff71-4aa2-97a4-f372087be7f0 `
       -DisplayName "Confidential VM Orchestrator"
   ```
+
+- The **`RestorePointSupportForConfidentialVMV2`** preview feature must be registered in your subscription. The script handles this automatically, but you can pre-register manually:
+
+  ```powershell
+  Register-AzProviderFeature -FeatureName "RestorePointSupportForConfidentialVMV2" `
+      -ProviderNamespace "Microsoft.Compute"
+  ```
+
+  See [Microsoft docs – Back up Confidential VM (preview)](https://learn.microsoft.com/en-us/azure/backup/confidential-vm-backup#prerequisites) for details.
 
 ## Script: `Deploy-CVMWithBackup.ps1`
 
@@ -112,7 +121,10 @@ The VM has **no public IP address** and no Azure Bastion. Connect via:
 - The basename must be **12 characters or fewer** (a 5-digit numeric suffix is always appended).
 - Only **v6 CVM SKUs** are accepted (`DCasv6`, `ECasv6`, `ECadsv6` families, e.g. `Standard_DC2as_v6`). The script exits with an error if a non-v6 SKU is supplied.
 - Azure Key Vault **Premium** SKU is required for CVM disk encryption.
+- The script automatically grants the **Backup Management Service** (`262044b1-e2ce-469f-a196-69ab7ada62d3`) `backup,get,list` access on the Key Vault for keys and secrets — required for CVM backup with CMK per [Microsoft docs](https://learn.microsoft.com/en-us/azure/backup/confidential-vm-backup#assign-permissions-for-confidential-vm-backup).
+- Snapshot (instant restore) retention is set to **7 days** (maximum allowed is 17 days for a 4-hour backup interval per Enhanced policy constraints).
 - Azure Backup of CVMs creates encrypted snapshots; the CMK in Key Vault must remain accessible for restores.
+- The `RestorePointSupportForConfidentialVMV2` preview feature is registered automatically — no manual step required.
 - Check [Azure region availability](https://azure.microsoft.com/en-gb/explore/global-infrastructure/products-by-region/) to confirm v6 CVM support in your target region.
 - The VM admin password is generated randomly and printed once to the terminal – save it before the script finishes.
 
