@@ -132,6 +132,10 @@ Reusable PowerShell snippets for common confidential computing tasks:
 - `snippet-createDES.ps1` - Create Disk Encryption Set for Confidential VMs
 - `snippet-remoteCallAttest.ps1` - Remote attestation call examples
 
+### [Sovereign Examples](/sov-examples/README.md)
+Confidential VM deployments with data-sovereignty and compliance focus:
+- **[cvm-backup/](sov-examples/cvm-backup/README.md)** - Windows CVM with Azure Backup (Recovery Services Vault), Customer Managed Keys, and confidential disk encryption
+
 ### [SKR Examples](/skr-examples/README.md) 🆕
 Standalone Secure Key Release demonstration:
 - **Deploy-SKRExample.ps1** - End-to-end CVM deployment with AMD SEV-SNP attestation and AKV key release
