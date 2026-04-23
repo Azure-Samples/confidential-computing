@@ -1,123 +1,141 @@
-# Deploy a Windows Confidential VM with Azure Backup enabled
-# VM will be created in a private VNet with no public IP; access is via Azure Bastion
-# Azure Backup (Recovery Services Vault) is configured to protect the CVM OS disk
+# Deploy a Windows Confidential VM with Azure Backup (Enhanced – 4-hourly schedule)
+# All resources are created in a single resource group in Korea Central.
+# The VM sits on a private VNet with no public IP address (Bastion is not deployed).
+# Azure Backup (Recovery Services Vault) uses the Enhanced policy with a 4-hour
+# backup interval; an initial on-demand backup is triggered immediately after setup.
 #
-# April 2025 - initial version
+# April 2025
 #
-# Usage: ./Deploy-CVMWithBackup.ps1 -subsID <SUBSCRIPTION_ID> -basename <BASENAME> [-description <DESC>]
-#        [-region <AZURE_REGION>] [-vmsize <VM_SKU>] [-backupRetentionDays <DAYS>] [-smoketest] [-DisableBastion]
+# Usage:
+#   ./Deploy-CVMWithBackup.ps1 -subsID <SUBSCRIPTION_ID> -basename <BASENAME>
+#       [-description <DESC>] [-region <AZURE_REGION>] [-vmsize <VM_SKU>]
+#       [-backupRetentionDays <DAYS>] [-smoketest]
 #
-# basename     : Prefix for all resources; a 5-char random suffix is appended automatically.
-# description  : Optional tag added to the resource group.
-# region       : Azure region (defaults to northeurope). Must support Confidential VMs.
-# vmsize       : VM SKU (defaults to Standard_DC2as_v5).
-# backupRetentionDays : Daily backup retention in days (defaults to 30).
-# smoketest    : When set, all resources are automatically removed after deployment.
-# DisableBastion : Skip Bastion creation (VM accessible only via private network).
+# Parameters:
+#   basename           : Prefix for all resource names; a 5-digit numeric suffix is
+#                        appended automatically (e.g. myvm12345).
+#   description        : Optional tag added to the resource group.
+#   region             : Azure region (defaults to koreacentral).
+#                        Must support DCasv5 Confidential VMs.
+#   vmsize             : VM SKU (defaults to Standard_DC2as_v5).
+#   backupRetentionDays: Daily backup retention in days (defaults to 30).
+#   smoketest          : When set, all resources are removed after the initial backup
+#                        completes (10-second cancellable countdown).
 #
 # Prerequisites:
-#   - Azure PowerShell (Az module, latest version):  Install-Module -Name Az -Force
-#   - You must be logged in to Azure PowerShell:     Connect-AzAccount
+#   - Azure PowerShell (Az module, latest):  Install-Module -Name Az -Force
+#   - Logged in to Azure:                    Connect-AzAccount
+#   - Confidential VM Orchestrator SP must exist in the tenant (run once per tenant):
+#       Connect-MgGraph -Tenant <TENANT_ID> -Scopes Application.ReadWrite.All
+#       New-MgServicePrincipal -AppId bf7b6499-ff71-4aa2-97a4-f372087be7f0 `
+#           -DisplayName "Confidential VM Orchestrator"
 #
 # Use at your own risk, no warranties implied, test in a non-production environment first.
 
 param (
-    [Parameter(Mandatory)]$subsID,
-    [Parameter(Mandatory)]$basename,
-    [Parameter(Mandatory=$false)]$description        = "",
-    [Parameter(Mandatory=$false)]$region             = "northeurope",
-    [Parameter(Mandatory=$false)]$vmsize             = "Standard_DC2as_v5",
-    [Parameter(Mandatory=$false)]$backupRetentionDays = 30,
-    [Parameter(Mandatory=$false)][switch]$smoketest,
-    [Parameter(Mandatory=$false)][switch]$DisableBastion
+    [Parameter(Mandatory)]         $subsID,
+    [Parameter(Mandatory)]         $basename,
+    [Parameter(Mandatory=$false)]  $description         = "",
+    [Parameter(Mandatory=$false)]  $region              = "koreacentral",
+    [Parameter(Mandatory=$false)]  $vmsize              = "Standard_DC2as_v5",
+    [Parameter(Mandatory=$false)]  $backupRetentionDays = 30,
+    [Parameter(Mandatory=$false)]  [switch]$smoketest
 )
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
 # ---------------------------------------------------------------------------
-# Startup checks
+# Startup validation
 # ---------------------------------------------------------------------------
-if ($subsID -eq "" -or $basename -eq "") {
-    Write-Host "You must provide a subscription ID and a basename." -ForegroundColor Red
+if ([string]::IsNullOrWhiteSpace($subsID) -or [string]::IsNullOrWhiteSpace($basename)) {
+    Write-Host "ERROR: -subsID and -basename are required." -ForegroundColor Red
+    exit 1
+}
+if ($basename.Length -gt 12) {
+    Write-Host "ERROR: -basename must be 12 characters or fewer (a 5-digit suffix will be appended)." -ForegroundColor Red
     exit 1
 }
 
 $startTime  = Get-Date
 $scriptName = $MyInvocation.MyCommand.Name
 
-# Detect git remote URL for resource tagging
-$gitRemoteUrl = git remote get-url origin 2>$null
-if ($gitRemoteUrl) {
-    $gitRemoteUrl = $gitRemoteUrl -replace "\.git$", ""
-} else {
-    $gitRemoteUrl = "[Originally from] https://github.com/vinfnet/confidential-computing"
+# Detect git remote URL for resource tagging (best-effort)
+try   { $gitRemoteUrl = (git remote get-url origin 2>$null) -replace "\.git$", "" }
+catch { $gitRemoteUrl = "" }
+if ([string]::IsNullOrWhiteSpace($gitRemoteUrl)) {
+    $gitRemoteUrl = "https://github.com/vinfnet/confidential-computing"
 }
 
 # ---------------------------------------------------------------------------
-# Resource names
+# Resource names  (prefix + 5-character numeric string, e.g. "03729")
+# Each position is independently drawn from 0-9, so leading zeros are possible.
 # ---------------------------------------------------------------------------
-$suffix       = -join ((97..122) | Get-Random -Count 5 | ForEach-Object {[char]$_})
-$basename     = $basename + $suffix
-$resgrp       = $basename
-$akvname      = $basename + "akv"
-$desname      = $basename + "des"
-$keyname      = $basename + "-cmk-key"
-$vmname       = $basename
-$vnetname     = $vmname  + "vnet"
-$bastionname  = $vnetname + "-bastion"
-$vnetipname   = $vnetname + "-pip"
-$nicPrefix    = $basename + "-nic"
-$vmsubnetname = $basename + "vmsubnet"
-$rsvname      = $basename + "rsv"          # Recovery Services Vault name
-$backupPolicyName = "CVMDailyBackupPolicy"
+$suffix           = -join (1..5 | ForEach-Object { Get-Random -Minimum 0 -Maximum 10 })
+$basename         = $basename + $suffix
+
+$resgrp           = $basename
+$akvname          = $basename + "akv"
+$desname          = $basename + "des"
+$keyname          = $basename + "-cmk-key"
+$vmname           = $basename
+$vnetname         = $vmname  + "vnet"
+$nicName          = $basename + "-nic"
+$vmsubnetname     = $basename + "vmsubnet"
+$rsvname          = $basename + "rsv"
+$backupPolicyName = "CVM4HourBackupPolicy"
 
 # VM settings
-$vmusername             = "azureuser"
-$vmadminpassword        = -join ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%".ToCharArray() | Get-Random -Count 40)
-$vmSize                 = $vmsize
-$identityType           = "SystemAssigned"
+$vmusername              = "azureuser"
+$vmadminpassword         = -join ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*".ToCharArray() | Get-Random -Count 40)
+$vmSize                  = $vmsize
 $secureEncryptGuestState = "DiskWithVMGuestState"
-$vmSecurityType         = "ConfidentialVM"
-$KeySize                = 3072
-$diskEncryptionType     = "ConfidentialVmEncryptedWithCustomerKey"
+$vmSecurityType          = "ConfidentialVM"
+$KeySize                 = 3072
+$diskEncryptionType      = "ConfidentialVmEncryptedWithCustomerKey"
 
 # ---------------------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------------------
-Write-Host "----------------------------------------------------------------------------------------------------------------"
-Write-Host "Deploying Windows Confidential VM with Azure Backup: $basename  |  Region: $region"
-if ($smoketest)      { Write-Host "SMOKETEST MODE: resources will be removed after deployment"        -ForegroundColor Yellow }
-if ($DisableBastion) { Write-Host "BASTION DISABLED: VM is accessible only via private connectivity" -ForegroundColor Yellow }
-Write-Host "VM admin username : $vmusername"
-Write-Host "VM admin password : $vmadminpassword  <-- SAVE THIS NOW, it cannot be retrieved later"
-Write-Host "Backup retention  : $backupRetentionDays day(s)"
-Write-Host "Script            : $scriptName"
-Write-Host "Repository URL    : $gitRemoteUrl"
-Write-Host "----------------------------------------------------------------------------------------------------------------"
+Write-Host "================================================================================================================"
+Write-Host " Windows Confidential VM + Azure Backup (4-hourly) | Korea Central"
+Write-Host " Resource group : $resgrp"
+Write-Host " VM name        : $vmname"
+Write-Host " Region         : $region"
+Write-Host " VM SKU         : $vmSize"
+Write-Host " Backup policy  : Enhanced – every 4 hours | $backupRetentionDays-day daily retention"
+if ($smoketest) { Write-Host " SMOKETEST MODE : resources will be removed after initial backup" -ForegroundColor Yellow }
+Write-Host ""
+Write-Host " VM admin username : $vmusername"
+Write-Host " VM admin password : $vmadminpassword"
+Write-Host " *** SAVE THE PASSWORD ABOVE NOW – it cannot be retrieved later ***" -ForegroundColor Yellow
+Write-Host " Script            : $scriptName"
+Write-Host " Repository        : $gitRemoteUrl"
+Write-Host "================================================================================================================"
 
 # ---------------------------------------------------------------------------
 # Azure context
 # ---------------------------------------------------------------------------
-Set-AzContext -SubscriptionId $subsID
-if (!$?) {
-    Write-Host "Failed to set Azure subscription context. Exiting." -ForegroundColor Red
-    exit 1
-}
-
+Write-Host "`n[1/9] Setting Azure context..." -ForegroundColor Cyan
+Set-AzContext -SubscriptionId $subsID | Out-Null
 $ownername = (Get-AzContext).Account.Id
+Write-Host "      Logged in as: $ownername" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
 # Resource Group
 # ---------------------------------------------------------------------------
+Write-Host "[2/9] Creating resource group: $resgrp ..." -ForegroundColor Cyan
 $rgTags = @{
     owner    = $ownername
     BuiltBy  = $scriptName
     OSType   = "Windows"
     GitRepo  = $gitRemoteUrl
 }
-if ($description      -ne "") { $rgTags.Add("description",  $description) }
-if ($smoketest)                { $rgTags.Add("smoketest",    "true") }
-if ($DisableBastion)           { $rgTags.Add("BastionDisabled", "true") }
+if ($description -ne "") { $rgTags["description"] = $description }
+if ($smoketest)           { $rgTags["smoketest"]   = "true" }
 
-New-AzResourceGroup -Name $resgrp -Location $region -Tag $rgTags -Force
+New-AzResourceGroup -Name $resgrp -Location $region -Tag $rgTags -Force | Out-Null
+Write-Host "      Resource group created." -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
 # Credential object
@@ -128,148 +146,212 @@ $cred = New-Object System.Management.Automation.PSCredential ($vmusername, $secu
 # ---------------------------------------------------------------------------
 # Key Vault (Premium SKU required for CVM CMK)
 # ---------------------------------------------------------------------------
-Write-Host "`nCreating Azure Key Vault (Premium)..." -ForegroundColor Cyan
+Write-Host "[3/9] Creating Azure Key Vault (Premium): $akvname ..." -ForegroundColor Cyan
 New-AzKeyVault -Name $akvname -Location $region -ResourceGroupName $resgrp `
     -Sku Premium -EnabledForDiskEncryption -DisableRbacAuthorization `
-    -SoftDeleteRetentionInDays 10 -EnablePurgeProtection
+    -SoftDeleteRetentionInDays 10 -EnablePurgeProtection | Out-Null
 
-# Grant CVM orchestrator access
+# Grant Confidential VM Orchestrator access
 $cvmAgent = Get-AzADServicePrincipal -ApplicationId 'bf7b6499-ff71-4aa2-97a4-f372087be7f0'
 Set-AzKeyVaultAccessPolicy -VaultName $akvname -ResourceGroupName $resgrp `
-    -ObjectId $cvmAgent.Id -PermissionsToKeys get,release
+    -ObjectId $cvmAgent.Id -PermissionsToKeys get,release | Out-Null
 
-# Add CMK key using default CVM release policy
+# Create the CMK key with the default CVM release policy (SEV-SNP validated)
 Add-AzKeyVaultKey -VaultName $akvname -Name $keyname -Size $KeySize `
-    -KeyOps wrapKey,unwrapKey -KeyType RSA -Destination HSM -Exportable -UseDefaultCVMPolicy
+    -KeyOps wrapKey,unwrapKey -KeyType RSA -Destination HSM `
+    -Exportable -UseDefaultCVMPolicy | Out-Null
 
-$encryptionKeyVaultId = (Get-AzKeyVault  -VaultName $akvname -ResourceGroupName $resgrp).ResourceId
+$encryptionKeyVaultId = (Get-AzKeyVault    -VaultName $akvname -ResourceGroupName $resgrp).ResourceId
 $encryptionKeyURL     = (Get-AzKeyVaultKey -VaultName $akvname -KeyName $keyname).Key.Kid
+Write-Host "      Key Vault and CMK key created." -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
 # Disk Encryption Set
 # ---------------------------------------------------------------------------
-Write-Host "Creating Disk Encryption Set..." -ForegroundColor Cyan
-$desConfig = New-AzDiskEncryptionSetConfig -Location $region -SourceVaultId $encryptionKeyVaultId `
-    -KeyUrl $encryptionKeyURL -IdentityType SystemAssigned -EncryptionType $diskEncryptionType
-New-AzDiskEncryptionSet -ResourceGroupName $resgrp -Name $desname -DiskEncryptionSet $desConfig
+Write-Host "[4/9] Creating Disk Encryption Set: $desname ..." -ForegroundColor Cyan
+$desConfig = New-AzDiskEncryptionSetConfig `
+    -Location $region `
+    -SourceVaultId $encryptionKeyVaultId `
+    -KeyUrl $encryptionKeyURL `
+    -IdentityType SystemAssigned `
+    -EncryptionType $diskEncryptionType
+New-AzDiskEncryptionSet -ResourceGroupName $resgrp -Name $desname `
+    -DiskEncryptionSet $desConfig | Out-Null
 
-$diskencset   = Get-AzDiskEncryptionSet -ResourceGroupName $resgrp -Name $desname
-$desIdentity  = $diskencset.Identity.PrincipalId
+$diskencset  = Get-AzDiskEncryptionSet -ResourceGroupName $resgrp -Name $desname
+$desIdentity = $diskencset.Identity.PrincipalId
 
 Set-AzKeyVaultAccessPolicy -VaultName $akvname -ResourceGroupName $resgrp `
-    -ObjectId $desIdentity -PermissionsToKeys wrapKey,unwrapKey,get -BypassObjectIdValidation
+    -ObjectId $desIdentity `
+    -PermissionsToKeys wrapKey,unwrapKey,get `
+    -BypassObjectIdValidation | Out-Null
+Write-Host "      Disk Encryption Set created and linked to Key Vault." -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
-# Virtual Machine configuration
+# Networking  (private VNet – NO public IP on the VM)
 # ---------------------------------------------------------------------------
-Write-Host "Configuring Confidential VM (Windows Server 2022)..." -ForegroundColor Cyan
-$VirtualMachine = New-AzVMConfig -VMName $vmname -VMSize $vmSize
-$VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Windows -ComputerName $vmname `
-    -Credential $cred -ProvisionVMAgent -EnableAutoUpdate
-$VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine `
-    -PublisherName 'MicrosoftWindowsServer' -Offer 'windowsserver' `
-    -Skus '2022-datacenter-smalldisk-g2' -Version "latest"
-
-# Networking
+Write-Host "[5/9] Creating private VNet and NIC (no public IP)..." -ForegroundColor Cyan
 $subnet   = New-AzVirtualNetworkSubnetConfig -Name $vmsubnetname -AddressPrefix "10.0.0.0/24"
 $vnet     = New-AzVirtualNetwork -Force -Name $vnetname -ResourceGroupName $resgrp `
     -Location $region -AddressPrefix "10.0.0.0/16" -Subnet $subnet
 $vnet     = Get-AzVirtualNetwork -Name $vnetname -ResourceGroupName $resgrp
 $subnetId = $vnet.Subnets[0].Id
 
-$nic    = New-AzNetworkInterface -Force -Name $nicPrefix -ResourceGroupName $resgrp `
+# NIC with no public IP address
+$nic   = New-AzNetworkInterface -Force -Name $nicName -ResourceGroupName $resgrp `
     -Location $region -SubnetId $subnetId
-$nic    = Get-AzNetworkInterface -Name $nicPrefix -ResourceGroupName $resgrp
-$nicId  = $nic.Id
+$nic   = Get-AzNetworkInterface -Name $nicName -ResourceGroupName $resgrp
+$nicId = $nic.Id
+Write-Host "      Private VNet and NIC created." -ForegroundColor Green
 
-$VirtualMachine = Add-AzVMNetworkInterface  -VM $VirtualMachine -Id $nicId
-$VirtualMachine = Set-AzVMOSDisk           -VM $VirtualMachine `
+# ---------------------------------------------------------------------------
+# Confidential VM
+# ---------------------------------------------------------------------------
+Write-Host "[6/9] Deploying Windows Server 2022 Confidential VM: $vmname ..." -ForegroundColor Cyan
+$VirtualMachine = New-AzVMConfig -VMName $vmname -VMSize $vmSize
+$VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Windows `
+    -ComputerName $vmname -Credential $cred -ProvisionVMAgent -EnableAutoUpdate
+$VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine `
+    -PublisherName 'MicrosoftWindowsServer' -Offer 'windowsserver' `
+    -Skus '2022-datacenter-smalldisk-g2' -Version "latest"
+$VirtualMachine = Add-AzVMNetworkInterface -VM $VirtualMachine -Id $nicId
+$VirtualMachine = Set-AzVMOSDisk -VM $VirtualMachine `
     -StorageAccountType "StandardSSD_LRS" -CreateOption "FromImage" `
     -SecurityEncryptionType $secureEncryptGuestState `
     -SecureVMDiskEncryptionSet $diskencset.Id
-$VirtualMachine = Set-AzVmSecurityProfile  -VM $VirtualMachine -SecurityType $vmSecurityType
-$VirtualMachine = Set-AzVmUefi             -VM $VirtualMachine -EnableVtpm $true -EnableSecureBoot $true
-$VirtualMachine = Set-AzVMBootDiagnostic   -VM $VirtualMachine -Disable
+$VirtualMachine = Set-AzVmSecurityProfile -VM $VirtualMachine -SecurityType $vmSecurityType
+$VirtualMachine = Set-AzVmUefi            -VM $VirtualMachine -EnableVtpm $true -EnableSecureBoot $true
+$VirtualMachine = Set-AzVMBootDiagnostic  -VM $VirtualMachine -Disable
 
-Write-Host "Creating Confidential VM..." -ForegroundColor Cyan
-New-AzVM -ResourceGroupName $resgrp -Location $region -Vm $VirtualMachine
+New-AzVM -ResourceGroupName $resgrp -Location $region -Vm $VirtualMachine | Out-Null
 $vm = Get-AzVm -ResourceGroupName $resgrp -Name $vmname
+Write-Host "      Confidential VM created: $($vm.Id)" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
-# Azure Bastion (optional)
+# Recovery Services Vault
 # ---------------------------------------------------------------------------
-if (-not $DisableBastion) {
-    Write-Host "Creating Azure Bastion..." -ForegroundColor Cyan
-    $vnet = Get-AzVirtualNetwork -Name $vnetname -ResourceGroupName $resgrp
-    Add-AzVirtualNetworkSubnetConfig -Name "AzureBastionSubnet" -VirtualNetwork $vnet `
-        -AddressPrefix "10.0.99.0/26" | Set-AzVirtualNetwork
-    $publicip = New-AzPublicIpAddress -ResourceGroupName $resgrp -Name $vnetipname `
-        -Location $region -AllocationMethod Static -Sku Standard
-    New-AzBastion -ResourceGroupName $resgrp -Name $bastionname `
-        -PublicIpAddressRgName $resgrp -PublicIpAddressName $publicip.Name `
-        -VirtualNetworkRgName $resgrp -VirtualNetworkName $vnetname -Sku "Basic"
-} else {
-    Write-Host "Bastion creation skipped (-DisableBastion). VM is accessible via private network only." -ForegroundColor Yellow
-}
-
-# ---------------------------------------------------------------------------
-# Recovery Services Vault + Backup Policy
-# ---------------------------------------------------------------------------
-Write-Host "`nCreating Recovery Services Vault for Azure Backup..." -ForegroundColor Cyan
-
-# Create the Recovery Services Vault
-New-AzRecoveryServicesVault -Name $rsvname -ResourceGroupName $resgrp -Location $region
-
+Write-Host "[7/9] Creating Recovery Services Vault: $rsvname ..." -ForegroundColor Cyan
+New-AzRecoveryServicesVault -Name $rsvname -ResourceGroupName $resgrp -Location $region | Out-Null
 $rsv = Get-AzRecoveryServicesVault -Name $rsvname -ResourceGroupName $resgrp
 Set-AzRecoveryServicesVaultContext -Vault $rsv
 
-# Build a daily backup schedule (02:00 UTC)
-$schedulePolicy    = Get-AzRecoveryServicesBackupSchedulePolicyObject -WorkloadType AzureVM
-$schedulePolicy.ScheduleRunTimes.Clear()
-$schedulePolicy.ScheduleRunTimes.Add((Get-Date "2000-01-01 02:00:00Z").ToUniversalTime())
+# Enable soft-delete for the vault (good practice; does not block CVM backup)
+Set-AzRecoveryServicesVaultProperty -VaultId $rsv.ID -SoftDeleteFeatureState Enable | Out-Null
+Write-Host "      Recovery Services Vault created." -ForegroundColor Green
 
-# Build a simple tiered retention policy
-$retentionPolicy   = Get-AzRecoveryServicesBackupRetentionPolicyObject -WorkloadType AzureVM
+# ---------------------------------------------------------------------------
+# Enhanced backup policy – 4-hour interval
+# The Enhanced policy is required for sub-daily (hourly) backup schedules.
+# ---------------------------------------------------------------------------
+Write-Host "[8/9] Configuring Enhanced backup policy (every 4 hours)..." -ForegroundColor Cyan
+
+$schedulePolicy = Get-AzRecoveryServicesBackupSchedulePolicyObject `
+    -WorkloadType AzureVM -BackupManagementType AzureVM -PolicySubType Enhanced
+
+# Set hourly schedule with a 4-hour interval covering the full 24-hour window
+$backupWindowHours = 24   # full-day coverage so no backup window is missed
+$schedulePolicy.ScheduleRunFrequency                    = "Hourly"
+$schedulePolicy.HourlySchedule.Interval                = 4
+$schedulePolicy.HourlySchedule.ScheduleWindowStartTime = `
+    (Get-Date "2000-01-01 00:00:00Z").ToUniversalTime()
+$schedulePolicy.HourlySchedule.ScheduleWindowDuration  = $backupWindowHours
+
+# Retention: keep daily recovery points for $backupRetentionDays days
+$retentionPolicy = Get-AzRecoveryServicesBackupRetentionPolicyObject `
+    -WorkloadType AzureVM -BackupManagementType AzureVM -PolicySubType Enhanced
 $retentionPolicy.DailySchedule.DurationCountInDays = $backupRetentionDays
 
-# Create (or update) the backup protection policy
+# Create the policy
 $backupPolicy = New-AzRecoveryServicesBackupProtectionPolicy `
     -Name $backupPolicyName `
     -WorkloadType AzureVM `
+    -BackupManagementType AzureVM `
     -RetentionPolicy $retentionPolicy `
-    -SchedulePolicy $schedulePolicy
+    -SchedulePolicy $schedulePolicy `
+    -VaultId $rsv.ID
 
-Write-Host "Enabling Azure Backup for the Confidential VM ($vmname)..." -ForegroundColor Cyan
+# Enable protection on the CVM
 Enable-AzRecoveryServicesBackupProtection `
     -ResourceGroupName $resgrp `
     -Name $vmname `
-    -Policy $backupPolicy
+    -Policy $backupPolicy `
+    -VaultId $rsv.ID | Out-Null
 
-Write-Host "`nAzure Backup enabled successfully." -ForegroundColor Green
-Write-Host "Recovery Services Vault : $rsvname"
-Write-Host "Backup Policy           : $backupPolicyName"
-Write-Host "Daily retention         : $backupRetentionDays day(s)"
+Write-Host "      Enhanced 4-hourly backup policy applied to $vmname." -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
-# Summary
+# Trigger initial on-demand backup and wait for completion
+# ---------------------------------------------------------------------------
+Write-Host "[9/9] Triggering initial on-demand backup..." -ForegroundColor Cyan
+
+# Give ARM a moment to register the protection before querying the item
+Start-Sleep -Seconds 30
+
+$container  = Get-AzRecoveryServicesBackupContainer `
+    -ContainerType AzureVM -FriendlyName $vmname -VaultId $rsv.ID
+$backupItem = Get-AzRecoveryServicesBackupItem `
+    -Container $container -WorkloadType AzureVM -VaultId $rsv.ID
+
+$backupJob = Backup-AzRecoveryServicesBackupItem -Item $backupItem -VaultId $rsv.ID
+
+Write-Host "      Backup job started. Job ID: $($backupJob.JobId)" -ForegroundColor Green
+Write-Host "      Waiting for initial backup to complete (this typically takes 10-30 minutes)..." -ForegroundColor Cyan
+
+$maxWaitMinutes = 60                        # hard timeout
+$maxWaitSeconds = $maxWaitMinutes * 60
+$pollIntervalSeconds = 30                   # seconds between status polls
+$elapsed        = 0
+
+do {
+    Start-Sleep -Seconds $pollIntervalSeconds
+    $elapsed += $pollIntervalSeconds
+    $job = Get-AzRecoveryServicesBackupJob -JobId $backupJob.JobId -VaultId $rsv.ID
+    $mins = [math]::Floor($elapsed / 60)
+    $secs = $elapsed % 60
+    Write-Host ("      [{0:D2}:{1:D2}] Backup status: {2}" -f $mins, $secs, $job.Status)
+} while ($job.Status -in @("InProgress", "NotStarted") -and $elapsed -lt $maxWaitSeconds)
+
+if ($job.Status -eq "Completed") {
+    Write-Host "      Initial backup COMPLETED successfully." -ForegroundColor Green
+} elseif ($job.Status -eq "CompletedWithWarnings") {
+    Write-Host "      Initial backup completed with warnings – check the RSV job log in the portal." -ForegroundColor Yellow
+} elseif ($elapsed -ge $maxWaitSeconds) {
+    Write-Host "      Timed out waiting for backup. Job is still running in the background." -ForegroundColor Yellow
+    Write-Host "      Check job status in the portal: Vault '$rsvname' > Backup Jobs." -ForegroundColor Yellow
+} else {
+    Write-Host "      Backup ended with status: $($job.Status). Check the portal for details." -ForegroundColor Red
+}
+
+# ---------------------------------------------------------------------------
+# Deployment summary
 # ---------------------------------------------------------------------------
 Write-Host ""
-Write-Host "----------------------------------------------------------------------------------------------------------------"
-Write-Host "Deployment complete. Resources created in resource group: $resgrp" -ForegroundColor Green
-if (-not $DisableBastion) {
-    Write-Host "Connect to the VM via Azure Bastion in the Azure portal (RDP)."
-}
-Write-Host "To clean up all resources manually, run:"
-Write-Host "  Remove-AzResourceGroup -Name $resgrp -Force"
-Write-Host "----------------------------------------------------------------------------------------------------------------"
+Write-Host "================================================================================================================"
+Write-Host " DEPLOYMENT COMPLETE" -ForegroundColor Green
+Write-Host "================================================================================================================"
+Write-Host " Resource group          : $resgrp"
+Write-Host " Region                  : $region"
+Write-Host " VM name                 : $vmname  (Windows Server 2022 CVM, AMD SEV-SNP)"
+Write-Host " Confidential disk enc.  : DiskWithVMGuestState + Customer Managed Key"
+Write-Host " Key Vault               : $akvname"
+Write-Host " Disk Encryption Set     : $desname"
+Write-Host " Recovery Services Vault : $rsvname"
+Write-Host " Backup policy           : $backupPolicyName (every 4 hours, $backupRetentionDays-day retention)"
+Write-Host " Initial backup job      : $($job.Status)"
+Write-Host ""
+Write-Host " The VM has NO public IP address."
+Write-Host " Access via: Azure portal (Serial console), VPN, ExpressRoute, or a jump box in the same VNet."
+Write-Host ""
+Write-Host " To clean up all resources run:"
+Write-Host "   Remove-AzResourceGroup -Name $resgrp -Force"
+Write-Host "================================================================================================================"
 
 # ---------------------------------------------------------------------------
 # Smoketest cleanup
 # ---------------------------------------------------------------------------
 if ($smoketest) {
     Write-Host ""
-    Write-Host "SMOKETEST MODE: Removing all created resources in 10 seconds..." -ForegroundColor Yellow
-    Write-Host "Press any key to cancel deletion." -ForegroundColor Yellow
+    Write-Host "SMOKETEST: Removing all resources in 10 seconds – press any key to cancel." -ForegroundColor Yellow
 
     $timeout   = 10
     $timer     = [System.Diagnostics.Stopwatch]::StartNew()
@@ -283,17 +365,18 @@ if ($smoketest) {
         }
         Start-Sleep -Milliseconds 100
         $remaining = [math]::Ceiling($timeout - $timer.Elapsed.TotalSeconds)
-        Write-Host "`rDeletion in $remaining second(s)... (Press any key to cancel)" -NoNewline -ForegroundColor Yellow
+        Write-Host ("`rDeleting in {0} second(s)... (any key to cancel)" -f $remaining) `
+            -NoNewline -ForegroundColor Yellow
     }
     $timer.Stop()
 
     if ($cancelled) {
-        Write-Host "`nDeletion cancelled. Resources remain in: $resgrp" -ForegroundColor Green
+        Write-Host "`nDeletion cancelled – resources remain in '$resgrp'." -ForegroundColor Green
     } else {
-        Write-Host "`nDeleting resource group $resgrp ..." -ForegroundColor Red
+        Write-Host "`nDeleting resource group '$resgrp' (background job)..." -ForegroundColor Red
         try {
-            Remove-AzResourceGroup -Name $resgrp -Force -AsJob
-            Write-Host "Resource group deletion initiated (running in background)."
+            Remove-AzResourceGroup -Name $resgrp -Force -AsJob | Out-Null
+            Write-Host "Resource group deletion initiated successfully."
         } catch {
             Write-Host "Error removing resource group: $($_.Exception.Message)" -ForegroundColor Red
         }
@@ -301,4 +384,4 @@ if ($smoketest) {
 }
 
 $elapsed = New-TimeSpan -Start $startTime -End (Get-Date)
-Write-Output ("Execution time: {0} minutes and {1} seconds." -f $elapsed.Minutes, $elapsed.Seconds)
+Write-Output ("Total execution time: {0} minutes and {1} seconds." -f $elapsed.Minutes, $elapsed.Seconds)
