@@ -40,7 +40,7 @@ This example deploys a **Windows Server 2022 Confidential Virtual Machine (CVM)*
 ## Prerequisites
 
 - [Azure PowerShell](https://learn.microsoft.com/en-us/powershell/azure/install-azure-powershell) (Az module, latest version)
-- An Azure subscription with quota for **DCasv5-series** Confidential VMs in Korea Central
+- An Azure subscription with quota for **DCasv6-series** (or ECasv6/ECadsv6) Confidential VMs in Korea Central
 - The **Confidential VM Orchestrator** service principal must exist in your tenant (run once per tenant):
 
   ```powershell
@@ -56,8 +56,8 @@ This example deploys a **Windows Server 2022 Confidential Virtual Machine (CVM)*
 | `subsID` | ✅ | — | Azure subscription ID |
 | `basename` | ✅ | — | Prefix for resource names (≤ 12 chars); a **5-character numeric string** is appended (e.g. `myvm03729` — leading zeros are possible) |
 | `description` | ❌ | `""` | Optional tag added to the resource group |
-| `region` | ❌ | `koreacentral` | Azure region (must support DCasv5 Confidential VMs) |
-| `vmsize` | ❌ | `Standard_DC2as_v5` | VM SKU |
+| `region` | ❌ | `koreacentral` | Azure region (must support DCasv6 / ECasv6 / ECadsv6 Confidential VMs) |
+| `vmsize` | ❌ | `Standard_DC2as_v6` | VM SKU — **only v6 CVM SKUs are accepted** (DCasv6, ECasv6, ECadsv6 families) |
 | `backupRetentionDays` | ❌ | `30` | Daily backup retention in days |
 | `smoketest` | ❌ | `$false` | Auto-delete all resources after the initial backup completes |
 
@@ -85,7 +85,7 @@ This example deploys a **Windows Server 2022 Confidential Virtual Machine (CVM)*
 | 4 | Disk Encryption Set | Links the CMK to confidential OS disk encryption (`DiskWithVMGuestState`) |
 | 5 | Private VNet + Subnet | 10.0.0.0/16 — no public IP on the VM, no Bastion |
 | 6 | Network Interface | Attached to VM subnet, no public IP |
-| 7 | Windows Server 2022 CVM | AMD SEV-SNP, Secure Boot + vTPM, CMK-encrypted OS disk |
+| 7 | Windows Server 2022 CVM | AMD SEV-SNP, Secure Boot + vTPM, CMK-encrypted OS disk — **v6 SKU only** (DCasv6/ECasv6/ECadsv6) |
 | 8 | Recovery Services Vault | Azure Backup vault in the same region and resource group |
 | 9 | Enhanced Backup Policy | Every **4 hours** (24-hour window), configurable daily retention |
 | 10 | Initial On-Demand Backup | Triggered immediately; script waits (up to 60 min) for completion |
@@ -110,9 +110,10 @@ The VM has **no public IP address** and no Azure Bastion. Connect via:
 ## Important Notes
 
 - The basename must be **12 characters or fewer** (a 5-digit numeric suffix is always appended).
+- Only **v6 CVM SKUs** are accepted (`DCasv6`, `ECasv6`, `ECadsv6` families, e.g. `Standard_DC2as_v6`). The script exits with an error if a non-v6 SKU is supplied.
 - Azure Key Vault **Premium** SKU is required for CVM disk encryption.
 - Azure Backup of CVMs creates encrypted snapshots; the CMK in Key Vault must remain accessible for restores.
-- Check [Azure region availability](https://azure.microsoft.com/en-gb/explore/global-infrastructure/products-by-region/) to confirm CVM support in your target region.
+- Check [Azure region availability](https://azure.microsoft.com/en-gb/explore/global-infrastructure/products-by-region/) to confirm v6 CVM support in your target region.
 - The VM admin password is generated randomly and printed once to the terminal – save it before the script finishes.
 
 ## Clean-up

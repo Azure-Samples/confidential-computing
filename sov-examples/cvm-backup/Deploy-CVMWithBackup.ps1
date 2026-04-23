@@ -16,8 +16,9 @@
 #                        appended automatically (e.g. myvm12345).
 #   description        : Optional tag added to the resource group.
 #   region             : Azure region (defaults to koreacentral).
-#                        Must support DCasv5 Confidential VMs.
-#   vmsize             : VM SKU (defaults to Standard_DC2as_v5).
+#                        Must support DCasv6 Confidential VMs.
+#   vmsize             : VM SKU (defaults to Standard_DC2as_v6).
+#                        Only DCasv6 / ECasv6 / ECadsv6 family (v6 CVM) SKUs are accepted.
 #   backupRetentionDays: Daily backup retention in days (defaults to 30).
 #   smoketest          : When set, all resources are removed after the initial backup
 #                        completes (10-second cancellable countdown).
@@ -37,7 +38,7 @@ param (
     [Parameter(Mandatory)]         $basename,
     [Parameter(Mandatory=$false)]  $description         = "",
     [Parameter(Mandatory=$false)]  $region              = "koreacentral",
-    [Parameter(Mandatory=$false)]  $vmsize              = "Standard_DC2as_v5",
+    [Parameter(Mandatory=$false)]  $vmsize              = "Standard_DC2as_v6",
     [Parameter(Mandatory=$false)]  $backupRetentionDays = 30,
     [Parameter(Mandatory=$false)]  [switch]$smoketest
 )
@@ -54,6 +55,12 @@ if ([string]::IsNullOrWhiteSpace($subsID) -or [string]::IsNullOrWhiteSpace($base
 }
 if ($basename.Length -gt 12) {
     Write-Host "ERROR: -basename must be 12 characters or fewer (a 5-digit suffix will be appended)." -ForegroundColor Red
+    exit 1
+}
+# Only v6 CVM SKUs are supported (DCasv6, ECasv6, ECadsv6 families)
+if ($vmsize -notmatch '(?i)Standard_(DC|EC)\d+a?d?s_v6$') {
+    Write-Host "ERROR: -vmsize '$vmsize' is not a supported v6 CVM SKU." -ForegroundColor Red
+    Write-Host "       Accepted families: DCasv6, ECasv6, ECadsv6  (e.g. Standard_DC2as_v6, Standard_EC4as_v6)" -ForegroundColor Red
     exit 1
 }
 
