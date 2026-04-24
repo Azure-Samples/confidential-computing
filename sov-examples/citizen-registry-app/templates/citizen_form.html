@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ 'Edit' if citizen else 'New' }} Citizen</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f7fa; }
+        h1 { color: #1a3a5c; }
+        label { display: block; margin-top: 10px; font-weight: bold; }
+        input, select { padding: 6px; width: 300px; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin-top: 16px; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        a { color: #2563eb; }
+    </style>
+</head>
+<body>
+    <h1>{{ 'Edit' if citizen else 'New' }} Citizen Record</h1>
+    <form method="post">
+        <label>National ID</label>
+        <input name="national_id" value="{{ citizen.national_id if citizen else '' }}" required>
+
+        <label>First Name</label>
+        <input name="first_name" value="{{ citizen.first_name if citizen else '' }}" required>
+
+        <label>Last Name</label>
+        <input name="last_name" value="{{ citizen.last_name if citizen else '' }}" required>
+
+        <label>Date of Birth</label>
+        <input name="date_of_birth" type="date" value="{{ citizen.date_of_birth if citizen else '' }}" required>
+
+        <label>Sex</label>
+        <select name="sex">
+            <option value="Male" {{ 'selected' if citizen and citizen.sex == 'Male' }}>Male</option>
+            <option value="Female" {{ 'selected' if citizen and citizen.sex == 'Female' }}>Female</option>
+        </select>
+
+        <label>Region</label>
+        <input name="region" value="{{ citizen.region if citizen else '' }}" required>
+
+        <label>Municipality</label>
+        <input name="municipality" value="{{ citizen.municipality if citizen else '' }}" required>
+
+        <label>Address Line</label>
+        <input name="address_line" value="{{ citizen.address_line if citizen else '' }}">
+
+        <label>Postal Code</label>
+        <input name="postal_code" value="{{ citizen.postal_code if citizen else '' }}">
+
+        <label>Household Size</label>
+        <input name="household_size" type="number" min="1" value="{{ citizen.household_size if citizen else 1 }}">
+
+        <label>Marital Status</label>
+        <select name="marital_status">
+            {% for s in ['Single','Married','Divorced','Widowed'] %}
+            <option value="{{ s }}" {{ 'selected' if citizen and citizen.marital_status == s }}>{{ s }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Employment Status</label>
+        <select name="employment_status">
+            {% for s in ['Employed','Unemployed','Retired','Student','Self-Employed'] %}
+            <option value="{{ s }}" {{ 'selected' if citizen and citizen.employment_status == s }}>{{ s }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Tax Bracket</label>
+        <select name="tax_bracket">
+            {% for s in ['A','B','C','D','E'] %}
+            <option value="{{ s }}" {{ 'selected' if citizen and citizen.tax_bracket == s }}>{{ s }}</option>
+            {% endfor %}
+        </select>
+
+        <label>
+            <input type="checkbox" name="registered_voter" {{ 'checked' if not citizen or citizen.registered_voter }}> Registered Voter
+        </label>
+
+        <br>
+        <button type="submit" class="btn btn-primary">{{ 'Update' if citizen else 'Create' }}</button>
+        <a href="/">Cancel</a>
+    </form>
+</body>
+</html>

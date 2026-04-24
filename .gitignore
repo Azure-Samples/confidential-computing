@@ -356,3 +356,5 @@ release-policy-*.json
 test-analytics*.json
 multiparty-view*.html
 cvm-config.json
+sov-examples/citizen-registry-app/confcom-params.json
+sov-examples/citizen-registry-app/confcom-params*.json
