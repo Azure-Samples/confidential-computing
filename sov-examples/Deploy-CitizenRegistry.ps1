@@ -243,15 +243,21 @@ if ($Deploy) {
     $identityName = "$($cfg.prefix)-nor-citizen-id"
     $null = az identity show --only-show-errors --name $identityName --resource-group $cfg.resourceGroup --query id -o tsv 2>$null
     if ($LASTEXITCODE -ne 0) {
-        $subscriptionId = az account show --only-show-errors --query id -o tsv
         $identityPayload = @{ 
             location = $cfg.location
             tags = @{ owner = $ownerUpn }
             properties = @{ isolationScope = "Regional" }
-        } | ConvertTo-Json -Depth 6 -Compress
+        }
 
-        $identityUrl = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$($cfg.resourceGroup)/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$identityName?api-version=2023-01-31"
-        $createOutput = az rest --method put --url $identityUrl --body $identityPayload --only-show-errors 2>&1
+        $identityPayloadJson = $identityPayload | ConvertTo-Json -Depth 6 -Compress
+
+        $createOutput = az resource create `
+            --resource-group $cfg.resourceGroup `
+            --name $identityName `
+            --resource-type Microsoft.ManagedIdentity/userAssignedIdentities `
+            --is-full-object `
+            --properties $identityPayloadJson `
+            --only-show-errors 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to create managed identity: $createOutput"
         }
