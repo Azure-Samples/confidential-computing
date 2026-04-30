@@ -295,15 +295,15 @@ $schedulePolicy = Get-AzRecoveryServicesBackupSchedulePolicyObject `
 
 # Set hourly schedule with a 4-hour interval covering the full 24-hour window
 $backupWindowHours = 24   # full-day coverage so no backup window is missed
-$schedulePolicy.ScheduleRunFrequency                    = "Hourly"
-$schedulePolicy.HourlySchedule.Interval                = 4
-$schedulePolicy.HourlySchedule.ScheduleWindowStartTime = `
+$schedulePolicy.ScheduleRunFrequency              = "Hourly"
+$schedulePolicy.HourlySchedule.Interval           = 4
+$schedulePolicy.HourlySchedule.WindowStartTime    = `
     (Get-Date "2000-01-01 00:00:00Z").ToUniversalTime()
-$schedulePolicy.HourlySchedule.ScheduleWindowDuration  = $backupWindowHours
+$schedulePolicy.HourlySchedule.WindowDuration     = $backupWindowHours
 
 # Retention: keep daily recovery points for $backupRetentionDays days
 $retentionPolicy = Get-AzRecoveryServicesBackupRetentionPolicyObject `
-    -WorkloadType AzureVM -BackupManagementType AzureVM -PolicySubType Enhanced `
+    -WorkloadType AzureVM -BackupManagementType AzureVM `
     -ScheduleRunFrequency Hourly
 $retentionPolicy.DailySchedule.DurationCountInDays = $backupRetentionDays
 
@@ -358,8 +358,8 @@ do {
     Start-Sleep -Seconds $pollIntervalSeconds
     $elapsed += $pollIntervalSeconds
     $job = Get-AzRecoveryServicesBackupJob -JobId $backupJob.JobId -VaultId $rsv.ID
-    $mins = [math]::Floor($elapsed / 60)
-    $secs = $elapsed % 60
+    $mins = [int][math]::Floor($elapsed / 60)
+    $secs = [int]($elapsed % 60)
     Write-Host ("      [{0:D2}:{1:D2}] Backup status: {2}" -f $mins, $secs, $job.Status)
 } while ($job.Status -in @("InProgress", "NotStarted") -and $elapsed -lt $maxWaitSeconds)
 
