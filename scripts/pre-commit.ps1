@@ -15,7 +15,20 @@
     Use "git commit --no-verify" to bypass in emergencies.
 #>
 
+param(
+    [ValidateSet('staged', 'all', 'files')]
+    [string]$ScanMode = 'staged',
+
+    [string[]]$Paths = @()
+)
+
 $ErrorActionPreference = "Continue"
+$repoRoot = git rev-parse --show-toplevel 2>$null
+
+if (-not $repoRoot) {
+    Write-Host "ERROR: Not inside a git repository." -ForegroundColor Red
+    exit 1
+}
 
 # Colors
 function Write-Blocked($desc, $file, $matches) {
@@ -58,11 +71,29 @@ Write-Host "══════════════════════�
 Write-Host " Pre-commit secret & credential scan" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
 
-# Get staged files (added or modified, not deleted)
-$stagedFiles = git diff --cached --name-only --diff-filter=ACM 2>$null
-if (-not $stagedFiles) {
-    Write-Host "No staged files to scan." -ForegroundColor Green
-    exit 0
+# Get files to scan
+switch ($ScanMode) {
+    'staged' {
+        $filesToScan = git diff --cached --name-only --diff-filter=ACM 2>$null
+        if (-not $filesToScan) {
+            Write-Host "No staged files to scan." -ForegroundColor Green
+            exit 0
+        }
+    }
+    'all' {
+        $filesToScan = git ls-files 2>$null
+        if (-not $filesToScan) {
+            Write-Host "No tracked files to scan." -ForegroundColor Green
+            exit 0
+        }
+    }
+    'files' {
+        $filesToScan = $Paths | Where-Object { $_ }
+        if (-not $filesToScan) {
+            Write-Host "No files supplied to scan." -ForegroundColor Green
+            exit 0
+        }
+    }
 }
 
 $blocked = 0
@@ -117,7 +148,7 @@ $blockedPatterns = @(
     @{
         Pattern     = '(?i)(password|passwd|pwd)\s*[:=]\s*["''][^"<'']{8,}["'']'
         Description = "Hardcoded password"
-        Exclude     = 'placeholder|example|YOUR_|<|notmatch|format|Expected'
+        Exclude     = 'placeholder|example|YOUR_|<|notmatch|format|Expected|\$[a-zA-Z]|\{\w+'
     },
     @{
         Pattern     = '(?<!\$[\w{}]*)[a-z0-9]{6,}\.vault\.azure\.net'
@@ -155,18 +186,45 @@ $warningPatterns = @(
     }
 )
 
+# BLOCKED content patterns: multiline parameter files with embedded secrets
+$blockedContentPatterns = @(
+    @{
+        Pattern     = '(?is)"(registryPassword|dbPassword|password|clientSecret|client_secret|apiKey|api_key|accessKey|accountKey|sharedAccessSignature|sasToken|connectionString)"\s*:\s*\{\s*"value"\s*:\s*"[^"<]{8,}"'
+        Description = "JSON parameters file with embedded credential value"
+        Exclude     = 'placeholder|example|YOUR_|<'
+    },
+    @{
+        Pattern     = '(?is)"value"\s*:\s*"DefaultEndpointsProtocol=https?;AccountName=[^";]+;AccountKey=[A-Za-z0-9+/=]{20,}'
+        Description = "JSON parameter value containing storage connection string"
+        Exclude     = $null
+    }
+)
+
 # Risky file extensions
 $riskyExtensions = @('.pfx', '.p12', '.key', '.pem', '.env')
+
+# Generated files that should never be committed because they often contain environment-specific secrets
+$blockedFilePatterns = @(
+    @{
+        Pattern     = '(^|[\\/])confcom-params(\.[^\\/]+)?\.json$'
+        Description = "Generated confidential container parameters file"
+    },
+    @{
+        Pattern     = '(^|[\\/])deployment-params[^\\/]*\.json$'
+        Description = "Generated deployment parameters file"
+    }
+)
 
 # ──────────────────────────────────────────────────────
 # Scan each staged file
 # ──────────────────────────────────────────────────────
-foreach ($file in $stagedFiles) {
+foreach ($file in $filesToScan) {
     # Check risky file extensions
     $ext = [System.IO.Path]::GetExtension($file)
     $basename = [System.IO.Path]::GetFileName($file)
+    $isRealEnvFile = $basename -eq '.env' -or ($basename -like '.env.*' -and $basename -notin @('.env.example', '.env.sample', '.env.template'))
 
-    if ($ext -in $riskyExtensions -or $basename -match '^\.env(\.|$)') {
+    if ($ext -in $riskyExtensions -or $isRealEnvFile) {
         Write-Host ""
         Write-Host "  ✗ BLOCKED " -ForegroundColor Red -NoNewline
         Write-Host "[Certificate/key/env file]"
@@ -175,14 +233,49 @@ foreach ($file in $stagedFiles) {
         continue
     }
 
-    # Get the staged content of the file
-    $content = git show ":$file" 2>$null
+    foreach ($fp in $blockedFilePatterns) {
+        if ($file -match $fp.Pattern) {
+            Write-Host ""
+            Write-Host "  ✗ BLOCKED " -ForegroundColor Red -NoNewline
+            Write-Host "[$($fp.Description)]"
+            Write-Host "    File: $file" -ForegroundColor Gray
+            $blocked++
+            continue 2
+        }
+    }
+
+    # Get file content based on scan mode
+    if ($ScanMode -eq 'staged') {
+        $content = git show ":$file" 2>$null
+    }
+    else {
+        $fullPath = Join-Path $repoRoot $file
+        if (-not (Test-Path $fullPath -PathType Leaf)) { continue }
+        $content = Get-Content -Path $fullPath -Raw -ErrorAction SilentlyContinue
+    }
+
     if (-not $content) { continue }
 
     # Skip binary detection (if content has null bytes, skip)
     if ($content -match '\x00') { continue }
 
     $lines = $content -split "`n"
+
+    foreach ($cp in $blockedContentPatterns) {
+        $contentMatches = [regex]::Matches($content, $cp.Pattern)
+        if ($contentMatches.Count -gt 0) {
+            $matchingSnippets = @()
+            foreach ($match in $contentMatches) {
+                if ($cp.Exclude -and $match.Value -match $cp.Exclude) { continue }
+                $snippet = ($match.Value -replace '\s+', ' ').Trim()
+                if ($snippet.Length -gt 120) { $snippet = $snippet.Substring(0, 120) + '...' }
+                $matchingSnippets += $snippet
+            }
+            if ($matchingSnippets.Count -gt 0) {
+                $blocked += Write-Blocked $cp.Description $file $matchingSnippets
+            }
+        }
+    }
 
     # Check blocked patterns
     foreach ($bp in $blockedPatterns) {

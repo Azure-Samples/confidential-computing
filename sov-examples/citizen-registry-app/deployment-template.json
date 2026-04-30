@@ -1,0 +1,165 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "containerGroupName": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "appImage": {
+      "type": "string"
+    },
+    "registryServer": {
+      "type": "string"
+    },
+    "registryUsername": {
+      "type": "string"
+    },
+    "registryPassword": {
+      "type": "securestring"
+    },
+    "dnsNameLabel": {
+      "type": "string"
+    },
+    "aciSubnetResourceId": {
+      "type": "string"
+    },
+    "dbHost": {
+      "type": "string"
+    },
+    "dbName": {
+      "type": "string",
+      "defaultValue": "citizendb"
+    },
+    "dbUser": {
+      "type": "string",
+      "defaultValue": "citizenapp"
+    },
+    "dbPassword": {
+      "type": "securestring"
+    },
+    "dbSaPassword": {
+      "type": "securestring",
+      "defaultValue": ""
+    },
+    "securityPolicyHash": {
+      "type": "string",
+      "defaultValue": ""
+    },
+    "ownerUpn": {
+      "type": "string",
+      "defaultValue": ""
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2023-05-01",
+      "name": "[parameters('containerGroupName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "owner": "[parameters('ownerUpn')]"
+      },
+      "properties": {
+        "sku": "Confidential",
+        "confidentialComputeProperties": {
+          "ccePolicy": ""
+        },
+        "containers": [
+          {
+            "name": "norland-citizen-app",
+            "properties": {
+              "image": "[parameters('appImage')]",
+              "ports": [
+                {
+                  "protocol": "TCP",
+                  "port": 80
+                },
+                {
+                  "protocol": "TCP",
+                  "port": 443
+                }
+              ],
+              "environmentVariables": [
+                {
+                  "name": "DB_HOST",
+                  "value": "[parameters('dbHost')]"
+                },
+                {
+                  "name": "DB_NAME",
+                  "value": "[parameters('dbName')]"
+                },
+                {
+                  "name": "DB_USER",
+                  "value": "[parameters('dbUser')]"
+                },
+                {
+                  "name": "DB_PASSWORD",
+                  "secureValue": "[parameters('dbPassword')]"
+                },
+                {
+                  "name": "DB_SA_PASSWORD",
+                  "secureValue": "[parameters('dbSaPassword')]"
+                },
+                {
+                  "name": "SECURITY_POLICY_HASH",
+                  "value": "[parameters('securityPolicyHash')]"
+                }
+              ],
+              "resources": {
+                "requests": {
+                  "memoryInGB": 4,
+                  "cpu": 2
+                }
+              }
+            }
+          }
+        ],
+        "imageRegistryCredentials": [
+          {
+            "server": "[parameters('registryServer')]",
+            "username": "[parameters('registryUsername')]",
+            "password": "[parameters('registryPassword')]"
+          }
+        ],
+        "subnetIds": [
+          {
+            "id": "[parameters('aciSubnetResourceId')]"
+          }
+        ],
+        "ipAddress": {
+          "type": "Private",
+          "ports": [
+            {
+              "protocol": "TCP",
+              "port": 80
+            },
+            {
+              "protocol": "TCP",
+              "port": 443
+            }
+          ]
+        },
+        "osType": "Linux",
+        "restartPolicy": "Always"
+      }
+    }
+  ],
+  "outputs": {
+    "containerGroupId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))]"
+    },
+    "fqdn": {
+      "type": "string",
+      "value": ""
+    },
+    "privateIp": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.ip]"
+    }
+  }
+}

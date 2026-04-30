@@ -1,0 +1,5 @@
+flask
+gunicorn
+pyodbc
+azure-identity
+requests

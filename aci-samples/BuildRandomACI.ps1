@@ -55,7 +55,11 @@ $ownername = $tmp.Account.Id
 New-AzResourceGroup -Name $resgrp -Location $region -Tag @{owner=$ownername} -force
 
 $port = New-AzContainerInstancePortObject -Port 80 -Protocol TCP
-$container = New-AzContainerInstanceObject -Name $containerName -Image "mcr.microsoft.com/azuredocs/aci-helloworld"
+# updated to use the latest helloworld image which displays attestation output
+$container = New-AzContainerInstanceObject -Name $containerName -Image "mcr.microsoft.com/acc/samples/aci/helloworld:2.8"
+
+
+
 $containerGroup = New-AzContainerGroup -ResourceGroupName $resgrp -Name $containerGroupName -Location $region -Container @($container) -OsType Linux -IpAddressDnsNameLabel ($basename + "dns") -IpAddressType Public -Sku confidential
 Get-AzContainerGroup -ResourceGroupName $resgrp -Name $containerGroupName
 $containerGroup | Format-Table InstanceViewState, IPAddressFqdn, IPAddressIP
