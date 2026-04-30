@@ -7,25 +7,25 @@
 
 > **Note:** This demonstration was **created using AI-assisted development** with GitHub Copilot powered by Claude. While functional, AI-generated code should always be reviewed by qualified security professionals before use in production scenarios.
 
-A demonstration of Azure Confidential Container Instances (ACI) running a fictional government citizen registry for the **Republic of Norland**, connected to Azure SQL Database with DC-series confidential computing SKU. The application and database both run inside hardware-protected Trusted Execution Environments (TEEs) with AMD SEV-SNP memory encryption. Authentication uses Azure AD managed identity—no static credentials.
+A demonstration of Azure Confidential Container Instances (ACI) running a fictional government citizen registry for the **Republic of Norland**, connected to SQL Server hosted on an AMD-based Confidential VM (DCasv6 family). Backend traffic stays on a private VNet while frontend access is exposed through a public Application Gateway IP.
 
 ## Overview
 
-This project deploys a **single confidential container** with a public IP, connected to a **SQL Database with DC-series hardware**, to demonstrate end-to-end confidential computing for sensitive citizen data:
+This project deploys a **confidential container with a private IP** behind a public Application Gateway, connected to a **SQL Server instance running on an AMD Confidential VM** over a private VNet:
 
 | Component | Type | Security | Purpose |
 |-----------|------|----------|---------|
-| **ACI Container** | Confidential (AMD SEV-SNP TEE) | Hardware memory encryption + ccepolicy | Runs Flask citizen registry CRUD app |
-| **SQL Database** | DC-series (AMD SEV-SNP TEE) | Hardware-encrypted database, TLS, Entra-only auth | Stores citizen registry records |
-| **Managed Identity** | User-Assigned (Azure AD) | RBAC roles (db_datareader, db_datawriter) | Secure auth without passwords |
+| **Application Gateway** | Public entrypoint | Internet-facing frontend only | Routes HTTP traffic to private ACI |
+| **ACI Container** | Confidential (AMD SEV-SNP TEE) | Hardware memory encryption + ccepolicy | Runs Flask citizen registry CRUD app on private subnet |
+| **SQL Server on CVM** | `Standard_DC2ads_v6` (or higher DCads v6) | Confidential VM memory encryption + TLS | Stores citizen registry records |
 | **SKR Sidecar** | Secure Key Release | Attestation-backed key release | Cryptographic proof of TEE |
 
 ### Key Features
 
 - **Confidential ACI Container** — AMD SEV-SNP memory encryption at the CPU level
-- **Confidential SQL Database** — DC-series SQL with AMD SEV-SNP TEE for hardware-protected data
-- **Managed Identity Auth** — Azure AD managed identity for secure database access; no static credentials stored
-- **Entra-Only Authentication** — SQL Server configured for Azure AD authentication only
+- **Confidential SQL Host** — SQL Server runs on an AMD Confidential VM (`DCads_v6` family)
+- **Private Backend Connectivity** — ACI and SQL VM communicate over private VNet addressing only
+- **Public Frontend Access** — Application Gateway provides internet-facing access to the private ACI app
 - **Security Policy (ccepolicy)** — Enforces container integrity via `az confcom acipolicygen`
 - **Citizen Registry CRUD** — Full create, read, update, delete for citizen records
 - **Fictional Dataset** — 100 auto-generated records for the Republic of Norland (5 regions, 15 municipalities)
@@ -39,24 +39,25 @@ This project deploys a **single confidential container** with a public IP, conne
 Internet
     │
     ▼
+┌──────────────────────────────────┐
+│  Application Gateway (Public)    │
+│  Public IP frontend              │
+└──────────────────────────────────┘
+                │
+                │ Private VNet
+                ▼
 ┌──────────────────────────────────┐     ┌──────────────────────────────┐
 │  ACI Container (Confidential)    │     │  SQL Database (Confidential) │
-│  Public IP + DNS label           │     │  DC-series AMD SEV-SNP TEE   │
+│  Private IP (no public backend)  │     │  AMD DCasv6 SEV-SNP TEE      │
 │  ┌──────────┐  ┌──────────────┐  │     │                              │
 │  │ Nginx    │  │ Flask/Gunicorn│  │     │  Database: citizendb         │
 │  │ (80/443) │→ │ (port 8000)  │  │────►│  Table: citizen_registry     │
-│  └──────────┘  └──────────────┘  │     │  Auth: Entra-only (MI)       │
+│  └──────────┘  └──────────────┘  │     │  Auth: SQL login             │
 │  ┌──────────────────────────────┐│     │  Encryption: TDE + HW TEE    │
-│  │ SKR Sidecar (port 8080)     ││     │                              │
-│  │ Managed Identity Client ID   ││     │  Firewall: Azure services +  │
-│  └──────────────────────────────┘│     │           Deployer IP       │
-│  AMD SEV-SNP TEE                 │     │                              │
+│  │ SKR Sidecar (port 8080)      ││     │                              │
+│  └──────────────────────────────┘│     │  Private subnet only         │
+│  AMD SEV-SNP TEE                │     │                              │
 └──────────────────────────────────┘     └──────────────────────────────┘
-          │
-          │ Authenticates via Managed Identity
-          │ (No static credentials in container)
-          │
-       Azure AD
 ```
 
 ## Prerequisites
@@ -82,7 +83,7 @@ Builds the container image using ACR Tasks and pushes to a new Azure Container R
 .\Deploy-CitizenRegistry.ps1 -Prefix "myprefix" -Deploy
 ```
 
-Creates the Azure SQL Database with DC-series confidential computing, creates a managed identity for secure auth, seeds 100 citizen records, generates the ccepolicy, and deploys the Confidential ACI container group.
+Creates an AMD confidential VM (`DCads_v6` family), installs SQL Server, seeds 100 citizen records, generates the ccepolicy, and deploys the Confidential ACI container group.
 
 ### 3. Build + Deploy (combined)
 
@@ -96,7 +97,7 @@ Creates the Azure SQL Database with DC-series confidential computing, creates a 
 .\Deploy-CitizenRegistry.ps1 -Prefix "myprefix" -Cleanup
 ```
 
-Deletes the container group, SQL Database, managed identity, and resource group.
+Deletes the resource group and all contained resources.
 
 ## Parameters
 
@@ -106,8 +107,46 @@ Deletes the container group, SQL Database, managed identity, and resource group.
 | `-Build` | No | — | Build and push the container image to ACR |
 | `-Deploy` | No | — | Deploy database, generate ccepolicy, deploy Confidential ACI |
 | `-Cleanup` | No | — | Delete all Azure resources |
-| `-Location` | No | `uaenorth` | Azure region for ACI deployment |
-| `-DbLocation` | No | `eastus` | Azure region for Azure SQL Database |
+| `-Location` | No | `koreacentral` | Azure region for ACI deployment |
+| `-DbLocation` | No | Same as `-Location` | Azure region for SQL CVM |
+
+Deploy credential behavior:
+
+- SQL SA and app-login passwords are generated randomly on each deploy run.
+- Credentials are passed to Azure deployment in an ephemeral temp params file and deleted immediately after use.
+- No secret-bearing deployment params file is written under the repository path.
+
+## Operational Fix Notes
+
+The following reliability fixes are now built into the deployment and app paths:
+
+- SQL bootstrap convergence: deployment SQL initialization now enforces login default database and user-login rebinding to prevent `4060` and orphaned principal cases.
+- Demo self-heal for missing database: the app retries `4060` by creating `citizendb`, login, user mapping, roles, and `dbo.citizen_registry` before reconnecting.
+- Confidential policy drift handling: deployment pins image by digest and regenerates `securityPolicyHash` for each effective image change.
+- App Gateway race handling: backend pool updates now retry transient `CanceledAndSupersededDueToAnotherOperation` responses.
+
+## Fresh End-to-End Validation
+
+Use this sequence for a clean validation run:
+
+```powershell
+.\Deploy-CitizenRegistry.ps1 -Prefix "myprefix" -Cleanup
+.\Deploy-CitizenRegistry.ps1 -Prefix "myprefix" -Build
+.\Deploy-CitizenRegistry.ps1 -Prefix "myprefix" -Deploy
+```
+
+Then validate:
+
+```powershell
+$cfg = Get-Content .\citizen-registry-config.json -Raw | ConvertFrom-Json
+curl.exe -sS -i ("http://" + $cfg.fqdn + "/health")
+curl.exe -sS -i ("http://" + $cfg.fqdn + "/db/status")
+```
+
+Expected results:
+
+- `/health` returns HTTP `200` with `{"status":"ok"}`
+- `/db/status` returns HTTP `200` with `{"status":"connected"}`
 
 ## Application Endpoints
 

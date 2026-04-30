@@ -358,3 +358,5 @@ multiparty-view*.html
 cvm-config.json
 sov-examples/citizen-registry-app/confcom-params.json
 sov-examples/citizen-registry-app/confcom-params*.json
+sov-examples/citizen-registry-config.json
+sov-examples/deploy.log

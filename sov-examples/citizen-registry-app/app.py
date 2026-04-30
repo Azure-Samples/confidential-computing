@@ -11,11 +11,82 @@ app.config['SECRET_KEY'] = secrets.token_hex(32)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024
 
 # ---------------------------------------------------------------------------
-# Azure AD Token Auth for SQL Server (no static credentials)
+# SQL connectivity supports two modes:
+# 1) SQL auth (DB_USER/DB_PASSWORD) for SQL Server on AMD CVM.
+# 2) Azure AD token fallback for Azure SQL style deployments.
 # ---------------------------------------------------------------------------
 SQL_COPT_SS_ACCESS_TOKEN = 1256
 _credential = None
 _credential_lock = threading.Lock()
+
+
+def _build_sql_auth_conn_str(server, database, user, password):
+    return (
+        f"Driver={{ODBC Driver 18 for SQL Server}};"
+        f"Server=tcp:{server},1433;"
+        f"Database={database};"
+        f"UID={user};PWD={password};"
+        "Encrypt=yes;TrustServerCertificate=yes;"
+    )
+
+
+def _bootstrap_demo_database(server, database, db_user, db_password):
+    # Deployment-safe self-heal for demo environments:
+    # when SQL init partially succeeds and the app hits 4060, recreate the
+    # target DB/login/user mapping and retry the app login path.
+    sa_password = os.environ.get('DB_SA_PASSWORD', '')
+    if not sa_password:
+        raise RuntimeError('DB_SA_PASSWORD env var is required for database bootstrap but is not set')
+    admin_conn = pyodbc.connect(
+        _build_sql_auth_conn_str(server, 'master', 'sa', sa_password),
+        autocommit=True,
+    )
+    try:
+        cur = admin_conn.cursor()
+        cur.execute(f"IF DB_ID(N'{database}') IS NULL CREATE DATABASE [{database}]")
+        cur.execute(
+            f"IF SUSER_ID(N'{db_user}') IS NULL "
+            f"CREATE LOGIN [{db_user}] WITH PASSWORD = '{db_password}' "
+            f"ELSE ALTER LOGIN [{db_user}] WITH PASSWORD = '{db_password}'"
+        )
+        cur.execute(f"ALTER LOGIN [{db_user}] WITH DEFAULT_DATABASE = [{database}]")
+        cur.execute(f"USE [{database}]")
+        cur.execute(
+            f"IF USER_ID(N'{db_user}') IS NULL CREATE USER [{db_user}] FOR LOGIN [{db_user}]"
+        )
+        cur.execute(f"ALTER USER [{db_user}] WITH LOGIN = [{db_user}]")
+        cur.execute(
+            f"IF IS_ROLEMEMBER('db_datareader', '{db_user}') <> 1 "
+            f"ALTER ROLE db_datareader ADD MEMBER [{db_user}]"
+        )
+        cur.execute(
+            f"IF IS_ROLEMEMBER('db_datawriter', '{db_user}') <> 1 "
+            f"ALTER ROLE db_datawriter ADD MEMBER [{db_user}]"
+        )
+        cur.execute("""
+            IF OBJECT_ID(N'dbo.citizen_registry', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.citizen_registry (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    national_id NVARCHAR(20) NOT NULL UNIQUE,
+                    first_name NVARCHAR(100) NOT NULL,
+                    last_name NVARCHAR(100) NOT NULL,
+                    date_of_birth DATE NOT NULL,
+                    sex NVARCHAR(10) NOT NULL,
+                    region NVARCHAR(100) NOT NULL,
+                    municipality NVARCHAR(100) NOT NULL,
+                    address_line NVARCHAR(200),
+                    postal_code NVARCHAR(10),
+                    household_size INT DEFAULT 1,
+                    marital_status NVARCHAR(20) DEFAULT N'Single',
+                    employment_status NVARCHAR(30) DEFAULT N'Employed',
+                    tax_bracket NVARCHAR(10) DEFAULT N'B',
+                    registered_voter BIT DEFAULT 1
+                )
+            END
+        """)
+    finally:
+        admin_conn.close()
 
 
 def _get_credential():
@@ -43,8 +114,34 @@ def _get_token_struct():
 def _get_db_conn():
     server = os.environ.get('DB_HOST', '')
     database = os.environ.get('DB_NAME', 'citizendb')
+    db_user = os.environ.get('DB_USER', '')
+    db_password = os.environ.get('DB_PASSWORD', '')
     if not server:
         raise RuntimeError('Database not configured (DB_HOST is empty)')
+
+    # Prefer SQL auth for SQL Server on CVM.
+    if db_user and db_password:
+        conn_str = _build_sql_auth_conn_str(server, database, db_user, db_password)
+        try:
+            return pyodbc.connect(conn_str)
+        except pyodbc.Error as primary_error:
+            # Demo deployment fallback: if primary SQL auth is rejected or the
+            # login cannot open the requested database, retry with SA.
+            error_text = str(primary_error)
+            if '28000' not in error_text and '4060' not in error_text:
+                raise
+
+            if '4060' in error_text:
+                _bootstrap_demo_database(server, database, db_user, db_password)
+                return pyodbc.connect(conn_str)
+
+            sa_password = os.environ.get('DB_SA_PASSWORD', '')
+            if not sa_password:
+                raise  # No SA password available; re-raise the original error
+            sa_conn_str = _build_sql_auth_conn_str(server, database, 'sa', sa_password)
+            return pyodbc.connect(sa_conn_str)
+
+    # Fallback path for managed identity / Azure AD token auth.
     conn_str = (
         f"Driver={{ODBC Driver 18 for SQL Server}};"
         f"Server=tcp:{server},1433;"

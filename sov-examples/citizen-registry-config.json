@@ -1,9 +1,0 @@
-{
-  "prefix": "sgall",
-  "location": "uaenorth",
-  "dbLocation": "eastus",
-  "resourceGroup": "rg-sgall-norland",
-  "acrName": "sgallnoracr",
-  "acrLoginServer": null,
-  "image": "/norland-citizen-cce:latest"
-}

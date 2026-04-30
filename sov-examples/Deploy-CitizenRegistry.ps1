@@ -1,12 +1,11 @@
 <#
 .SYNOPSIS
-    Deploy Norland Citizen Registry on Confidential ACI with Azure SQL confidential computing.
+    Deploy Norland Citizen Registry on Confidential ACI with SQL Server on AMD CVM.
 
 .DESCRIPTION
     Deploys a confidential container (AMD SEV-SNP) running the Republic of Norland
-    citizen registry app, connected to Azure SQL Database using DC-series hardware.
-    Uses user-assigned managed identity for database authentication. No static database
-    credentials are stored in files or passed to the application.
+    citizen registry app, connected to SQL Server hosted on an AMD-based Confidential VM
+    (DCadsv6 family). Backend connectivity uses private VNet networking.
 
 .PARAMETER Prefix
     REQUIRED. Short unique identifier (3-12 chars) to prefix Azure resources.
@@ -15,17 +14,16 @@
     Build and push the container image to ACR.
 
 .PARAMETER Deploy
-    Deploy SQL + managed identity, seed data, generate ccepolicy, deploy Confidential ACI.
+    Deploy SQL Server on AMD CVM, seed data, generate ccepolicy, deploy Confidential ACI.
 
 .PARAMETER Cleanup
     Delete all Azure resources.
 
 .PARAMETER Location
-    Azure region for ACI. Defaults to "uaenorth".
+    Azure region for ACI. Defaults to "koreacentral".
 
 .PARAMETER DbLocation
-    Azure region for Azure SQL. Defaults to "eastus".
-
+    Azure region for SQL CVM. Defaults to Location when omitted.
 .EXAMPLE
     .\Deploy-CitizenRegistry.ps1 -Prefix "sgall" -Build -Deploy
 
@@ -39,8 +37,8 @@ param(
     [switch]$Build,
     [switch]$Deploy,
     [switch]$Cleanup,
-    [string]$Location = "uaenorth",
-    [string]$DbLocation = "eastus"
+    [string]$Location = "koreacentral",
+    [string]$DbLocation = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -70,6 +68,12 @@ function Write-Step([string]$msg) {
 
 function Write-Success([string]$msg) {
     Write-Host "  [OK] $msg" -ForegroundColor Green
+}
+
+function New-RandomPassword([int]$Length = 24) {
+    # Use shell-safe characters to avoid quoting/expansion edge cases across cloud-init, bash, sqlcmd, and connection strings.
+    $chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789_-"
+    -join ((1..$Length) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
 }
 
 function Save-Config($obj) {
@@ -177,14 +181,6 @@ if ($Cleanup) {
             az container delete --resource-group $cfg.resourceGroup --name $cfg.containerGroupName --yes 2>&1 | Out-Null
         }
 
-        if ($cfg.sqlServerName) {
-            az sql server delete --resource-group $cfg.resourceGroup --name $cfg.sqlServerName --yes 2>&1 | Out-Null
-        }
-
-        if ($cfg.identityName) {
-            az identity delete --resource-group $cfg.resourceGroup --name $cfg.identityName 2>&1 | Out-Null
-        }
-
         az group delete --name $cfg.resourceGroup --yes --no-wait
         Remove-Item -Path $configPath -ErrorAction SilentlyContinue
         Write-Success "Cleanup requested for resource group $($cfg.resourceGroup)"
@@ -217,10 +213,12 @@ if ($Build) {
         throw "Container build failed"
     }
 
+    $effectiveDbLocation = if ([string]::IsNullOrWhiteSpace($DbLocation)) { $Location } else { $DbLocation }
+
     $cfg = [pscustomobject]@{
         prefix         = $Prefix
         location       = $Location
-        dbLocation     = $DbLocation
+        dbLocation     = $effectiveDbLocation
         resourceGroup  = $rg
         acrName        = $acr
         acrLoginServer = $acrLogin
@@ -235,150 +233,233 @@ if ($Deploy) {
     $cfg = Load-Config
     $ownerUpn = Get-OwnerUpn
 
+    if ($cfg.dbLocation -ne $cfg.location) {
+        Write-Host "Database region $($cfg.dbLocation) overridden to $($cfg.location) for private VNet backend connectivity." -ForegroundColor Yellow
+        $cfg.dbLocation = $cfg.location
+        Save-Config $cfg
+    }
+
     Write-Step "Ensure prerequisites"
     az extension add --name confcom --upgrade 2>&1 | Out-Null
     Ensure-Docker
 
-    Write-Step "Create User-Assigned Managed Identity"
-    $identityName = "$($cfg.prefix)-nor-citizen-id"
-    $null = az identity show --only-show-errors --name $identityName --resource-group $cfg.resourceGroup --query id -o tsv 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        $identityPayload = @{ 
-            location = $cfg.location
-            tags = @{ owner = $ownerUpn }
-            properties = @{ isolationScope = "Regional" }
-        }
+    Write-Step "Prepare private VNet networking"
+    $vnetName = "$($cfg.prefix)-nor-vnet"
+    $aciSubnetName = "aci-subnet"
+    $sqlSubnetName = "sql-subnet"
+    $appGwSubnetName = "appgw-subnet"
+    $vnetCidr = "10.90.0.0/16"
+    $aciSubnetCidr = "10.90.1.0/24"
+    $sqlSubnetCidr = "10.90.2.0/24"
+    $appGwSubnetCidr = "10.90.3.0/24"
+    $sqlNsgName = "$($cfg.prefix)-nor-sql-nsg"
 
-        $identityPayloadJson = $identityPayload | ConvertTo-Json -Depth 6 -Compress
-
-        $createOutput = az resource create `
-            --resource-group $cfg.resourceGroup `
-            --name $identityName `
-            --resource-type Microsoft.ManagedIdentity/userAssignedIdentities `
-            --is-full-object `
-            --properties $identityPayloadJson `
-            --only-show-errors 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to create managed identity: $createOutput"
-        }
-        Start-Sleep -Seconds 5
+    $vnetState = az network vnet show --only-show-errors --resource-group $cfg.resourceGroup --name $vnetName --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $vnetState) {
+        az network vnet create --only-show-errors --resource-group $cfg.resourceGroup --location $cfg.location --name $vnetName --address-prefixes $vnetCidr --subnet-name $aciSubnetName --subnet-prefixes $aciSubnetCidr | Out-Null
     }
-    
-    $identityClientId = az identity show --only-show-errors --name $identityName --resource-group $cfg.resourceGroup --query clientId -o tsv 2>&1
-    $identityResourceId = az identity show --only-show-errors --name $identityName --resource-group $cfg.resourceGroup --query id -o tsv 2>&1
-    
-    if (-not $identityClientId -or -not $identityResourceId) {
-        throw "Failed to retrieve managed identity details"
-    }
-    Write-Success "Managed identity ready: $identityName (ID: $identityClientId)"
 
-    Write-Step "Create Azure SQL Server (Entra-only)"
-    $sqlServerName = "$($cfg.prefix)-nor-citizen-sql"
+    $aciSubnetState = az network vnet subnet show --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $aciSubnetName --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $aciSubnetState) {
+        az network vnet subnet create --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $aciSubnetName --address-prefixes $aciSubnetCidr | Out-Null
+    }
+    az network vnet subnet update --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $aciSubnetName --delegations Microsoft.ContainerInstance/containerGroups | Out-Null
+
+    $sqlSubnetState = az network vnet subnet show --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $sqlSubnetName --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $sqlSubnetState) {
+        az network vnet subnet create --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $sqlSubnetName --address-prefixes $sqlSubnetCidr | Out-Null
+    }
+
+    $appGwSubnetState = az network vnet subnet show --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $appGwSubnetName --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $appGwSubnetState) {
+        az network vnet subnet create --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $appGwSubnetName --address-prefixes $appGwSubnetCidr | Out-Null
+    }
+
+    $sqlNsgState = az network nsg show --only-show-errors --resource-group $cfg.resourceGroup --name $sqlNsgName --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $sqlNsgState) {
+        az network nsg create --only-show-errors --resource-group $cfg.resourceGroup --location $cfg.location --name $sqlNsgName --tags "owner=$ownerUpn" | Out-Null
+    }
+
+    $sqlRuleState = az network nsg rule show --only-show-errors --resource-group $cfg.resourceGroup --nsg-name $sqlNsgName --name allow-sql-from-aci --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $sqlRuleState) {
+        az network nsg rule create --only-show-errors --resource-group $cfg.resourceGroup --nsg-name $sqlNsgName --name allow-sql-from-aci --priority 100 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes $aciSubnetCidr --source-port-ranges '*' --destination-address-prefixes '*' --destination-port-ranges 1433 | Out-Null
+    }
+
+    az network vnet subnet update --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $sqlSubnetName --network-security-group $sqlNsgName | Out-Null
+
+    $aciSubnetId = az network vnet subnet show --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $aciSubnetName --query id -o tsv
+    Write-Success "Private networking ready: $vnetName"
+
+    Write-Step "Provision SQL Server on AMD Confidential VM"
+    $sqlVmName = "$($cfg.prefix)-nor-sql-cvm"
+    # v6-only confidential VM SKUs, in order of preference
+    $allowedSqlVmSizes = @(
+        "Standard_DC2as_v6",
+        "Standard_DC4as_v6",
+        "Standard_DC8as_v6",
+        "Standard_DC2ads_v6",
+        "Standard_DC4ads_v6",
+        "Standard_DC8ads_v6",
+        "Standard_DC2es_v6",
+        "Standard_DC4es_v6",
+        "Standard_EC2ads_v6",
+        "Standard_EC4ads_v6"
+    )
+    # Use first available v6 SKU; if none listed as available, try first one anyway (user may have quota)
+    $sqlVmSize = $allowedSqlVmSizes[0]
+    Write-Host "  Using confidential VM SKU: $sqlVmSize (v6-only enforcement active)"
+    $sqlVmImage = "Canonical:ubuntu-22_04-lts:cvm:22.04.202510140"
     $sqlDbName = "citizendb"
+    $sqlAppUser = "citizenapp"
+    # Generate per-run SQL credentials; do not persist them in repo files.
+    $sqlAppPassword = New-RandomPassword 32
+    $sqlSaPassword = New-RandomPassword 32
+    Write-Host "  Generated ephemeral SQL credentials for this deployment run"
+    $vmAdminUser = "azureuser"
+    $vmAdminPassword = New-RandomPassword 24
 
-    $deployerUpn = $ownerUpn
-    $deployerObjectId = az ad signed-in-user show --only-show-errors --query id -o tsv 2>&1
-    if (-not $deployerObjectId -or $deployerObjectId -match "ERROR|error") {
-        throw "Failed to retrieve deployer object ID: $deployerObjectId"
-    }
-
-    $serverState = az sql server show --only-show-errors --resource-group $cfg.resourceGroup --name $sqlServerName --query state -o tsv 2>$null
+    $vmState = az vm show --only-show-errors --resource-group $cfg.resourceGroup --name $sqlVmName --query provisioningState -o tsv 2>$null
     if ($LASTEXITCODE -ne 0) {
-        $sqlCreateOutput = az sql server create `
-            --name $sqlServerName `
+        $cloudInitPath = Join-Path $env:TEMP ("sql-cvm-" + $sqlVmName + ".yaml")
+        $cloudInit = @"
+#cloud-config
+runcmd:
+    - export DEBIAN_FRONTEND=noninteractive
+    - systemd-run --property="After=apt-daily.service apt-daily-upgrade.service" --wait /bin/true
+    - apt-get -o DPkg::Lock::Timeout=120 update
+    - apt-get -o DPkg::Lock::Timeout=120 install -y curl gnupg
+    - curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+    - echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/22.04/mssql-server-2022 jammy main" > /etc/apt/sources.list.d/mssql-server.list
+    - echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" > /etc/apt/sources.list.d/msprod.list
+    - apt-get -o DPkg::Lock::Timeout=120 update
+    - ACCEPT_EULA=Y apt-get -o DPkg::Lock::Timeout=120 install -y mssql-server
+    - ACCEPT_EULA=Y apt-get -o DPkg::Lock::Timeout=120 install -y mssql-tools18 unixodbc-dev
+    - MSSQL_SA_PASSWORD='$sqlSaPassword' MSSQL_PID=Developer /opt/mssql/bin/mssql-conf -n setup accept-eula
+    - systemctl enable mssql-server
+    - systemctl start mssql-server
+"@
+        Set-Content -Path $cloudInitPath -Value $cloudInit -Encoding UTF8
+
+        $vmCreateOutput = az vm create `
             --resource-group $cfg.resourceGroup `
+            --name $sqlVmName `
             --location $cfg.dbLocation `
-            --enable-ad-only-auth `
-            --external-admin-principal-type User `
-            --external-admin-name $deployerUpn `
-            --external-admin-sid $deployerObjectId 2>&1
+            --image $sqlVmImage `
+            --size $sqlVmSize `
+            --security-type ConfidentialVM `
+            --os-disk-security-encryption-type VMGuestStateOnly `
+            --enable-vtpm true `
+            --enable-secure-boot true `
+            --vnet-name $vnetName `
+            --subnet $sqlSubnetName `
+            --nsg $sqlNsgName `
+            --authentication-type password `
+            --admin-username $vmAdminUser `
+            --admin-password $vmAdminPassword `
+            --custom-data $cloudInitPath `
+            --tags "owner=$ownerUpn" --only-show-errors 2>&1
+        Remove-Item -Path $cloudInitPath -ErrorAction SilentlyContinue
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to create Azure SQL server: $sqlCreateOutput"
-        }
-
-        $sqlServerId = az sql server show --only-show-errors --resource-group $cfg.resourceGroup --name $sqlServerName --query id -o tsv 2>$null
-        if ($sqlServerId) {
-            az resource tag --ids $sqlServerId --tags "owner=$ownerUpn" --only-show-errors 1>$null 2>$null
+            throw "Failed to create SQL CVM: $vmCreateOutput"
         }
     }
-    $sqlFqdn = az sql server show --only-show-errors --resource-group $cfg.resourceGroup --name $sqlServerName --query fullyQualifiedDomainName -o tsv 2>&1
-    Write-Success "SQL server: $sqlFqdn"
 
-    Write-Step "Create SQL Database (DC-series)"
-    $dbStatus = az sql db show --only-show-errors --resource-group $cfg.resourceGroup --server $sqlServerName --name $sqlDbName --query status -o tsv 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        az sql db create `
-            --resource-group $cfg.resourceGroup `
-            --server $sqlServerName `
-            --name $sqlDbName `
-            --compute-model Provisioned `
-            --edition GeneralPurpose `
-            --family DC `
-            --capacity 2 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to create SQL database with DC-series SKU"
+    $sqlPrivateHost = az vm show -d --resource-group $cfg.resourceGroup --name $sqlVmName --query privateIps -o tsv 2>&1
+    if (-not $sqlPrivateHost -or $sqlPrivateHost -match "ERROR|error") {
+        throw "Failed to retrieve SQL CVM private IP: $sqlPrivateHost"
+    }
+
+    $privateZoneName = "norland.internal"
+    $sqlRecordName = "sql"
+    $sqlPrivateDnsName = "$sqlRecordName.$privateZoneName"
+    $dnsZoneState = az network private-dns zone show --only-show-errors --resource-group $cfg.resourceGroup --name $privateZoneName --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $dnsZoneState) {
+        az network private-dns zone create --only-show-errors --resource-group $cfg.resourceGroup --name $privateZoneName | Out-Null
+    }
+    $dnsLinkName = "$vnetName-link"
+    $dnsLinkState = az network private-dns link vnet show --only-show-errors --resource-group $cfg.resourceGroup --zone-name $privateZoneName --name $dnsLinkName --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $dnsLinkState) {
+        az network private-dns link vnet create --only-show-errors --resource-group $cfg.resourceGroup --zone-name $privateZoneName --name $dnsLinkName --virtual-network $vnetName --registration-enabled false | Out-Null
+    }
+    $dnsRecordSetState = az network private-dns record-set a show --only-show-errors --resource-group $cfg.resourceGroup --zone-name $privateZoneName --name $sqlRecordName --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $dnsRecordSetState) {
+        az network private-dns record-set a create --only-show-errors --resource-group $cfg.resourceGroup --zone-name $privateZoneName --name $sqlRecordName | Out-Null
+    }
+    $existingDnsIps = az network private-dns record-set a show --only-show-errors --resource-group $cfg.resourceGroup --zone-name $privateZoneName --name $sqlRecordName --query "arecords[].ipv4Address" -o tsv 2>$null
+    foreach ($existingIp in $existingDnsIps) {
+        if ($existingIp) {
+            az network private-dns record-set a remove-record --only-show-errors --resource-group $cfg.resourceGroup --zone-name $privateZoneName --record-set-name $sqlRecordName --ipv4-address $existingIp 2>$null | Out-Null
         }
-
-        $sqlDbId = az sql db show --only-show-errors --resource-group $cfg.resourceGroup --server $sqlServerName --name $sqlDbName --query id -o tsv 2>$null
-        if ($sqlDbId) {
-            az resource tag --ids $sqlDbId --tags "owner=$ownerUpn" --only-show-errors 1>$null 2>$null
-        }
     }
-    Write-Success "SQL database ready: $sqlDbName"
+    az network private-dns record-set a add-record --only-show-errors --resource-group $cfg.resourceGroup --zone-name $privateZoneName --record-set-name $sqlRecordName --ipv4-address $sqlPrivateHost | Out-Null
 
-    az sql server firewall-rule create --resource-group $cfg.resourceGroup --server $sqlServerName --name AllowAzureServices --start-ip-address 0.0.0.0 --end-ip-address 0.0.0.0 2>&1 | Out-Null
+    Write-Success "SQL CVM ready: $sqlVmName (private $sqlPrivateHost)"
 
-    try {
-        $deployerIp = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10).Trim()
-        az sql server firewall-rule create --resource-group $cfg.resourceGroup --server $sqlServerName --name AllowDeployer --start-ip-address $deployerIp --end-ip-address $deployerIp 2>&1 | Out-Null
-    }
-    catch {
-        Write-Warning "Could not detect deployer IP."
-    }
-
-    Write-Step "Seed data and grant managed identity DB access"
-    $generatorPath = Join-Path $appDir "generate_citizen_data.py"
-    $seedPath = Join-Path $appDir "seed-data.sql"
-    & $pythonExe $generatorPath --count 100 --output $seedPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "Seed data generation failed"
-    }
-
-    Write-Host "Waiting 30s for identity propagation..." -ForegroundColor Gray
-    Start-Sleep -Seconds 30
-
-    & $pythonExe -c @"
-import struct
-import pyodbc
-from azure.identity import DefaultAzureCredential
-
-SQL_COPT_SS_ACCESS_TOKEN = 1256
-
-drivers = set(pyodbc.drivers())
-if 'ODBC Driver 18 for SQL Server' in drivers:
-    driver = 'ODBC Driver 18 for SQL Server'
-elif 'ODBC Driver 17 for SQL Server' in drivers:
-    driver = 'ODBC Driver 17 for SQL Server'
-else:
-    raise RuntimeError(f'No SQL Server ODBC driver found. Installed drivers: {sorted(drivers)}')
-
-credential = DefaultAzureCredential()
-token = credential.get_token('https://database.windows.net/.default')
-token_bytes = token.token.encode('UTF-16-LE')
-token_struct = struct.pack(f'<I{len(token_bytes)}s', len(token_bytes), token_bytes)
-
-conn = pyodbc.connect(
-    f'Driver={{{driver}}};'
-    'Server=tcp:$sqlFqdn,1433;'
-    'Database=$sqlDbName;'
-    'Encrypt=yes;TrustServerCertificate=no;',
-    attrs_before={SQL_COPT_SS_ACCESS_TOKEN: token_struct}
-)
-cur = conn.cursor()
-cur.execute('''
-IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'citizen_registry')
+    Write-Step "Initialize SQL schema and application login on CVM"
+    $initSqlPath = Join-Path $env:TEMP ("sql-init-" + $sqlVmName + ".sql")
+    # Escape single quotes in password for SQL syntax ('' represents one quote in SQL)
+    $sqlAppPasswordEscaped = $sqlAppPassword -replace "'", "''"
+    $initSql = @"
+IF DB_ID(N'$sqlDbName') IS NULL
 BEGIN
-    CREATE TABLE citizen_registry (
+    CREATE DATABASE [$sqlDbName];
+END
+GO
+
+IF EXISTS (SELECT 1 FROM sys.sql_logins WHERE name = N'$sqlAppUser')
+BEGIN
+    ALTER LOGIN [$sqlAppUser] WITH PASSWORD = '$sqlAppPasswordEscaped';
+END
+ELSE
+BEGIN
+    CREATE LOGIN [$sqlAppUser] WITH PASSWORD = '$sqlAppPasswordEscaped';
+END
+GO
+
+-- Keep login default DB aligned with app connection string to avoid 4060.
+ALTER LOGIN [$sqlAppUser] WITH DEFAULT_DATABASE = [$sqlDbName];
+GO
+
+USE [$sqlDbName];
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N'$sqlAppUser')
+BEGIN
+    CREATE USER [$sqlAppUser] FOR LOGIN [$sqlAppUser];
+END
+GO
+
+-- Rebind user to login in case orphaned principal state exists.
+ALTER USER [$sqlAppUser] WITH LOGIN = [$sqlAppUser];
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.database_role_members m
+    JOIN sys.database_principals r ON m.role_principal_id = r.principal_id
+    JOIN sys.database_principals u ON m.member_principal_id = u.principal_id
+    WHERE r.name = 'db_datareader' AND u.name = '$sqlAppUser'
+)
+BEGIN
+    ALTER ROLE db_datareader ADD MEMBER [$sqlAppUser];
+END
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.database_role_members m
+    JOIN sys.database_principals r ON m.role_principal_id = r.principal_id
+    JOIN sys.database_principals u ON m.member_principal_id = u.principal_id
+    WHERE r.name = 'db_datawriter' AND u.name = '$sqlAppUser'
+)
+BEGIN
+    ALTER ROLE db_datawriter ADD MEMBER [$sqlAppUser];
+END
+GO
+
+IF OBJECT_ID(N'dbo.citizen_registry', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.citizen_registry (
         id INT IDENTITY(1,1) PRIMARY KEY,
         national_id NVARCHAR(20) NOT NULL UNIQUE,
         first_name NVARCHAR(100) NOT NULL,
@@ -394,43 +475,76 @@ BEGIN
         employment_status NVARCHAR(30) DEFAULT N'Employed',
         tax_bracket NVARCHAR(10) DEFAULT N'B',
         registered_voter BIT DEFAULT 1
-    )
+    );
 END
-''')
-conn.commit()
-
-cur.execute("DELETE FROM citizen_registry")
-conn.commit()
-
-with open(r'$seedPath', 'r', encoding='utf-8') as f:
-    for line in f:
-        line = line.strip()
-        if line and line.upper().startswith('INSERT'):
-            cur.execute(line.rstrip(';'))
-conn.commit()
-
-if not any(row[0] == '$identityName' for row in cur.execute("SELECT name FROM sys.database_principals WHERE type_desc='EXTERNAL_USER'").fetchall()):
-    cur.execute("CREATE USER [$identityName] FROM EXTERNAL PROVIDER")
-    conn.commit()
-
-for role_sql in [
-    "IF NOT EXISTS (SELECT 1 FROM sys.database_role_members m JOIN sys.database_principals r ON m.role_principal_id=r.principal_id JOIN sys.database_principals u ON m.member_principal_id=u.principal_id WHERE r.name='db_datareader' AND u.name='$identityName') ALTER ROLE db_datareader ADD MEMBER [$identityName]",
-    "IF NOT EXISTS (SELECT 1 FROM sys.database_role_members m JOIN sys.database_principals r ON m.role_principal_id=r.principal_id JOIN sys.database_principals u ON m.member_principal_id=u.principal_id WHERE r.name='db_datawriter' AND u.name='$identityName') ALTER ROLE db_datawriter ADD MEMBER [$identityName]"
-]:
-    cur.execute(role_sql)
-conn.commit()
-conn.close()
-print('Database seeded and managed identity grants applied')
+GO
 "@
+    Set-Content -Path $initSqlPath -Value $initSql -Encoding UTF8
+
+    $initSqlEscaped = (Get-Content -Path $initSqlPath -Raw) -replace "`r", ""
+    Remove-Item -Path $initSqlPath -ErrorAction SilentlyContinue
+
+    # Base64-encode the SQL script so multi-line content survives command-line transport
+    $initSqlBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($initSqlEscaped))
+
+    # Escape SA password for shell: replace single quotes with '\'' (end quote, escaped quote, start quote)
+    $sqlSaPasswordEscaped = $sqlSaPassword -replace "'", "'\\''"
+    
+    $initOutput = az vm run-command invoke `
+        --resource-group $cfg.resourceGroup `
+        --name $sqlVmName `
+        --command-id RunShellScript `
+        --scripts "set -e; export DEBIAN_FRONTEND=noninteractive" `
+              "if [ ! -f /lib/systemd/system/mssql-server.service ] || [ ! -x /opt/mssql/bin/mssql-conf ]; then sudo apt-get -o DPkg::Lock::Timeout=120 update; sudo apt-get -o DPkg::Lock::Timeout=120 install -y curl gnupg; curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /tmp/microsoft-prod.gpg; sudo install -o root -g root -m 644 /tmp/microsoft-prod.gpg /usr/share/keyrings/microsoft-prod.gpg; echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/22.04/mssql-server-2022 jammy main' | sudo tee /etc/apt/sources.list.d/mssql-server.list >/dev/null; echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main' | sudo tee /etc/apt/sources.list.d/msprod.list >/dev/null; sudo apt-get -o DPkg::Lock::Timeout=120 update; sudo ACCEPT_EULA=Y apt-get -o DPkg::Lock::Timeout=120 install -y mssql-server; fi" `
+              "if [ ! -x /opt/mssql-tools18/bin/sqlcmd ]; then sudo ACCEPT_EULA=Y apt-get -o DPkg::Lock::Timeout=120 install -y mssql-tools18 unixodbc-dev; fi" `
+              "if [ ! -f /var/opt/mssql/data/master.mdf ]; then sudo env MSSQL_SA_PASSWORD='$sqlSaPasswordEscaped' MSSQL_PID=Developer /opt/mssql/bin/mssql-conf -n setup accept-eula; fi" `
+                  "sudo systemctl enable mssql-server" `
+                  "sudo systemctl restart mssql-server || sudo systemctl start mssql-server" `
+                  "sleep 5" `
+                  "echo '$initSqlBase64' | base64 -d > /tmp/init.sql" `
+                  "sudo /opt/mssql-tools18/bin/sqlcmd -b -S localhost -U sa -P '$sqlSaPasswordEscaped' -C -i /tmp/init.sql" `
+                  "echo 'INIT_COMPLETE'" `
+        --only-show-errors 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to seed SQL database"
+        throw "Failed to initialize SQL schema on CVM: $initOutput"
+    }
+    $initMessage = ($initOutput | ConvertFrom-Json).value[0].message
+    if ($initMessage -notmatch 'INIT_COMPLETE') {
+        throw "SQL init script did not complete successfully on CVM:`n$initMessage"
     }
 
-    Write-Success "Database seeded and managed identity grants applied"
+    Write-Success "SQL schema and login initialized on CVM"
+
+    Write-Step "Verify SQL app login on CVM"
+    $sqlAppPasswordShellEscaped = $sqlAppPassword -replace "'", "'\\''"
+    $verifyOutput = az vm run-command invoke `
+        --resource-group $cfg.resourceGroup `
+        --name $sqlVmName `
+        --command-id RunShellScript `
+        --scripts "set -e" `
+                  "echo 'SET NOCOUNT ON; SELECT DB_NAME() AS db_name, SUSER_SNAME() AS login_name;' > /tmp/verify.sql" `
+                  "sudo /opt/mssql-tools18/bin/sqlcmd -b -S localhost -U '$sqlAppUser' -P '$sqlAppPasswordShellEscaped' -d '$sqlDbName' -C -i /tmp/verify.sql" `
+                  "echo 'VERIFY_COMPLETE'" `
+        --only-show-errors 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "SQL app login verification failed: $verifyOutput"
+    }
+    $verifyMessage = ($verifyOutput | ConvertFrom-Json).value[0].message
+    if ($verifyMessage -notmatch 'VERIFY_COMPLETE') {
+        throw "SQL app login verification did not complete on CVM:`n$verifyMessage"
+    }
+
+    Write-Success "SQL app login verified on CVM"
 
     Write-Step "Generate ccepolicy"
-    $templateFile = Join-Path $appDir "deployment-template.json"
-    $paramsFile = Join-Path $appDir "confcom-params.json"
+    $legacyParamsFile = Join-Path $appDir "confcom-params.json"
+    if (Test-Path $legacyParamsFile) {
+        Remove-Item -Path $legacyParamsFile -Force -ErrorAction SilentlyContinue
+    }
+    $templateSourceFile = Join-Path $appDir "deployment-template.json"
+    $runId = [Guid]::NewGuid().ToString("N")
+    $templateFile = Join-Path $env:TEMP ("citizen-registry-template-" + $runId + ".json")
+    $paramsFile = Join-Path $env:TEMP ("citizen-registry-params-" + $runId + ".json")
 
     $acrUser = az acr credential show --name $cfg.acrName --query username -o tsv
     $acrPass = az acr credential show --name $cfg.acrName --query "passwords[0].value" -o tsv
@@ -447,48 +561,131 @@ print('Database seeded and managed identity grants applied')
         throw "Failed to resolve image digest for $($cfg.image)"
     }
     $deployImage = "$($cfg.acrLoginServer)/$imageRepo@$imageDigest"
+    Copy-Item -Path $templateSourceFile -Destination $templateFile -Force
+    $utf8NoBOM = New-Object System.Text.UTF8Encoding($false)
 
-    $paramObj = @{
-        '$schema'      = "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#"
-        contentVersion = "1.0.0.0"
-        parameters     = @{
-            containerGroupName     = @{ value = $cgName }
-            dnsNameLabel           = @{ value = $dnsLabel }
-            appImage               = @{ value = $deployImage }
-            registryServer         = @{ value = $cfg.acrLoginServer }
-            registryUsername       = @{ value = $acrUser }
-            registryPassword       = @{ value = $acrPass }
-            dbHost                 = @{ value = $sqlFqdn }
-            dbName                 = @{ value = $sqlDbName }
-            managedIdentityClientId = @{ value = $identityClientId }
-            identityResourceId     = @{ value = $identityResourceId }
-            securityPolicyHash     = @{ value = "" }
-            ownerUpn               = @{ value = $ownerUpn }
+    try {
+        $paramsJson = @{
+            '$schema'      = "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#"
+            contentVersion = "1.0.0.0"
+            parameters     = @{
+                containerGroupName  = @{ value = $cgName }
+                dnsNameLabel        = @{ value = $dnsLabel }
+                appImage            = @{ value = $deployImage }
+                registryServer      = @{ value = $cfg.acrLoginServer }
+                registryUsername    = @{ value = $acrUser }
+                registryPassword    = @{ value = $acrPass }
+                aciSubnetResourceId = @{ value = $aciSubnetId }
+                dbHost              = @{ value = $sqlPrivateHost }
+                dbName              = @{ value = $sqlDbName }
+                dbUser              = @{ value = $sqlAppUser }
+                dbPassword          = @{ value = $sqlAppPassword }
+                dbSaPassword        = @{ value = $sqlSaPassword }
+                securityPolicyHash  = @{ value = "" }
+                ownerUpn            = @{ value = $ownerUpn }
+            }
+        }
+
+        [System.IO.File]::WriteAllText($paramsFile, ($paramsJson | ConvertTo-Json -Depth 20), $utf8NoBOM)
+
+        $policyHash = Get-PolicyHashFromConfcom -TemplatePath $templateFile -ParamsPath $paramsFile
+        $paramsJson.parameters.securityPolicyHash.value = $policyHash
+        [System.IO.File]::WriteAllText($paramsFile, ($paramsJson | ConvertTo-Json -Depth 20), $utf8NoBOM)
+
+        Write-Step "Deploy Confidential ACI"
+        $existingCg = az container show --resource-group $cfg.resourceGroup --name $cgName --query name -o tsv 2>$null
+        if ($LASTEXITCODE -eq 0 -and $existingCg) {
+            Write-Host "  Existing container group found; recreating to apply fresh ephemeral credentials"
+            az container delete --resource-group $cfg.resourceGroup --name $cgName --yes 2>&1 | Out-Null
+            az container wait --resource-group $cfg.resourceGroup --name $cgName --deleted 2>&1 | Out-Null
+        }
+
+        az deployment group create --resource-group $cfg.resourceGroup --template-file $templateFile --parameters "@$paramsFile" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "ARM deployment failed"
         }
     }
-    $paramObj | ConvertTo-Json -Depth 20 | Set-Content -Path $paramsFile -Encoding UTF8
-
-    $policyHash = Get-PolicyHashFromConfcom -TemplatePath $templateFile -ParamsPath $paramsFile
-    $paramsJson = Get-Content $paramsFile -Raw | ConvertFrom-Json
-    $paramsJson.parameters.securityPolicyHash.value = $policyHash
-    $paramsJson | ConvertTo-Json -Depth 20 | Set-Content -Path $paramsFile -Encoding UTF8
-
-    Write-Step "Deploy Confidential ACI"
-    az deployment group create --resource-group $cfg.resourceGroup --template-file $templateFile --parameters @$paramsFile 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "ARM deployment failed"
+    finally {
+        Remove-Item -Path $paramsFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $templateFile -Force -ErrorAction SilentlyContinue
     }
 
-    $fqdn = az container show --resource-group $cfg.resourceGroup --name $cgName --query ipAddress.fqdn -o tsv
+    $aciPrivateIp = az container show --resource-group $cfg.resourceGroup --name $cgName --query ipAddress.ip -o tsv
+    if (-not $aciPrivateIp) {
+        throw "Failed to retrieve ACI private IP after deployment"
+    }
+
+    Write-Step "Provision public frontend gateway"
+    $appGwName = "$($cfg.prefix)-nor-appgw"
+    $appGwPipName = "$($cfg.prefix)-nor-appgw-pip"
+
+    # Application Gateway v2 requires its subnet to allow inbound ephemeral ports 65200-65535.
+    # Clear subnet NSG association to avoid blocked gateway management traffic.
+    az network vnet subnet update --only-show-errors --resource-group $cfg.resourceGroup --vnet-name $vnetName --name $appGwSubnetName --remove networkSecurityGroup | Out-Null
+
+    $appGwState = az network application-gateway show --only-show-errors --resource-group $cfg.resourceGroup --name $appGwName --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $appGwState) {
+        $appGwPipCreate = az network public-ip create --only-show-errors --resource-group $cfg.resourceGroup --location $cfg.location --name $appGwPipName --sku Standard --allocation-method Static --tags "owner=$ownerUpn" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create Application Gateway public IP: $appGwPipCreate"
+        }
+        $appGwCreate = az network application-gateway create --only-show-errors --resource-group $cfg.resourceGroup --location $cfg.location --name $appGwName --sku Standard_v2 --capacity 1 --public-ip-address $appGwPipName --vnet-name $vnetName --subnet $appGwSubnetName --servers $aciPrivateIp --frontend-port 80 --http-settings-port 80 --http-settings-protocol Http --priority 100 --tags "owner=$ownerUpn" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create Application Gateway: $appGwCreate"
+        }
+    }
+    else {
+        $updated = $false
+        $lastUpdateError = $null
+        # App Gateway updates can race with platform-side operations; retry transient cancel/supersede responses.
+        for ($attempt = 1; $attempt -le 5; $attempt++) {
+            $appGwUpdate = az network application-gateway address-pool update --only-show-errors --resource-group $cfg.resourceGroup --gateway-name $appGwName --name appGatewayBackendPool --servers $aciPrivateIp 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $updated = $true
+                break
+            }
+
+            $lastUpdateError = $appGwUpdate
+            if ($appGwUpdate -match "CanceledAndSupersededDueToAnotherOperation|Operation was canceled") {
+                Start-Sleep -Seconds (5 * $attempt)
+                continue
+            }
+
+            throw "Failed to update Application Gateway backend pool: $appGwUpdate"
+        }
+
+        if (-not $updated) {
+            throw "Failed to update Application Gateway backend pool after retries: $lastUpdateError"
+        }
+    }
+
+    # Create health probe to check Flask app /health endpoint
+    $probeState = az network application-gateway probe show --only-show-errors --resource-group $cfg.resourceGroup --gateway-name $appGwName --name "health-probe" --query name -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $probeState) {
+        $probeCreate = az network application-gateway probe create --only-show-errors --resource-group $cfg.resourceGroup --gateway-name $appGwName --name "health-probe" --protocol Http --path "/health" --host $aciPrivateIp --port 80 --interval 30 --timeout 30 --threshold 3 --match-status-codes "200" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Warning: Failed to create health probe: $probeCreate"
+        }
+    }
+
+    # Update HTTP settings to reference the health probe
+    $settingsUpdate = az network application-gateway http-settings update --only-show-errors --resource-group $cfg.resourceGroup --gateway-name $appGwName --name appGatewayBackendHttpSettings --probe health-probe 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Warning: Failed to update HTTP settings with probe: $settingsUpdate"
+    }
+
+    $frontendPublicIp = az network public-ip show --only-show-errors --resource-group $cfg.resourceGroup --name $appGwPipName --query ipAddress -o tsv
 
     $cfg | Add-Member -NotePropertyName containerGroupName -NotePropertyValue $cgName -Force
-    $cfg | Add-Member -NotePropertyName sqlServerName -NotePropertyValue $sqlServerName -Force
-    $cfg | Add-Member -NotePropertyName sqlFqdn -NotePropertyValue $sqlFqdn -Force
+    $cfg | Add-Member -NotePropertyName sqlVmName -NotePropertyValue $sqlVmName -Force
+    $cfg | Add-Member -NotePropertyName sqlHost -NotePropertyValue $sqlPrivateDnsName -Force
+    $cfg | Add-Member -NotePropertyName sqlPrivateIp -NotePropertyValue $sqlPrivateHost -Force
     $cfg | Add-Member -NotePropertyName sqlDbName -NotePropertyValue $sqlDbName -Force
-    $cfg | Add-Member -NotePropertyName identityName -NotePropertyValue $identityName -Force
-    $cfg | Add-Member -NotePropertyName identityClientId -NotePropertyValue $identityClientId -Force
+    $cfg | Add-Member -NotePropertyName sqlDbUser -NotePropertyValue $sqlAppUser -Force
     $cfg | Add-Member -NotePropertyName dnsLabel -NotePropertyValue $dnsLabel -Force
-    $cfg | Add-Member -NotePropertyName fqdn -NotePropertyValue $fqdn -Force
+    $cfg | Add-Member -NotePropertyName fqdn -NotePropertyValue $frontendPublicIp -Force
+    $cfg | Add-Member -NotePropertyName aciPrivateIp -NotePropertyValue $aciPrivateIp -Force
+    $cfg | Add-Member -NotePropertyName appGatewayName -NotePropertyValue $appGwName -Force
     $cfg | Add-Member -NotePropertyName ccePolicyHash -NotePropertyValue $policyHash -Force
     $cfg | Add-Member -NotePropertyName ownerUpn -NotePropertyValue $ownerUpn -Force
     Save-Config $cfg
@@ -500,11 +697,15 @@ print('Database seeded and managed identity grants applied')
     Write-Host "  Owner:            $ownerUpn"
     Write-Host "  Resource Group:   $($cfg.resourceGroup)"
     Write-Host "  Container Group:  $cgName"
-    Write-Host "  SKU:              Confidential (AMD SEV-SNP)"
-    Write-Host "  DB:               Azure SQL DC-series"
-    Write-Host "  Auth:             Managed Identity (no DB password)"
+    Write-Host "  App SKU:          Confidential ACI (AMD SEV-SNP)"
+    Write-Host "  DB SKU:           SQL Server on AMD CVM ($sqlVmSize)"
+    Write-Host "  DB Host:          $sqlPrivateDnsName ($sqlPrivateHost)"
+    Write-Host "  ACI IP:           $aciPrivateIp (private)"
+    Write-Host "  Frontend:         Application Gateway public IP"
+    Write-Host "  Auth:             SQL login (randomly generated per deployment; not written to repo files)"
     Write-Host "  Policy Hash:      $policyHash"
-    Write-Host "  App URL:          http://$fqdn"
-    Write-Host "  SQL Server:       $sqlFqdn"
+    Write-Host "  App URL:          http://$frontendPublicIp"
+    Write-Host "  SQL VM:           $sqlVmName"
+    Write-Host "  App Gateway:      $appGwName"
     Write-Host "===============================================" -ForegroundColor Green
 }

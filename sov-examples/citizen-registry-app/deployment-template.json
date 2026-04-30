@@ -24,6 +24,9 @@
     "dnsNameLabel": {
       "type": "string"
     },
+    "aciSubnetResourceId": {
+      "type": "string"
+    },
     "dbHost": {
       "type": "string"
     },
@@ -31,11 +34,16 @@
       "type": "string",
       "defaultValue": "citizendb"
     },
-    "managedIdentityClientId": {
-      "type": "string"
+    "dbUser": {
+      "type": "string",
+      "defaultValue": "citizenapp"
     },
-    "identityResourceId": {
-      "type": "string"
+    "dbPassword": {
+      "type": "securestring"
+    },
+    "dbSaPassword": {
+      "type": "securestring",
+      "defaultValue": ""
     },
     "securityPolicyHash": {
       "type": "string",
@@ -54,12 +62,6 @@
       "location": "[parameters('location')]",
       "tags": {
         "owner": "[parameters('ownerUpn')]"
-      },
-      "identity": {
-        "type": "UserAssigned",
-        "userAssignedIdentities": {
-          "[parameters('identityResourceId')]": {}
-        }
       },
       "properties": {
         "sku": "Confidential",
@@ -91,8 +93,16 @@
                   "value": "[parameters('dbName')]"
                 },
                 {
-                  "name": "AZURE_CLIENT_ID",
-                  "value": "[parameters('managedIdentityClientId')]"
+                  "name": "DB_USER",
+                  "value": "[parameters('dbUser')]"
+                },
+                {
+                  "name": "DB_PASSWORD",
+                  "secureValue": "[parameters('dbPassword')]"
+                },
+                {
+                  "name": "DB_SA_PASSWORD",
+                  "secureValue": "[parameters('dbSaPassword')]"
                 },
                 {
                   "name": "SECURITY_POLICY_HASH",
@@ -115,9 +125,13 @@
             "password": "[parameters('registryPassword')]"
           }
         ],
+        "subnetIds": [
+          {
+            "id": "[parameters('aciSubnetResourceId')]"
+          }
+        ],
         "ipAddress": {
-          "type": "Public",
-          "dnsNameLabel": "[parameters('dnsNameLabel')]",
+          "type": "Private",
           "ports": [
             {
               "protocol": "TCP",
@@ -141,7 +155,11 @@
     },
     "fqdn": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.fqdn]"
+      "value": ""
+    },
+    "privateIp": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.ip]"
     }
   }
 }
