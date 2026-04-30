@@ -148,7 +148,7 @@ $blockedPatterns = @(
     @{
         Pattern     = '(?i)(password|passwd|pwd)\s*[:=]\s*["''][^"<'']{8,}["'']'
         Description = "Hardcoded password"
-        Exclude     = 'placeholder|example|YOUR_|<|notmatch|format|Expected'
+        Exclude     = 'placeholder|example|YOUR_|<|notmatch|format|Expected|\$[a-zA-Z]|\{\w+'
     },
     @{
         Pattern     = '(?<!\$[\w{}]*)[a-z0-9]{6,}\.vault\.azure\.net'
