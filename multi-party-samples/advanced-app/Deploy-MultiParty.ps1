@@ -806,27 +806,52 @@ function Invoke-Build {
     Write-Host "  Identities: $IdentityNameA, $IdentityNameB, $IdentityNameC" -ForegroundColor Gray
     Write-Host ""
     
-    # Launch all 6 resource creations in parallel (3 KVs + 3 identities)
+    # Launch Key Vault creations in parallel
     $kvJobA = Start-Job -ScriptBlock { az keyvault create --resource-group $using:ResourceGroup --name $using:KeyVaultNameA --location $using:Location --sku premium --enable-rbac-authorization false 2>&1 }
     $kvJobB = Start-Job -ScriptBlock { az keyvault create --resource-group $using:ResourceGroup --name $using:KeyVaultNameB --location $using:Location --sku premium --enable-rbac-authorization false 2>&1 }
     $kvJobC = Start-Job -ScriptBlock { az keyvault create --resource-group $using:ResourceGroup --name $using:KeyVaultNameC --location $using:Location --sku premium --enable-rbac-authorization false 2>&1 }
-    $idJobA = Start-Job -ScriptBlock { az identity create --resource-group $using:ResourceGroup --name $using:IdentityNameA 2>&1 }
-    $idJobB = Start-Job -ScriptBlock { az identity create --resource-group $using:ResourceGroup --name $using:IdentityNameB 2>&1 }
-    $idJobC = Start-Job -ScriptBlock { az identity create --resource-group $using:ResourceGroup --name $using:IdentityNameC 2>&1 }
-    
+
+    # Create managed identities using REST API with isolationScope: Regional
+    # WORKAROUND: Subscription policy "Require regional isolation scope on user-assigned managed identities"
+    # (policy def: e9c7fbf7-b3ad-4226-a696-9bffd9d360a4) denies az identity create because the CLI uses
+    # API version 2023-01-31 which doesn't support the isolationScope property. We use az rest with the
+    # preview API (2025-01-31-preview) to set isolationScope=Regional and satisfy the policy.
+    # Without this workaround, identities silently fail to create, resulting in null identity IDs,
+    # missing managed identity on containers, and SKR sidecar timeouts (169.254.169.254 unreachable).
+    $subscriptionId = (az account show --query id -o tsv)
+    $identityApiVersion = "2025-01-31-preview"
+    $identityBodyFile = Join-Path $PSScriptRoot "_identity-body.json"
+    @{ location = $Location; properties = @{ isolationScope = "Regional" } } | ConvertTo-Json | Out-File -FilePath $identityBodyFile -Encoding UTF8
+
+    $idJobA = Start-Job -ScriptBlock {
+        az rest --method PUT --url "https://management.azure.com/subscriptions/$using:subscriptionId/resourceGroups/$using:ResourceGroup/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$($using:IdentityNameA)?api-version=$using:identityApiVersion" --body "@$using:identityBodyFile" -o json 2>&1
+    }
+    $idJobB = Start-Job -ScriptBlock {
+        az rest --method PUT --url "https://management.azure.com/subscriptions/$using:subscriptionId/resourceGroups/$using:ResourceGroup/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$($using:IdentityNameB)?api-version=$using:identityApiVersion" --body "@$using:identityBodyFile" -o json 2>&1
+    }
+    $idJobC = Start-Job -ScriptBlock {
+        az rest --method PUT --url "https://management.azure.com/subscriptions/$using:subscriptionId/resourceGroups/$using:ResourceGroup/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$($using:IdentityNameC)?api-version=$using:identityApiVersion" --body "@$using:identityBodyFile" -o json 2>&1
+    }
+
     # Wait for all to complete
     $allJobs = @($kvJobA, $kvJobB, $kvJobC, $idJobA, $idJobB, $idJobC)
     $null = Wait-Job -Job $allJobs
     
-    # Check results
+    # Check KV results
     foreach ($j in @($kvJobA, $kvJobB, $kvJobC)) {
         $result = Receive-Job -Job $j
         if ($j.State -eq 'Failed') { Write-Warning "Key Vault creation had issues: $result" }
     }
+    # Check identity results
+    foreach ($j in @($idJobA, $idJobB, $idJobC)) {
+        $result = Receive-Job -Job $j
+        if ($j.State -eq 'Failed') { Write-Warning "Identity creation had issues: $result" }
+    }
     Remove-Job -Job $allJobs -Force
+    if (Test-Path $identityBodyFile) { Remove-Item $identityBodyFile -Force }
     Write-Success "All Key Vaults and Identities created"
     
-    # Retrieve identity details (single call per identity using JSON output)
+    # Retrieve identity details
     Write-Host "Retrieving identity details..." -ForegroundColor Green
     $idInfoA = az identity show --resource-group $ResourceGroup --name $IdentityNameA -o json 2>$null | ConvertFrom-Json
     $idInfoB = az identity show --resource-group $ResourceGroup --name $IdentityNameB -o json 2>$null | ConvertFrom-Json
@@ -843,6 +868,12 @@ function Invoke-Build {
     $IdentityClientIdC = $idInfoC.clientId
     $IdentityResourceIdC = $idInfoC.id
     $IdentityPrincipalIdC = $idInfoC.principalId
+
+    # Validate all identity details were captured
+    if (-not $IdentityClientIdA -or -not $IdentityResourceIdA) { throw "Failed to retrieve Contoso identity details. Check if identity '$IdentityNameA' exists in resource group '$ResourceGroup'." }
+    if (-not $IdentityClientIdB -or -not $IdentityResourceIdB) { throw "Failed to retrieve Fabrikam identity details. Check if identity '$IdentityNameB' exists in resource group '$ResourceGroup'." }
+    if (-not $IdentityClientIdC -or -not $IdentityResourceIdC) { throw "Failed to retrieve Woodgrove identity details. Check if identity '$IdentityNameC' exists in resource group '$ResourceGroup'." }
+    Write-Success "All identity details retrieved successfully"
     
     # Grant Key Vault access policies in parallel
     Write-Host "Granting Key Vault access policies in parallel..." -ForegroundColor Green
@@ -858,13 +889,9 @@ function Invoke-Build {
     $null = Wait-Job -Job $policyJobs
     $kvPolicyFailures = @()
     foreach ($job in $policyJobs) {
-        if ($job.State -eq 'Failed') {
-            $kvPolicyFailures += "Job $($job.Id) failed: $($job.ChildJobs[0].JobStateInfo.Reason)"
-        } else {
-            $jobOutput = Receive-Job -Job $job 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 0) {
-                $kvPolicyFailures += "KV policy job $($job.Id) returned exit code $LASTEXITCODE"
-            }
+        $jobOutput = Receive-Job -Job $job 2>&1 | Out-String
+        if ($job.State -eq 'Failed' -or $jobOutput -match 'ERROR') {
+            $kvPolicyFailures += "KV policy job $($job.Id) failed: $jobOutput"
         }
     }
     Remove-Job -Job $policyJobs -Force
