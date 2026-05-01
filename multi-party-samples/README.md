@@ -159,6 +159,46 @@ cd demo-app
 .\Deploy-SimpleDemo.ps1 -Prefix <yourcode> -Build -Deploy
 ```
 
+---
+
+### [Finance + OpenAI Demo](advanced-app-finance-openAI/README.md) 🆕 AI-Powered Analytics
+
+A 3-company financial transaction analytics demo with **Azure OpenAI** (GPT-4o-mini) integration:
+
+![Multi-Party Topology](advanced-app-finance-openAI/MultiPartyTopology.svg)
+
+| Container | Type | Purpose |
+|-----------|------|---------|
+| **Contoso** | Confidential (AMD SEV-SNP) | Corporate financial data provider (🏢) |
+| **Fabrikam Fashion** | Confidential (AMD SEV-SNP) | Retail transaction data provider (👗) |
+| **Woodgrove Bank** | Confidential (AMD SEV-SNP) | Analytics partner with AI chat assistant (🏦) |
+
+#### Key Features
+
+- 💰 **5,000+ synthetic financial transactions** across Contoso & Fabrikam
+- 🤖 **AI Chat Assistant** — Natural language queries over analytics results via Azure OpenAI (gpt-4o-mini)
+- 📊 **Interactive Charts** — Spending by category, merchant, age group, and country (Chart.js)
+- 🔒 **Data Isolation** — The LLM only sees aggregate summaries; raw data never leaves the TEE
+- 📈 **KPI Cards** — Real-time summary stats with loan payment analysis
+- 🌍 **Salary World Map** — Geographic salary distribution visualization
+
+#### Architecture
+
+![Architecture Diagram](advanced-app-finance-openAI/MultiPartyArchitecture.svg)
+
+#### Encrypted Data Flow
+
+![Data Flow Diagram](advanced-app-finance-openAI/DataFlowDiagram.svg)
+
+#### Quick Start
+
+```powershell
+cd advanced-app-finance-openAI
+.\Deploy-MultiFinanceAI.ps1 -Prefix <yourcode> -Build -Deploy
+```
+
+See the [full documentation](advanced-app-finance-openAI/README.md) for detailed instructions.
+
 ## Prerequisites
 
 ### For ACI Samples (advanced-app, demo-app)

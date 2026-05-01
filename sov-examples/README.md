@@ -7,6 +7,7 @@ resources in scenarios that require heightened data sovereignty, compliance, or 
 
 | Folder | Description |
 |--------|-------------|
+| [`citizen-registry-app/`](citizen-registry-app/) 🆕 | Sovereign citizen registry: Confidential ACI container → Private VNet → Application Gateway → SQL Server on a Confidential VM. Features remote attestation, Secure Key Release, IPv6-only CVM, ephemeral credentials, and API-based data seeding. |
 | [`cvm-backup/`](cvm-backup/README.md) | Deploy a Windows Confidential VM (CVM) with Azure Backup (Recovery Services Vault) and Customer Managed Key disk encryption |
 
 ## Common Themes

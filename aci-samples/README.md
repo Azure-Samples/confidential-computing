@@ -1,6 +1,6 @@
 # Azure Container Instances (ACI) Confidential Computing Samples
 
-**Last Updated:** February 2026
+**Last Updated:** May 2026
 
 ## Overview
 
@@ -46,6 +46,7 @@ Scripts and samples for creating Confidential Azure Container Instances (ACIs) u
 |--------|-------------|
 | `BuildRandomACI.ps1` | PowerShell script to create a confidential ACI with a hello-world container |
 | [Visual Attestation Demo](visual-attestation-demo/README.md) | Interactive web application demonstrating remote attestation via Microsoft Azure Attestation (MAA) |
+| [App + PostgreSQL Finance Demo](app-and-postgreSQL-demo/README.md) 🆕 | Confidential ACI with DCa/ECa AMD PostgreSQL, 5,000 financial transactions, Application Gateway, and 9 threat scenarios |
 
 ---
 
