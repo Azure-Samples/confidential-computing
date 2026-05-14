@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate realistic fake employee data for Contoso and Fabrikam CSV files."""
+"""Generate realistic fake employee data with sensitive PII for Contoso, Fabrikam, and Wingtip Toys."""
 
 import csv
 import random
@@ -63,6 +63,72 @@ eye_weights = [55, 20, 10, 8, 5, 2]  # Brown is most common globally
 
 favorite_colors = ['Blue', 'Red', 'Green', 'Purple', 'Black', 'Pink', 'Orange', 'Yellow', 'White', 'Gray', 'Teal', 'Gold', 'Silver', 'Navy', 'Maroon']
 
+email_domains = ['gmail.com', 'outlook.com', 'yahoo.com', 'protonmail.com', 'icloud.com',
+    'hotmail.com', 'mail.com', 'zoho.com', 'fastmail.com', 'tutanota.com']
+
+medical_conditions = [
+    'Type 2 Diabetes', 'Hypertension', 'Asthma', 'Migraine', 'Anxiety Disorder',
+    'Hypothyroidism', 'GERD', 'Eczema', 'Depression', 'Seasonal Allergies',
+    'Iron Deficiency', 'Sleep Apnea', 'Arthritis', 'High Cholesterol', 'None',
+    'None', 'None', 'None', 'None', 'None'  # ~50% chance of no condition
+]
+
+blood_types = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+blood_weights = [30, 6, 9, 2, 4, 1, 36, 7]  # approximate global distribution
+
+def generate_ssn(country):
+    """Generate a fake national ID / SSN based on country format."""
+    if country in ('United States', 'Canada'):
+        return f'{random.randint(100,999)}-{random.randint(10,99)}-{random.randint(1000,9999)}'
+    elif country == 'United Kingdom':
+        letters = 'ABCEGHJKLMNPRSTWXYZ'
+        return f'{random.choice(letters)}{random.choice(letters)} {random.randint(10,99)} {random.randint(10,99)} {random.randint(10,99)} {random.choice(letters)}'
+    elif country in ('Germany', 'France', 'Italy', 'Spain', 'Netherlands', 'Sweden'):
+        return f'{random.randint(10,99)}{random.randint(100000,999999)}{random.randint(100,999)}'
+    elif country == 'Japan':
+        return f'{random.randint(1000,9999)}-{random.randint(1000,9999)}-{random.randint(1000,9999)}'
+    elif country in ('India',):
+        return f'{random.randint(1000,9999)} {random.randint(1000,9999)} {random.randint(1000,9999)}'
+    elif country in ('Brazil', 'Mexico'):
+        return f'{random.randint(100,999)}.{random.randint(100,999)}.{random.randint(100,999)}-{random.randint(10,99)}'
+    else:
+        return f'{random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")}{random.randint(10000000,99999999)}'
+
+def generate_email(first, last):
+    first_clean = first.lower().replace(' ', '')
+    last_clean = last.lower().replace(' ', '').replace("'", '').replace('-', '')
+    styles = [
+        f'{first_clean}.{last_clean}',
+        f'{first_clean[0]}{last_clean}',
+        f'{first_clean}{last_clean[0]}',
+        f'{first_clean}.{last_clean}{random.randint(1,99)}',
+        f'{first_clean}_{last_clean}',
+    ]
+    return f'{random.choice(styles)}@{random.choice(email_domains)}'
+
+def generate_dob(age):
+    birth_year = 2026 - age
+    month = random.randint(1, 12)
+    day = random.randint(1, 28)
+    return f'{birth_year}-{month:02d}-{day:02d}'
+
+def generate_credit_card():
+    prefix = random.choice(['4', '5', '37', '6011'])
+    remaining = 16 - len(prefix) - 1
+    digits = prefix + ''.join(str(random.randint(0,9)) for _ in range(remaining))
+    # Luhn check digit (simplified - just random for fake data)
+    digits += str(random.randint(0,9))
+    # Format in groups of 4
+    return ' '.join(digits[i:i+4] for i in range(0, len(digits), 4))
+
+def generate_bank_account():
+    country_prefix = random.choice(['US', 'GB', 'DE', 'FR', 'JP', 'AU', 'CA', 'NL', 'IT', 'ES'])
+    return f'{country_prefix}{random.randint(10,99)}-{random.randint(1000,9999)}-{random.randint(10000000,99999999)}'
+
+def generate_passport():
+    letter = random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+    return f'{letter}{random.randint(10000000,99999999)}'
+
 uk_prefixes = ['AB', 'BA', 'BB', 'BD', 'BH', 'BL', 'BN', 'BR', 'BS', 'CA', 'CB', 'CF', 'CH', 'CM', 'CO', 'CR', 'CT', 'CV', 'CW', 'DA', 
     'DE', 'DH', 'DL', 'DN', 'DT', 'DY', 'EC', 'EH', 'EN', 'EX', 'FY', 'GL', 'GU', 'HA', 'HD', 'HG', 'HP', 'HR', 'HS', 'HU']
 uk_suffixes = ['AA', 'AB', 'AD', 'AE', 'AF', 'AG', 'AH', 'AJ', 'AL', 'AN', 'AP', 'AR', 'AS', 'AT', 'AW', 'AX', 'AY', 'AZ',
@@ -82,16 +148,26 @@ def generate_postal(country):
 def generate_record():
     country = random.choice(list(countries.keys()))
     info = countries[country]
-    name = f'{random.choice(first_names)} {random.choice(last_names)}'
+    first = random.choice(first_names)
+    last = random.choice(last_names)
+    name = f'{first} {last}'
+    email = generate_email(first, last)
     phone = generate_phone(info['code'])
     age = random.randint(18, 65)
-    salary = random.randint(18000, 450000)  # Wider range: $18K - $450K
+    dob = generate_dob(age)
+    ssn = generate_ssn(country)
+    salary = random.randint(18000, 450000)
+    credit_card = generate_credit_card()
+    bank_account = generate_bank_account()
+    passport = generate_passport()
+    medical = random.choice(medical_conditions)
+    blood_type = random.choices(blood_types, weights=blood_weights)[0]
     eye_color = random.choices(eye_colors, weights=eye_weights)[0]
     fav_color = random.choice(favorite_colors)
     address = f'{random.randint(100, 9999)} {random.choice(street_names)} {random.choice(street_types)}'
     postal = generate_postal(country)
     city = random.choice(info['cities'])
-    return [name, phone, age, salary, eye_color, fav_color, address, postal, city, country]
+    return [name, email, phone, age, dob, ssn, salary, credit_card, bank_account, passport, medical, blood_type, eye_color, fav_color, address, postal, city, country]
 
 def main():
     import os
@@ -102,7 +178,7 @@ def main():
     contoso_path = os.path.join(script_dir, 'contoso-data.csv')
     with open(contoso_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(['name', 'phone', 'age', 'salary', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
+        writer.writerow(['name', 'email', 'phone', 'age', 'date_of_birth', 'national_id', 'salary', 'credit_card', 'bank_account', 'passport_number', 'medical_condition', 'blood_type', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
         for _ in range(250):
             writer.writerow(generate_record())
     print(f'Generated 250 records for contoso-data.csv')
@@ -112,7 +188,7 @@ def main():
     fabrikam_path = os.path.join(script_dir, 'fabrikam-data.csv')
     with open(fabrikam_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(['name', 'phone', 'age', 'salary', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
+        writer.writerow(['name', 'email', 'phone', 'age', 'date_of_birth', 'national_id', 'salary', 'credit_card', 'bank_account', 'passport_number', 'medical_condition', 'blood_type', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
         for _ in range(250):
             writer.writerow(generate_record())
     print(f'Generated 250 records for fabrikam-data.csv')
@@ -122,7 +198,7 @@ def main():
     wingtip_path = os.path.join(script_dir, 'wingtip-data.csv')
     with open(wingtip_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(['name', 'phone', 'age', 'salary', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
+        writer.writerow(['name', 'email', 'phone', 'age', 'date_of_birth', 'national_id', 'salary', 'credit_card', 'bank_account', 'passport_number', 'medical_condition', 'blood_type', 'eye_color', 'favorite_color', 'address', 'postal_code', 'city', 'country'])
         for _ in range(250):
             writer.writerow(generate_record())
     print(f'Generated 250 records for wingtip-data.csv')

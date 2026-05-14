@@ -46,6 +46,7 @@ COPY nginx.conf /etc/nginx/nginx.conf
 # Copy application files
 COPY app.py .
 COPY templates/ templates/
+COPY static/ static/
 
 # Copy company data CSV files for seeding
 COPY contoso-data.csv .

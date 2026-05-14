@@ -279,6 +279,11 @@
             to { transform: rotate(360deg); }
         }
         
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
         .footer {
             text-align: center;
             padding: 30px;
@@ -471,6 +476,47 @@
         </div>
         
         <div class="content">
+            <!-- Architecture Diagram Section (Woodgrove Bank Only) -->
+            <details class="section" id="architectureDiagramSection" style="display: none;" open>
+                <summary style="cursor: pointer;"><h2 style="display: inline;">🏗️ Federated Multi-Party Architecture</h2></summary>
+                <div style="margin-top: 15px;">
+                    <div style="display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 300px; text-align: center;">
+                            <img src="/static/architecture-diagram.svg" alt="Federated Multi-Party Demo Architecture" style="max-width: 100%; height: auto; border-radius: 8px; border: 2px solid #3a3a4e;">
+                        </div>
+                        <div style="flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+                            <button id="explainItBtn" onclick="toggleExplainNarration()" style="background: #6a1b9a; padding: 12px 24px; font-size: 1em; white-space: nowrap;">
+                                🔊 Explain It
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- TTS Narration Controls -->
+                    <div id="narrationControls" style="display: none; margin-top: 20px; padding: 20px; background: #2a2a3e; border-radius: 8px; border: 2px solid #6a1b9a;">
+                        <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                            <button id="narrationRewindBtn" onclick="narrationSeek(-5)" style="background: #4a4a5e; padding: 8px 14px; font-size: 0.9em;">⏪ 5s</button>
+                            <button id="narrationPlayPauseBtn" onclick="narrationPlayPause()" style="background: #6a1b9a; padding: 10px 20px; font-size: 1em;">▶️ Play</button>
+                            <button id="narrationForwardBtn" onclick="narrationSeek(5)" style="background: #4a4a5e; padding: 8px 14px; font-size: 0.9em;">5s ⏩</button>
+                            <button id="narrationStopBtn" onclick="narrationStop()" style="background: #c62828; padding: 8px 14px; font-size: 0.9em;">⏹ Stop</button>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+                                <span style="color: #9e9e9e; font-size: 0.85em;">🔈</span>
+                                <input type="range" id="narrationVolume" min="0" max="100" value="80" style="width: 100px; cursor: pointer;" oninput="narrationSetVolume(this.value)">
+                                <span style="color: #9e9e9e; font-size: 0.85em;">🔊</span>
+                            </div>
+                        </div>
+                        <div style="margin-top: 12px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span id="narrationTimeElapsed" style="color: #9e9e9e; font-size: 0.8em; min-width: 35px;">0:00</span>
+                                <input type="range" id="narrationProgress" min="0" max="100" value="0" style="flex: 1; cursor: pointer;" oninput="narrationScrub(this.value)">
+                                <span id="narrationTimeTotal" style="color: #9e9e9e; font-size: 0.8em; min-width: 35px;">0:30</span>
+                            </div>
+                        </div>
+                        <div id="narrationText" style="margin-top: 15px; padding: 15px; background: #1e1e2e; border-radius: 6px; color: #b0b0b0; font-size: 0.9em; line-height: 1.6; max-height: 120px; overflow-y: auto;">
+                        </div>
+                    </div>
+                </div>
+            </details>
+
             <details class="section" open>
                 <summary style="cursor: pointer;"><h2 style="display: inline;">🛡️ Security Features</h2></summary>
                 <p id="securityStatus" style="margin-bottom: 15px; font-style: italic; color: #6c757d; margin-top: 15px;">
@@ -703,6 +749,40 @@
                         </button>
                     </div>
                     
+                    <!-- Attestation Verification Panel -->
+                    <div id="attestationPanel" style="display: none; margin-top: 20px;">
+                        <div style="background: #f8f9fa; border-radius: 10px; padding: 20px; border: 2px solid #1a472a;">
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                <span style="font-size: 24px;">🛡️</span>
+                                <div style="flex: 1;">
+                                    <h5 style="color: #1a472a; margin: 0; font-size: 18px;">Container Attestation Verification</h5>
+                                    <p style="color: #6c757d; margin: 0; font-size: 13px;">Verified by Woodgrove Bank — each partner's container identity confirmed before data processing</p>
+                                </div>
+                                <button onclick="toggleExplainPanel()" id="explainBtn" style="background: #1a472a; color: #fff; border: none; padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 6px;">&#x2139;&#xFE0F; Explain This</button>
+                            </div>
+                            <!-- Explain This flyout panel -->
+                            <div id="explainPanel" style="display: none; margin-bottom: 14px; padding: 18px; background: #fff; border-radius: 8px; border: 1px solid #1a472a; box-shadow: 0 4px 12px rgba(26,71,42,0.12); animation: slideDown 0.25s ease-out;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                                    <h6 style="color: #1a472a; margin: 0; font-size: 15px; font-weight: 700;">How Attestation Verification Works</h6>
+                                    <button onclick="toggleExplainPanel()" style="background: none; border: none; font-size: 18px; cursor: pointer; color: #6c757d; padding: 0; line-height: 1;">&times;</button>
+                                </div>
+                                <p style="color: #495057; margin: 0 0 12px 0; font-size: 14px; line-height: 1.6;">Woodgrove Bank uses a <strong>two-phase trust chain</strong> to verify every partner before accepting their data:</p>
+                                <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; font-size: 14px; color: #495057; line-height: 1.5;">
+                                    <span style="font-weight: 700; color: #1a472a;">1.</span>
+                                    <div><strong>Hardware attestation (AMD SEV-SNP):</strong> Each partner container runs inside an AMD SEV-SNP Trusted Execution Environment. The hardware generates a unique <em>security policy hash</em> that represents the exact code and configuration running in the enclave.</div>
+                                    <span style="font-weight: 700; color: #1a472a;">2.</span>
+                                    <div><strong>Key release gate (MAA &rarr; Key Vault):</strong> Before Azure Key Vault releases any decryption key, Microsoft Azure Attestation (MAA) must confirm the container's <code style="background: #e9ecef; padding: 1px 5px; border-radius: 3px; font-size: 13px;">x-ms-sevsnpvm-hostdata</code> claim matches the approved policy hash. If the container code has been tampered with, key release fails.</div>
+                                    <span style="font-weight: 700; color: #1a472a;">3.</span>
+                                    <div><strong>Cross-verification (Woodgrove):</strong> At deploy time, each partner's policy hash is injected into Woodgrove's own container as an environment variable &mdash; baked into Woodgrove's confcom policy as an exact-match rule. At analysis time, Woodgrove compares each partner's <em>self-reported</em> hash against this expected value.</div>
+                                </div>
+                                <div style="margin-top: 14px; padding: 12px; background: #d4edda; border-radius: 6px; font-size: 13px; color: #155724; line-height: 1.5;">
+                                    <strong>&#x2705; APPROVED</strong> = policy hash matches <em>and</em> SKR key was successfully released (proving hardware-level attestation). <strong>&#x26A0;&#xFE0F; UNVERIFIED</strong> = hash mismatch or key release failed.
+                                </div>
+                            </div>
+                            <div id="attestationCards" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;"></div>
+                        </div>
+                    </div>
+                    
                     <!-- Progress Bar Section -->
                     <div id="progressSection" style="display: none; margin-top: 20px;">
                         <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; border: 2px solid #1a472a;">
@@ -816,29 +896,28 @@
                         <h5 style="color: #1a472a; margin: 20px 0 10px 0;">🎨 Top 3 Favorite Colors</h5>
                         <div id="favoriteColors" style="display: flex; gap: 15px; margin-bottom: 20px;"></div>
                         
+                        <!-- Blood Type Distribution -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">🩸 Blood Type Distribution</h5>
+                        <div id="bloodTypes" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;"></div>
+                        
+                        <!-- Medical Conditions -->
+                        <h5 style="color: #1a472a; margin: 20px 0 10px 0;">🏥 Health Conditions (Aggregated)</h5>
+                        <div id="medicalConditions" style="margin-bottom: 20px;"></div>
+                        
                         <!-- Top 10 Countries with Cities -->
                         <h5 style="color: #1a472a; margin: 20px 0 10px 0;">🌍 Top 10 Countries (with Top 3 Cities)</h5>
                         <div id="countriesTable" style="margin-bottom: 20px;"></div>
                     </div>
                     
-                    <!-- Raw Response Proof Section -->
+                    <!-- Raw Response Proof Section - Scrollable Table -->
                     <div id="rawResponseProof" style="display: none; margin-top: 25px;">
                         <h4 style="color: #1a472a; margin-bottom: 15px;">&#128270; Raw Partner Responses (Privacy Proof)</h4>
                         <div style="padding: 15px; background: #fff3cd; border-radius: 8px; border: 2px solid #ffc107; margin-bottom: 15px;">
-                            <p style="color: #856404; margin: 0;"><strong>&#9888;&#65039; What Woodgrove actually received:</strong> The JSON below shows the EXACT raw data received from each partner. Notice it contains only aggregate statistics (counts, averages, percentages) &mdash; no individual names, addresses, salaries, or any PII.</p>
+                            <p style="color: #856404; margin: 0;"><strong>&#9888;&#65039; What Woodgrove actually received:</strong> The JSON below shows the EXACT data received from each partner. Notice it contains only aggregate statistics (counts, averages, percentages) &mdash; no individual names, addresses, salaries, or any PII.</p>
                         </div>
-                        <div id="rawResponseContoso" style="margin-bottom: 15px;">
-                            <h5 style="color: #667eea; margin-bottom: 8px;">&#127970; Contoso Response</h5>
-                            <pre style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; overflow-x: auto; max-height: 400px; font-size: 11px; border: 2px solid #667eea;"><code id="rawContoso">No data received yet</code></pre>
+                        <div id="rawProofJsonContainer" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
                         </div>
-                        <div id="rawResponseFabrikam" style="margin-bottom: 15px;">
-                            <h5 style="color: #11998e; margin-bottom: 8px;">&#128087; Fabrikam Response</h5>
-                            <pre style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; overflow-x: auto; max-height: 400px; font-size: 11px; border: 2px solid #11998e;"><code id="rawFabrikam">No data received yet</code></pre>
-                        </div>
-                        <div id="rawResponseWingtip" style="margin-bottom: 15px;">
-                            <h5 style="color: #f5576c; margin-bottom: 8px;">&#129531; Wingtip Toys Response</h5>
-                            <pre style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; overflow-x: auto; max-height: 400px; font-size: 11px; border: 2px solid #f5576c;"><code id="rawWingtip">No data received yet</code></pre>
-                        </div>
+                        <p style="margin-top: 10px; font-size: 12px; color: #6c757d; text-align: center;">Each panel shows the complete JSON response from that partner's TEE container. No PII is present.</p>
                     </div>
                 </div>
             </details>
@@ -2837,6 +2916,10 @@
                         if (partnerAnalysisSection) {
                             partnerAnalysisSection.style.display = 'block';
                         }
+                        const architectureDiagramSection = document.getElementById('architectureDiagramSection');
+                        if (architectureDiagramSection) {
+                            architectureDiagramSection.style.display = 'block';
+                        }
                         partnerConfigs = data.partner_configs || true;
                     }
                     
@@ -3076,6 +3159,222 @@
             };
         }
         
+        // Explain This flyout toggle
+        function toggleExplainPanel() {
+            var panel = document.getElementById('explainPanel');
+            var btn = document.getElementById('explainBtn');
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                btn.innerHTML = '&#x2716; Close';
+            } else {
+                panel.style.display = 'none';
+                btn.innerHTML = '&#x2139;&#xFE0F; Explain This';
+            }
+        }
+
+        // ===== TTS Narration System =====
+        const NARRATION_SCRIPT = `This is a federated multi-party confidential computing demo. Four companies — Contoso, Fabrikam, Wingtip Toys, and Woodgrove Bank — each run their workloads inside AMD SEV-SNP Trusted Execution Environments on Azure. Each company's data is encrypted at rest and only decrypted inside its own TEE, meaning not even the cloud provider can see the plaintext. Woodgrove Bank acts as the analytics partner. It requests aggregate statistics from each company's container, but never receives any raw personal data. Before accepting results, Woodgrove cryptographically verifies each partner's identity through remote attestation and policy hash matching. This ensures the code running in each TEE hasn't been tampered with. The result: multiple organizations collaborate on shared analytics without ever exposing their sensitive data to each other or to the infrastructure.`;
+
+        let narrationUtterance = null;
+        let narrationState = 'stopped'; // stopped, playing, paused
+        let narrationStartTime = 0;
+        let narrationElapsedBeforePause = 0;
+        let narrationTimer = null;
+        // Estimate duration from word count: ~2.5 words/sec at rate 1.0
+        const NARRATION_DURATION = Math.ceil(NARRATION_SCRIPT.split(/\s+/).length / (2.5 * 1.05));
+
+        function toggleExplainNarration() {
+            const controls = document.getElementById('narrationControls');
+            const textDiv = document.getElementById('narrationText');
+            if (controls.style.display === 'none') {
+                controls.style.display = 'block';
+                textDiv.textContent = NARRATION_SCRIPT;
+                document.getElementById('explainItBtn').innerHTML = '🔇 Hide Narration';
+            } else {
+                narrationStop();
+                controls.style.display = 'none';
+                document.getElementById('explainItBtn').innerHTML = '🔊 Explain It';
+            }
+        }
+
+        function narrationPlayPause() {
+            if (narrationState === 'playing') {
+                // Pause
+                window.speechSynthesis.pause();
+                narrationState = 'paused';
+                narrationElapsedBeforePause += (Date.now() - narrationStartTime) / 1000;
+                clearInterval(narrationTimer);
+                document.getElementById('narrationPlayPauseBtn').innerHTML = '▶️ Play';
+            } else if (narrationState === 'paused') {
+                // Resume
+                window.speechSynthesis.resume();
+                narrationState = 'playing';
+                narrationStartTime = Date.now();
+                narrationTimer = setInterval(updateNarrationProgress, 200);
+                document.getElementById('narrationPlayPauseBtn').innerHTML = '⏸ Pause';
+            } else {
+                // Start fresh
+                narrationStart();
+            }
+        }
+
+        function narrationStart() {
+            window.speechSynthesis.cancel();
+            narrationUtterance = new SpeechSynthesisUtterance(NARRATION_SCRIPT);
+            narrationUtterance.rate = 1.05;
+            narrationUtterance.pitch = 1.0;
+            narrationUtterance.volume = document.getElementById('narrationVolume').value / 100;
+
+            // Pick an English woman's voice
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v => v.lang === 'en-GB' && v.name.includes('Female')) ||
+                              voices.find(v => v.lang === 'en-GB' && /hazel|susan|libby/i.test(v.name)) ||
+                              voices.find(v => v.lang.startsWith('en') && /female|zira|hazel|jenny|aria|libby/i.test(v.name)) ||
+                              voices.find(v => v.lang === 'en-GB') ||
+                              voices.find(v => v.lang.startsWith('en-'));
+            if (preferred) narrationUtterance.voice = preferred;
+
+            narrationUtterance.onend = function() {
+                narrationState = 'stopped';
+                narrationElapsedBeforePause = 0;
+                clearInterval(narrationTimer);
+                document.getElementById('narrationPlayPauseBtn').innerHTML = '▶️ Play';
+                document.getElementById('narrationProgress').value = 100;
+                document.getElementById('narrationTimeElapsed').textContent = formatTime(NARRATION_DURATION);
+            };
+
+            narrationState = 'playing';
+            narrationStartTime = Date.now();
+            narrationElapsedBeforePause = 0;
+            window.speechSynthesis.speak(narrationUtterance);
+            narrationTimer = setInterval(updateNarrationProgress, 200);
+            document.getElementById('narrationPlayPauseBtn').innerHTML = '⏸ Pause';
+        }
+
+        function narrationStop() {
+            window.speechSynthesis.cancel();
+            narrationState = 'stopped';
+            narrationElapsedBeforePause = 0;
+            clearInterval(narrationTimer);
+            document.getElementById('narrationPlayPauseBtn').innerHTML = '▶️ Play';
+            document.getElementById('narrationProgress').value = 0;
+            document.getElementById('narrationTimeElapsed').textContent = '0:00';
+        }
+
+        function narrationSeek(seconds) {
+            // TTS doesn't support true seeking — restart from adjusted position via rate trick
+            // For simplicity, we restart playback (Web Speech API limitation)
+            if (narrationState === 'stopped') return;
+            let currentElapsed = narrationElapsedBeforePause;
+            if (narrationState === 'playing') {
+                currentElapsed += (Date.now() - narrationStartTime) / 1000;
+            }
+            let newElapsed = Math.max(0, Math.min(NARRATION_DURATION, currentElapsed + seconds));
+            // Approximate: restart from proportional position in text
+            let proportion = newElapsed / NARRATION_DURATION;
+            let charIndex = Math.floor(proportion * NARRATION_SCRIPT.length);
+            let remainingText = NARRATION_SCRIPT.substring(charIndex);
+
+            window.speechSynthesis.cancel();
+            narrationUtterance = new SpeechSynthesisUtterance(remainingText);
+            narrationUtterance.rate = 1.05;
+            narrationUtterance.pitch = 1.0;
+            narrationUtterance.volume = document.getElementById('narrationVolume').value / 100;
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v => v.lang === 'en-GB' && v.name.includes('Female')) ||
+                              voices.find(v => v.lang === 'en-GB' && /hazel|susan|libby/i.test(v.name)) ||
+                              voices.find(v => v.lang.startsWith('en') && /female|zira|hazel|jenny|aria|libby/i.test(v.name)) ||
+                              voices.find(v => v.lang === 'en-GB') ||
+                              voices.find(v => v.lang.startsWith('en-'));
+            if (preferred) narrationUtterance.voice = preferred;
+
+            narrationUtterance.onend = function() {
+                narrationState = 'stopped';
+                narrationElapsedBeforePause = 0;
+                clearInterval(narrationTimer);
+                document.getElementById('narrationPlayPauseBtn').innerHTML = '▶️ Play';
+                document.getElementById('narrationProgress').value = 100;
+                document.getElementById('narrationTimeElapsed').textContent = formatTime(NARRATION_DURATION);
+            };
+
+            narrationElapsedBeforePause = newElapsed;
+            narrationStartTime = Date.now();
+            narrationState = 'playing';
+            window.speechSynthesis.speak(narrationUtterance);
+            if (!narrationTimer) narrationTimer = setInterval(updateNarrationProgress, 200);
+            document.getElementById('narrationPlayPauseBtn').innerHTML = '⏸ Pause';
+        }
+
+        function narrationScrub(value) {
+            let targetTime = (value / 100) * NARRATION_DURATION;
+            let proportion = value / 100;
+            let charIndex = Math.floor(proportion * NARRATION_SCRIPT.length);
+            let remainingText = NARRATION_SCRIPT.substring(charIndex);
+
+            window.speechSynthesis.cancel();
+            if (remainingText.length === 0) {
+                narrationStop();
+                return;
+            }
+            narrationUtterance = new SpeechSynthesisUtterance(remainingText);
+            narrationUtterance.rate = 1.05;
+            narrationUtterance.pitch = 1.0;
+            narrationUtterance.volume = document.getElementById('narrationVolume').value / 100;
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v => v.lang === 'en-GB' && v.name.includes('Female')) ||
+                              voices.find(v => v.lang === 'en-GB' && /hazel|susan|libby/i.test(v.name)) ||
+                              voices.find(v => v.lang.startsWith('en') && /female|zira|hazel|jenny|aria|libby/i.test(v.name)) ||
+                              voices.find(v => v.lang === 'en-GB') ||
+                              voices.find(v => v.lang.startsWith('en-'));
+            if (preferred) narrationUtterance.voice = preferred;
+
+            narrationUtterance.onend = function() {
+                narrationState = 'stopped';
+                narrationElapsedBeforePause = 0;
+                clearInterval(narrationTimer);
+                document.getElementById('narrationPlayPauseBtn').innerHTML = '▶️ Play';
+                document.getElementById('narrationProgress').value = 100;
+                document.getElementById('narrationTimeElapsed').textContent = formatTime(NARRATION_DURATION);
+            };
+
+            narrationElapsedBeforePause = targetTime;
+            narrationStartTime = Date.now();
+            narrationState = 'playing';
+            window.speechSynthesis.speak(narrationUtterance);
+            if (!narrationTimer) narrationTimer = setInterval(updateNarrationProgress, 200);
+            document.getElementById('narrationPlayPauseBtn').innerHTML = '⏸ Pause';
+        }
+
+        function narrationSetVolume(value) {
+            if (narrationUtterance) {
+                narrationUtterance.volume = value / 100;
+            }
+        }
+
+        function updateNarrationProgress() {
+            let elapsed = narrationElapsedBeforePause;
+            if (narrationState === 'playing') {
+                elapsed += (Date.now() - narrationStartTime) / 1000;
+            }
+            elapsed = Math.min(elapsed, NARRATION_DURATION);
+            let pct = (elapsed / NARRATION_DURATION) * 100;
+            document.getElementById('narrationProgress').value = pct;
+            document.getElementById('narrationTimeElapsed').textContent = formatTime(elapsed);
+        }
+
+        function formatTime(seconds) {
+            let m = Math.floor(seconds / 60);
+            let s = Math.floor(seconds % 60);
+            return m + ':' + (s < 10 ? '0' : '') + s;
+        }
+
+        // Pre-load voices (some browsers need this)
+        if (window.speechSynthesis) {
+            window.speechSynthesis.getVoices();
+            window.speechSynthesis.onvoiceschanged = function() { window.speechSynthesis.getVoices(); };
+        }
+        // ===== End TTS Narration System =====
+
         // Partner Federated Analysis Functions (Woodgrove Bank only)
         async function startPartnerAnalysis() {
             const btn = document.getElementById('startPartnerAnalysisBtn');
@@ -3119,6 +3418,29 @@
                     const key = partnerLower === 'wingtiptoys' ? 'wingtip' : partnerLower;
                     updateKeyStatus(key, 'success', data.record_count + ' records analyzed in ' + data.time + 's');
                     resultDiv.innerHTML += '<p style="color: #155724; font-size: 13px;">&#9989; ' + escapeHtml(data.partner) + ': ' + data.record_count + ' records analyzed</p>';
+                    
+                    // Show attestation panel and add card for this partner
+                    if (data.attestation) {
+                        document.getElementById('attestationPanel').style.display = 'block';
+                        var att = data.attestation;
+                        var cardHtml = document.getElementById('attestationCards').innerHTML;
+                        var policyDisplay = att.policy_hash ? att.policy_hash + '...' : 'Pending';
+                        cardHtml += '<div style="padding: 14px; background: #fff; border-radius: 8px; border: 2px solid #28a745; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">';
+                        cardHtml += '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">';
+                        cardHtml += '<strong style="color: #212529; font-size: 13px;">' + escapeHtml(data.partner) + '</strong>';
+                        cardHtml += '<span style="background: #28a745; color: #fff; font-size: 9px; font-weight: bold; padding: 3px 8px; border-radius: 10px; letter-spacing: 0.5px;">VERIFIED</span>';
+                        cardHtml += '</div>';
+                        cardHtml += '<table style="width: 100%; font-size: 11px; color: #495057;">';
+                        cardHtml += '<tr><td style="padding: 3px 0; color: #6c757d;">TEE Type</td><td style="padding: 3px 0; text-align: right; font-weight: 600;">AMD SEV-SNP</td></tr>';
+                        cardHtml += '<tr><td style="padding: 3px 0; color: #6c757d;">Key Released</td><td style="padding: 3px 0; text-align: right;"><span style="color: ' + (att.key_released ? '#28a745' : '#dc3545') + '; font-weight: 600;">' + (att.key_released ? '✓ Yes' : '✗ No') + '</span></td></tr>';
+                        cardHtml += '<tr><td style="padding: 3px 0; color: #6c757d;">Image Approved</td><td style="padding: 3px 0; text-align: right;"><span style="color: ' + (att.image_verified ? '#28a745' : '#dc3545') + '; font-weight: 600;">' + (att.image_verified ? '✓ Yes' : '✗ No') + '</span></td></tr>';
+                        cardHtml += '</table>';
+                        cardHtml += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e9ecef;">';
+                        cardHtml += '<div style="font-size: 10px; color: #6c757d; margin-bottom: 2px;">Policy Hash</div>';
+                        cardHtml += '<code style="font-size: 9px; color: #1a472a; background: #e9ecef; padding: 3px 6px; border-radius: 3px; display: block; word-break: break-all;">' + escapeHtml(policyDisplay) + '</code>';
+                        cardHtml += '</div></div>';
+                        document.getElementById('attestationCards').innerHTML = cardHtml;
+                    }
                 }
                 else if (data.type === 'partner_error') {
                     const partnerLower = data.partner.toLowerCase().replace(' ', '');
@@ -3282,33 +3604,101 @@
                         document.getElementById('countriesTable').innerHTML = countryHtml;
                     }
                     
-                    // Show raw response proof section
+                    // Blood types
+                    if (data.blood_types && data.blood_types.length > 0) {
+                        let btHtml = '';
+                        const btColors = {'A+': '#e74c3c', 'A-': '#c0392b', 'B+': '#3498db', 'B-': '#2980b9', 'AB+': '#9b59b6', 'AB-': '#8e44ad', 'O+': '#27ae60', 'O-': '#229954'};
+                        data.blood_types.forEach(bt => {
+                            const color = btColors[bt.type] || '#7f8c8d';
+                            btHtml += '<div style="padding: 10px 15px; background: white; border-radius: 8px; text-align: center; border: 2px solid ' + color + '; min-width: 70px;">';
+                            btHtml += '<div style="font-size: 20px; font-weight: bold; color: ' + color + ';">' + bt.count + '</div>';
+                            btHtml += '<div style="font-size: 13px; font-weight: bold; color: #495057;">' + escapeHtml(bt.type) + '</div>';
+                            btHtml += '</div>';
+                        });
+                        document.getElementById('bloodTypes').innerHTML = btHtml;
+                    }
+                    
+                    // Medical conditions
+                    if (data.medical_conditions) {
+                        let mcHtml = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">';
+                        mcHtml += '<div style="padding: 15px; background: #d4edda; border-radius: 8px; text-align: center; border: 2px solid #28a745;">';
+                        mcHtml += '<div style="font-size: 24px; font-weight: bold; color: #155724;">' + data.medical_conditions.without_condition + '</div>';
+                        mcHtml += '<div style="font-size: 12px; color: #155724;">No Reported Conditions</div></div>';
+                        mcHtml += '<div style="padding: 15px; background: #fff3cd; border-radius: 8px; text-align: center; border: 2px solid #ffc107;">';
+                        mcHtml += '<div style="font-size: 24px; font-weight: bold; color: #856404;">' + data.medical_conditions.with_condition + '</div>';
+                        mcHtml += '<div style="font-size: 12px; color: #856404;">Has Reported Condition</div></div></div>';
+                        if (data.medical_conditions.top_conditions && data.medical_conditions.top_conditions.length > 0) {
+                            mcHtml += '<div style="display: flex; flex-wrap: wrap; gap: 8px;">';
+                            data.medical_conditions.top_conditions.forEach(mc => {
+                                mcHtml += '<span style="padding: 6px 12px; background: #f8f9fa; border-radius: 20px; font-size: 12px; border: 1px solid #dee2e6;">';
+                                mcHtml += escapeHtml(mc.condition) + ' <strong>(' + mc.count + ')</strong></span>';
+                            });
+                            mcHtml += '</div>';
+                        }
+                        document.getElementById('medicalConditions').innerHTML = mcHtml;
+                    }
+                    
+                    // Show raw response proof section as scrollable table
                     if (data.raw_partner_responses) {
                         rawProofDiv.style.display = 'block';
-                        if (data.raw_partner_responses['Contoso']) {
-                            try {
-                                const parsed = JSON.parse(data.raw_partner_responses['Contoso']);
-                                document.getElementById('rawContoso').textContent = JSON.stringify(parsed, null, 2);
-                            } catch(e) {
-                                document.getElementById('rawContoso').textContent = data.raw_partner_responses['Contoso'];
+                        renderRawProofTable(data.raw_partner_responses);
+                    }
+                    
+                    // Render full attestation evidence from complete event
+                    if (data.partner_attestation) {
+                        document.getElementById('attestationPanel').style.display = 'block';
+                        var attCardsHtml = '';
+                        Object.keys(data.partner_attestation).forEach(function(partner) {
+                            var att = data.partner_attestation[partner];
+                            var isApproved = att.verification_verdict === 'APPROVED';
+                            var borderColor = isApproved ? '#28a745' : '#ffc107';
+                            var badgeColor = isApproved ? '#28a745' : '#dc3545';
+                            var badgeText = isApproved ? 'APPROVED' : 'UNVERIFIED';
+                            var policyFull = att.policy_hash || 'N/A';
+                            var expectedFull = att.expected_policy_hash || 'N/A';
+                            var hashMatch = att.policy_hash_verified;
+
+                            attCardsHtml += '<div style="padding: 14px; background: #fff; border-radius: 8px; border: 2px solid ' + borderColor + '; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">';
+                            
+                            // Header with company name and verdict badge
+                            attCardsHtml += '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">';
+                            attCardsHtml += '<strong style="color: #212529; font-size: 15px;">' + escapeHtml(partner) + '</strong>';
+                            attCardsHtml += '<span style="background: ' + badgeColor + '; color: #fff; font-size: 11px; font-weight: bold; padding: 4px 10px; border-radius: 10px; letter-spacing: 0.5px;">' + badgeText + '</span>';
+                            attCardsHtml += '</div>';
+                            
+                            // Verification checklist
+                            attCardsHtml += '<table style="width: 100%; font-size: 13px; color: #495057;">';
+                            attCardsHtml += '<tr><td style="padding: 4px 0; color: #6c757d;">TEE Hardware</td><td style="padding: 4px 0; text-align: right; font-weight: 600;">' + escapeHtml(att.tee_type || 'AMD SEV-SNP') + '</td></tr>';
+                            attCardsHtml += '<tr><td style="padding: 4px 0; color: #6c757d;">SKR Key Released</td><td style="padding: 4px 0; text-align: right;"><span style="color: ' + (att.skr_key_released ? '#28a745' : '#dc3545') + '; font-weight: 600;">' + (att.skr_key_released ? '✓ Yes' : '✗ No') + '</span></td></tr>';
+                            attCardsHtml += '<tr><td style="padding: 4px 0; color: #6c757d;">Image Approved</td><td style="padding: 4px 0; text-align: right;"><span style="color: ' + (att.container_image_verified ? '#28a745' : '#dc3545') + '; font-weight: 600;">' + (att.container_image_verified ? '✓ Yes' : '✗ No') + '</span></td></tr>';
+                            attCardsHtml += '<tr><td style="padding: 4px 0; color: #6c757d;">Policy Hash Match</td><td style="padding: 4px 0; text-align: right;"><span style="color: ' + (hashMatch ? '#28a745' : '#dc3545') + '; font-weight: 600;">' + (hashMatch ? '✓ Matches' : '✗ Mismatch') + '</span></td></tr>';
+                            if (att.skr_key_name) {
+                                attCardsHtml += '<tr><td style="padding: 4px 0; color: #6c757d;">Key Name</td><td style="padding: 4px 0; text-align: right; font-weight: 500;">' + escapeHtml(att.skr_key_name) + '</td></tr>';
                             }
-                        }
-                        if (data.raw_partner_responses['Fabrikam']) {
-                            try {
-                                const parsed = JSON.parse(data.raw_partner_responses['Fabrikam']);
-                                document.getElementById('rawFabrikam').textContent = JSON.stringify(parsed, null, 2);
-                            } catch(e) {
-                                document.getElementById('rawFabrikam').textContent = data.raw_partner_responses['Fabrikam'];
+                            attCardsHtml += '</table>';
+                            
+                            // Policy hash comparison
+                            attCardsHtml += '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e9ecef;">';
+                            attCardsHtml += '<div style="font-size: 12px; color: #6c757d; margin-bottom: 4px;">Reported Policy Hash:</div>';
+                            attCardsHtml += '<code style="font-size: 11px; color: #1a472a; background: #e9ecef; padding: 4px 8px; border-radius: 3px; display: block; word-break: break-all; margin-bottom: 6px;">' + escapeHtml(policyFull) + '</code>';
+                            attCardsHtml += '<div style="font-size: 12px; color: #6c757d; margin-bottom: 4px;">Expected (Deployment-time):</div>';
+                            attCardsHtml += '<code style="font-size: 11px; color: #1a472a; background: ' + (hashMatch ? '#d4edda' : '#f8d7da') + '; padding: 4px 8px; border-radius: 3px; display: block; word-break: break-all;">' + escapeHtml(expectedFull) + '</code>';
+                            attCardsHtml += '</div>';
+                            
+                            // File integrity (if available)
+                            if (att.container_integrity && Object.keys(att.container_integrity).length > 0) {
+                                attCardsHtml += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e9ecef;">';
+                                attCardsHtml += '<div style="font-size: 12px; color: #6c757d; margin-bottom: 4px;">File Integrity (SHA-256):</div>';
+                                Object.keys(att.container_integrity).forEach(function(file) {
+                                    var hash = att.container_integrity[file];
+                                    attCardsHtml += '<div style="font-size: 11px; color: #495057; margin-bottom: 2px;"><span style="color: #6c757d;">' + escapeHtml(file.split('/').pop()) + ':</span> <code style="background: #e9ecef; padding: 2px 5px; border-radius: 2px; font-size: 10px;">' + escapeHtml(hash.substring(0, 16)) + '...</code></div>';
+                                });
+                                attCardsHtml += '</div>';
                             }
-                        }
-                        if (data.raw_partner_responses['Wingtip Toys']) {
-                            try {
-                                const parsed = JSON.parse(data.raw_partner_responses['Wingtip Toys']);
-                                document.getElementById('rawWingtip').textContent = JSON.stringify(parsed, null, 2);
-                            } catch(e) {
-                                document.getElementById('rawWingtip').textContent = data.raw_partner_responses['Wingtip Toys'];
-                            }
-                        }
+                            
+                            attCardsHtml += '</div>';
+                        });
+                        document.getElementById('attestationCards').innerHTML = attCardsHtml;
                     }
                     
                     // Show success message
@@ -3365,6 +3755,27 @@
             }
             
             textEl.textContent = message;
+        }
+        
+        function renderRawProofTable(rawResponses) {
+            // Render each partner's raw JSON response as a formatted code block
+            var container = document.getElementById('rawProofJsonContainer');
+            var html = '';
+            var partners = [
+                {key: 'Contoso', label: '🏢 Contoso', color: '#0078d4'},
+                {key: 'Fabrikam', label: '👗 Fabrikam', color: '#7b2d8b'},
+                {key: 'Wingtip Toys', label: '🧸 Wingtip Toys', color: '#e3008c'}
+            ];
+            partners.forEach(function(p) {
+                var rawStr = rawResponses[p.key] || '{}';
+                var formatted = '';
+                try { formatted = JSON.stringify(JSON.parse(rawStr), null, 2); } catch(e) { formatted = rawStr; }
+                html += '<div style="border: 2px solid ' + p.color + '; border-radius: 8px; overflow: hidden;">';
+                html += '<div style="background: ' + p.color + '; color: white; padding: 8px 12px; font-weight: bold; font-size: 12px;">' + p.label + '</div>';
+                html += '<pre style="margin: 0; padding: 12px; background: #1e1e1e; font-size: 11px; line-height: 1.4; overflow: auto; max-height: 400px; white-space: pre-wrap; word-break: break-word; color: #d4d4d4;">' + escapeHtml(formatted) + '</pre>';
+                html += '</div>';
+            });
+            container.innerHTML = html;
         }
         
         // Page timer - tracks time since last refresh

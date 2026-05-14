@@ -1716,6 +1716,7 @@ function Invoke-Deploy {
             'identityResourceId' = @{ 'value' = $contosoConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
             'resourceGroupName' = @{ 'value' = $resource_group }
+            'securityPolicyHash' = @{ 'value' = '' }
         }
     }
     $params_companyA | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-contoso.json'
@@ -1745,6 +1746,7 @@ function Invoke-Deploy {
             'identityResourceId' = @{ 'value' = $fabrikamConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
             'resourceGroupName' = @{ 'value' = $resource_group }
+            'securityPolicyHash' = @{ 'value' = '' }
         }
     }
     $params_companyB | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-fabrikam.json'
@@ -1774,6 +1776,7 @@ function Invoke-Deploy {
             'identityResourceId' = @{ 'value' = $wingtipConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
             'resourceGroupName' = @{ 'value' = $resource_group }
+            'securityPolicyHash' = @{ 'value' = '' }
         }
     }
     $params_companyD | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-wingtip.json'
@@ -1816,6 +1819,10 @@ function Invoke-Deploy {
             'partnerFabrikamUrl' = @{ 'value' = $fabrikamContainerUrl }
             'partnerWingtipAkvEndpoint' = @{ 'value' = $config.wingtip.skrAkvEndpoint }
             'partnerWingtipUrl' = @{ 'value' = $wingtipContainerUrl }
+            'partnerContosoPolicyHash' = @{ 'value' = $contosoPolicyInfo.PolicyHash }
+            'partnerFabrikamPolicyHash' = @{ 'value' = $fabrikamPolicyInfo.PolicyHash }
+            'partnerWingtipPolicyHash' = @{ 'value' = $wingtipPolicyInfo.PolicyHash }
+            'securityPolicyHash' = @{ 'value' = '' }
         }
     }
     $params_companyC | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-woodgrove.json'
@@ -2058,6 +2065,9 @@ function Invoke-Deploy {
     $params_companyD | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-wingtip.json'
     
     $params_companyC.parameters['securityPolicyHash'] = @{ 'value' = $woodgrovePolicyInfo.PolicyHash }
+    $params_companyC.parameters['partnerContosoPolicyHash'] = @{ 'value' = $contosoPolicyInfo.PolicyHash }
+    $params_companyC.parameters['partnerFabrikamPolicyHash'] = @{ 'value' = $fabrikamPolicyInfo.PolicyHash }
+    $params_companyC.parameters['partnerWingtipPolicyHash'] = @{ 'value' = $wingtipPolicyInfo.PolicyHash }
     $params_companyC | ConvertTo-Json -Depth 10 | Set-Content 'deployment-params-woodgrove.json'
     
     # Deploy all 4 containers in parallel for maximum speed

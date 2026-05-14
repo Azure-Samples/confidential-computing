@@ -88,7 +88,7 @@
       }
     },
     "securityPolicyHash": {
-      "type": "string",
+      "type": "securestring",
       "defaultValue": "",
       "metadata": {
         "description": "SHA256 hash of the container security policy (x-ms-sevsnpvm-hostdata)"
@@ -145,7 +145,7 @@
                 },
                 {
                   "name": "SECURITY_POLICY_HASH",
-                  "value": "[parameters('securityPolicyHash')]"
+                  "secureValue": "[parameters('securityPolicyHash')]"
                 }
               ],
               "resources": {

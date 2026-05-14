@@ -1,7 +1,7 @@
 # Multi-Party Confidential Computing Demo
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** February 2026
+**Last Updated:** May 2026
 
 This demonstration shows how Azure Confidential Containers enable secure multi-party computation where each party's data remains protected, even from other parties and infrastructure operators.
 
@@ -17,12 +17,13 @@ This demonstration shows how Azure Confidential Containers enable secure multi-p
 
 ## Overview
 
-The demo deploys **three confidential containers** running identical code, demonstrating how hardware-based security and partner trust relationships enable secure multi-party data sharing:
+The demo deploys **four confidential containers** running identical code, demonstrating how hardware-based security and partner trust relationships enable secure multi-party data sharing:
 
 | Container | SKU | Hardware | Can Attest? | Can Get Keys? | Can Decrypt Data? |
 |-----------|-----|----------|-------------|---------------|-------------------|
 | **Contoso** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
-| **Fabrikam Fashion** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
+| **Fabrikam** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
+| **Wingtip Toys** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
 | **Woodgrove Bank** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own + Partner | ✅ All partner data |
 
 ## Key Concepts
@@ -39,8 +40,8 @@ In traditional cloud computing, infrastructure operators (cloud providers, IT ad
 ### Woodgrove Bank: Trusted Partner Analytics
 
 Woodgrove Bank demonstrates a **trusted third-party analytics** scenario:
-- Operates as a financial analytics partner for Contoso and Fabrikam
-- Both companies explicitly grant Woodgrove access to their Key Vaults
+- Operates as a financial analytics partner for Contoso, Fabrikam, and Wingtip
+- All three companies explicitly grant Woodgrove access to their Key Vaults
 - Woodgrove must still pass TEE attestation to release partner keys
 - Enables aggregate demographic analysis while maintaining cryptographic guarantees
 
@@ -51,15 +52,15 @@ Woodgrove Bank demonstrates a **trusted third-party analytics** scenario:
 
 ### Cross-Company Isolation
 
-Even between trusted parties (Contoso and Fabrikam Fashion):
+Even between trusted parties (Contoso, Fabrikam, and Wingtip Toys):
 - Each company has a **separate Key Vault key** with its own release policy
 - Contoso's key is bound to Contoso's container identity
 - Fabrikam cannot access Contoso's key, and vice versa
 
 **Woodgrove Bank exception:**
-- Woodgrove can access both partner keys because partners **explicitly granted** access
+- Woodgrove can access all partner keys because partners **explicitly granted** access
 - This is not a security bypass - it's intentional delegation for analytics
-- Enables cross-company demographic analysis inside TEE-protected memory
+- Enables cross-company federated analysis inside TEE-protected memory
 
 ## Traffic Flow
 
@@ -88,14 +89,14 @@ Woodgrove Container → SKR Sidecar (:8080)
                               ↓
                     JWT Token (Woodgrove TEE)
                               ↓
-          ┌─────────────────────────────────────────┐
-          ↓                                         ↓
-  Contoso Key Vault                        Fabrikam Key Vault
-  (Woodgrove has access)                   (Woodgrove has access)
-          ↓                                         ↓
-  contoso-secret-key                       fabrikam-secret-key
-          ↓                                         ↓
-          └─────────────────────────────────────────┘
+          ┌─────────────────────────────────────────────────────┐
+          ↓                                         ↓                   ↓
+  Contoso Key Vault                        Fabrikam Key Vault  Wingtip Key Vault
+  (Woodgrove has access)                   (Woodgrove has access) (Woodgrove has access)
+          ↓                                         ↓                   ↓
+  contoso-secret-key                       fabrikam-secret-key wingtip-secret-key
+          ↓                                         ↓                   ↓
+          └─────────────────────────────────────────────────────┘
                               ↓
                     Partner Data Analysis
 ```
@@ -110,23 +111,24 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 │  (Raw data encrypted before entering system)                            │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│   ┌─────────────────┐         ┌─────────────────┐                       │
-│   │   contoso.csv   │         │  fabrikam.csv   │                       │
-│   │  (800 records)  │         │  (800 records)  │                       │
-│   └────────┬────────┘         └────────┬────────┘                       │
-│            │                           │                                 │
-│            ▼                           ▼                                 │
-│   ┌─────────────────┐         ┌─────────────────┐                       │
-│   │ Encrypt with    │         │ Encrypt with    │                       │
-│   │ Contoso Key     │         │ Fabrikam Key    │                       │
-│   │ (RSA-OAEP-256)  │         │ (RSA-OAEP-256)  │                       │
-│   └────────┬────────┘         └────────┬────────┘                       │
-│            │                           │                                 │
-│            └─────────────┬─────────────┘                                │
-│                          ▼                                               │
-│              ┌───────────────────────┐                                  │
-│              │  Encrypted records    │                                  │
-│              │  stored in memory     │                                  │
+│   ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐  │
+│   │   contoso.csv   │         │  fabrikam.csv   │         │   wingtip.csv   │  │
+│   │  (250 records)  │         │  (250 records)  │         │  (250 records)  │  │
+│   └────────┬────────┘         └────────┬────────┘         └────────┬────────┘  │
+│            │                           │                           │           │
+│            ▼                           ▼                           ▼           │
+│   ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐  │
+│   │ Encrypt with    │         │ Encrypt with    │         │ Encrypt with    │  │
+│   │ Contoso Key     │         │ Fabrikam Key    │         │ Wingtip Key     │  │
+│   │ (RSA-OAEP-256)  │         │ (RSA-OAEP-256)  │         │ (RSA-OAEP-256)  │  │
+│   └────────┬────────┘         └────────┬────────┘         └────────┬────────┘  │
+│            │                           │                           │           │
+│            └─────────────┬─────────────┘                           │           │
+│                          │                                         │           │
+│                          ▼                                         │           │
+│              ┌───────────────────────┐◄────────────────────────────┘           │
+│              │  Encrypted records    │                                        │
+│              │  stored in memory     │◄─────────────────────────────────────────┘
 │              └───────────┬───────────┘                                  │
 │                          │                                              │
 └──────────────────────────┼──────────────────────────────────────────────┘
@@ -163,13 +165,13 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 │  │     🔓 Even hypervisor cannot read TEE memory                     │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                          │                                               │
-│            ┌─────────────┼─────────────┐                                │
-│            │             │             │                                │
-│            ▼             ▼             ▼                                │
-│        Contoso       Fabrikam      Woodgrove                            │
-│       Decrypts      Decrypts      Decrypts                              │
-│       own 800       own 800       ALL partner                           │
-│       records       records       records                               │
+│            ┌─────────────┼─────────────┼─────────────┐                │
+│            │             │             │             │                │
+│            ▼             ▼             ▼             ▼                │
+│        Contoso       Fabrikam      Wingtip       Woodgrove            │
+│       Decrypts      Decrypts      Decrypts      Decrypts              │
+│       own 250       own 250       own 250       ALL partner           │
+│       records       records       records       records               │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -188,7 +190,7 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 # Build the container image (first time only)
 .\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build
 
-# Deploy all 3 containers
+# Deploy all 4 containers
 .\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy
 
 # Or build and deploy in one command
@@ -206,24 +208,25 @@ The following diagram shows how encrypted data flows from storage to the TEE whe
 
 ## What You'll See
 
-After deployment, a browser opens with a 3-pane side-by-side view:
+After deployment, a browser opens with a 4-pane side-by-side view:
 
 ```
-+------------------+------------------+------------------+
-|     CONTOSO      | FABRIKAM FASHION |  WOODGROVE BANK  |
-| (Confidential)   |  (Confidential)  |  (Confidential)  |
-|       🏢         |       👗         |       🏦         |
-| ✅ Attestation   | ✅ Attestation   | ✅ Attestation   |
-| ✅ Key Release   | ✅ Key Release   | ✅ Key Release   |
-| ✅ Own data      | ✅ Own data      | ✅ Partner data  |
-+------------------+------------------+------------------+
++------------------+------------------+------------------+------------------+
+|     CONTOSO      |    FABRIKAM      |  WINGTIP TOYS    |  WOODGROVE BANK  |
+| (Confidential)   | (Confidential)   | (Confidential)   | (Confidential)   |
+|       🏢         |       👗         |       🧸         |       🏦         |
+| ✅ Attestation   | ✅ Attestation   | ✅ Attestation   | ✅ Attestation   |
+| ✅ Key Release   | ✅ Key Release   | ✅ Key Release   | ✅ Key Release   |
+| ✅ Own data      | ✅ Own data      | ✅ Own data      | ✅ Federated     |
++------------------+------------------+------------------+------------------+
 ```
 
 ### Woodgrove Bank Features
 
 - **Green bank branding** with 🏦 logo
 - **Partner Demographic Analysis** section
-- **Progress indicators** for Contoso and Fabrikam key release
+- **Progress indicators** for Contoso, Fabrikam, and Wingtip key release
+- **Federated Analysis** - collects pre-computed results from each partner's TEE
 - **Real-time analysis log**
 - **Demographics**: Top 10 countries with top 3 cities, generational breakdown, salary world map
 
@@ -232,22 +235,30 @@ After deployment, a browser opens with a 3-pane side-by-side view:
 ### Basic Attestation Demo
 
 1. **Show Contoso**: Click "Get Raw Report" - attestation succeeds
-2. **Show Fabrikam Fashion**: Same result - attestation succeeds (pink fashion theme)
-3. **Show Woodgrove Bank**: Attestation succeeds with green bank theme
+2. **Show Fabrikam**: Same result - attestation succeeds (pink fashion theme)
+3. **Show Wingtip Toys**: Same result - attestation succeeds (orange toy theme)
+4. **Show Woodgrove Bank**: Attestation succeeds with green bank theme
 
 ### Secure Key Release Demo
 
-4. **Release Key on Contoso**: Expand "Secure Key Release" section, click release
-5. **Cross-Company Test**: Contoso tries to access Fabrikam Fashion's key - denied
+5. **Release Key on Contoso**: Expand "Secure Key Release" section, click release
+6. **Cross-Company Test**: Contoso tries to access Fabrikam's key - denied
 
 ### Partner Analysis Demo (Woodgrove Bank)
 
-6. **Open Woodgrove Bank pane**: Notice green bank branding with 🏦 logo
-7. **Expand "Partner Demographic Analysis"** section
-8. **Click "Start Partner Demographic Analysis"**
-9. **Watch progress**: Contoso ✅ → Fabrikam ✅
-10. **Review results**: Demographics by country, generation breakdown by company, salary world map
-11. **Review log**: Shows both partner keys released successfully
+7. **Open Woodgrove Bank pane**: Notice green bank branding with 🏦 logo
+8. **Expand "Partner Demographic Analysis"** section
+9. **Click "Start Partner Demographic Analysis"**
+10. **Watch progress**: Contoso ✅ → Fabrikam ✅ → Wingtip ✅
+11. **Review results**: Demographics by country, generation breakdown by company, salary world map
+12. **Review log**: Shows all partner keys released successfully
+
+### Federated Analysis Demo (Woodgrove Bank)
+
+13. **Expand "Federated Analysis"** section
+14. **Click "Start Federated Analysis"**
+15. **Watch collection**: Woodgrove polls each partner for pre-computed analysis results
+16. **Review combined results**: Aggregated analysis across all four companies
 
 ## Security Model
 
@@ -271,7 +282,15 @@ Azure Key Vault: kv<registry>c (Woodgrove Bank)
 ├── Type: RSA-HSM (4096-bit)
 ├── Exportable: true (for SKR)
 ├── Release Policy: sevsnpvm + Woodgrove container identity
-└── Cross-Company: Access to kv<registry>a and kv<registry>b
+└── Cross-Company: Access to kv<registry>a, kv<registry>b, and kv<registry>d
+```
+
+```
+Azure Key Vault: kv<registry>d (Wingtip Toys)
+├── Key: wingtip-secret-key
+├── Type: RSA-HSM (4096-bit)
+├── Exportable: true (for SKR)
+└── Release Policy: sevsnpvm + Wingtip container identity
 ```
 
 ### Release Policy Example
@@ -304,8 +323,9 @@ This means:
 | `Dockerfile` | Multi-stage build with SKR sidecar |
 | `templates/index.html` | Interactive web UI with all demo features |
 | `templates/index-woodgrove.html` | Woodgrove Bank custom UI with partner analytics |
-| `contoso-data.csv` | Sample data for Contoso (800 records) |
-| `fabrikam-data.csv` | Sample data for Fabrikam Fashion (800 records) |
+| `contoso-data.csv` | Sample data for Contoso (250 records) |
+| `fabrikam-data.csv` | Sample data for Fabrikam (250 records) |
+| `wingtip-data.csv` | Sample data for Wingtip Toys (250 records) |
 | `deployment-template-original.json` | ARM template for Confidential SKU |
 | `deployment-template-woodgrove-base.json` | ARM template for Woodgrove with partner env vars |
 | `MultiPartyArchitecture.svg` | High-level architecture diagram |

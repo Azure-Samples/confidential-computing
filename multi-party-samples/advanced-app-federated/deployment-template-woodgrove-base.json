@@ -130,10 +130,31 @@
       }
     },
     "securityPolicyHash": {
-      "type": "string",
+      "type": "securestring",
       "defaultValue": "",
       "metadata": {
         "description": "SHA256 hash of the container security policy (x-ms-sevsnpvm-hostdata)"
+      }
+    },
+    "partnerContosoPolicyHash": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Expected security policy hash for Contoso's container (for verification)"
+      }
+    },
+    "partnerFabrikamPolicyHash": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Expected security policy hash for Fabrikam's container (for verification)"
+      }
+    },
+    "partnerWingtipPolicyHash": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Expected security policy hash for Wingtip's container (for verification)"
       }
     }
   },
@@ -211,7 +232,19 @@
                 },
                 {
                   "name": "SECURITY_POLICY_HASH",
-                  "value": "[parameters('securityPolicyHash')]"
+                  "secureValue": "[parameters('securityPolicyHash')]"
+                },
+                {
+                  "name": "PARTNER_CONTOSO_POLICY_HASH",
+                  "value": "[parameters('partnerContosoPolicyHash')]"
+                },
+                {
+                  "name": "PARTNER_FABRIKAM_POLICY_HASH",
+                  "value": "[parameters('partnerFabrikamPolicyHash')]"
+                },
+                {
+                  "name": "PARTNER_WINGTIP_POLICY_HASH",
+                  "value": "[parameters('partnerWingtipPolicyHash')]"
                 }
               ],
               "resources": {

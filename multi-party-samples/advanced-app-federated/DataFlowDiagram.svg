@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 750">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800">
   <defs>
     <linearGradient id="teeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#28a745;stop-opacity:0.2"/>
@@ -15,6 +15,10 @@
     <linearGradient id="bankGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#1a472a;stop-opacity:0.2"/>
       <stop offset="100%" style="stop-color:#1a472a;stop-opacity:0.1"/>
+    </linearGradient>
+    <linearGradient id="wingtipGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E8700A;stop-opacity:0.2"/>
+      <stop offset="100%" style="stop-color:#E8700A;stop-opacity:0.1"/>
     </linearGradient>
     <marker id="arrowGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
       <polygon points="0 0, 10 3.5, 0 7" fill="#28a745"/>
@@ -37,175 +41,200 @@
   </defs>
   
   <!-- Background -->
-  <rect width="1100" height="750" fill="#fafafa"/>
+  <rect width="1200" height="800" fill="#fafafa"/>
   
   <!-- Title -->
-  <text x="550" y="30" text-anchor="middle" font-family="Segoe UI, Arial" font-size="22" font-weight="bold" fill="#333">Encrypted Data Flow - Multi-Party TEE Decryption Model</text>
-  <text x="550" y="50" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#666">3 Confidential Containers: Contoso, Fabrikam Fashion, Woodgrove Bank (Partner Analytics)</text>
+  <text x="600" y="30" text-anchor="middle" font-family="Segoe UI, Arial" font-size="22" font-weight="bold" fill="#333">Encrypted Data Flow - Multi-Party Federated TEE Decryption Model</text>
+  <text x="600" y="50" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#666">4 Confidential Containers: Contoso, Fabrikam, Wingtip Toys, Woodgrove Bank (Partner Analytics)</text>
   
   <!-- ============ EXTERNAL DATA ZONE (Left) ============ -->
-  <rect x="25" y="70" width="280" height="200" rx="15" fill="#fff8e6" stroke="#ffc107" stroke-width="2" stroke-dasharray="8,4"/>
+  <rect x="25" y="70" width="280" height="230" rx="15" fill="#fff8e6" stroke="#ffc107" stroke-width="2" stroke-dasharray="8,4"/>
   <text x="45" y="95" font-family="Segoe UI, Arial" font-size="13" fill="#856404" font-weight="bold">📁 External Data Sources</text>
   <text x="45" y="112" font-family="Segoe UI, Arial" font-size="9" fill="#856404">Data encrypted before entering TEE</text>
   
   <!-- Data Sources -->
   <g filter="url(#shadow)">
-    <rect x="45" y="130" width="240" height="120" rx="10" fill="#fff" stroke="#ffc107" stroke-width="2"/>
-    <rect x="45" y="130" width="240" height="28" rx="10" fill="#ffc107"/>
-    <text x="165" y="150" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#333" font-weight="bold">📊 Partner Data</text>
-    <text x="165" y="175" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">contoso-data.csv (800 records)</text>
-    <text x="165" y="195" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">fabrikam-data.csv (800 records)</text>
-    <text x="165" y="220" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#666">Encrypted with RSA-OAEP-256</text>
-    <text x="165" y="240" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#666">Keys from respective Key Vaults</text>
+    <rect x="45" y="125" width="240" height="155" rx="10" fill="#fff" stroke="#ffc107" stroke-width="2"/>
+    <rect x="45" y="125" width="240" height="28" rx="10" fill="#ffc107"/>
+    <text x="165" y="145" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#333" font-weight="bold">📊 Partner Data</text>
+    <text x="165" y="170" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">contoso-data.csv (250 records)</text>
+    <text x="165" y="190" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#333">fabrikam-data.csv (250 records)</text>
+    <text x="165" y="210" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#E8700A">wingtip-data.csv (250 records)</text>
+    <text x="165" y="238" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#666">Encrypted with RSA-OAEP-256</text>
+    <text x="165" y="255" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#666">Keys from respective Key Vaults</text>
   </g>
   
   <!-- ============ TRUSTED ZONE (Right) ============ -->
-  <rect x="330" y="70" width="745" height="560" rx="15" fill="#f0fff0" stroke="#28a745" stroke-width="2"/>
+  <rect x="330" y="70" width="845" height="600" rx="15" fill="#f0fff0" stroke="#28a745" stroke-width="2"/>
   <text x="350" y="95" font-family="Segoe UI, Arial" font-size="13" fill="#28a745" font-weight="bold">✅ TRUSTED ZONE (Hardware Protected)</text>
   <text x="350" y="112" font-family="Segoe UI, Arial" font-size="9" fill="#28a745">Decryption only happens here, inside AMD SEV-SNP TEE</text>
   
   <!-- Key Vaults Row -->
   <g filter="url(#shadow)">
-    <rect x="350" y="125" width="160" height="85" rx="8" fill="url(#keyVaultGrad)" stroke="#0078d4" stroke-width="2"/>
-    <rect x="350" y="125" width="160" height="22" rx="8" fill="#0078d4"/>
-    <text x="430" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🔐 Contoso Key Vault</text>
-    <text x="430" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;a</text>
-    <text x="430" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#0078d4">🔑 contoso-secret-key</text>
-    <text x="430" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sevsnpvm required</text>
+    <rect x="345" y="125" width="150" height="85" rx="8" fill="url(#keyVaultGrad)" stroke="#0078d4" stroke-width="2"/>
+    <rect x="345" y="125" width="150" height="22" rx="8" fill="#0078d4"/>
+    <text x="420" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🔐 Contoso Key Vault</text>
+    <text x="420" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;a</text>
+    <text x="420" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#0078d4">🔑 contoso-secret-key</text>
+    <text x="420" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sevsnpvm required</text>
   </g>
   
   <g filter="url(#shadow)">
-    <rect x="530" y="125" width="160" height="85" rx="8" fill="url(#keyVaultGrad)" stroke="#0078d4" stroke-width="2"/>
-    <rect x="530" y="125" width="160" height="22" rx="8" fill="#0078d4"/>
-    <text x="610" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🔐 Fabrikam Key Vault</text>
-    <text x="610" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;b</text>
-    <text x="610" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#0078d4">🔑 fabrikam-secret-key</text>
-    <text x="610" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sevsnpvm required</text>
+    <rect x="510" y="125" width="150" height="85" rx="8" fill="url(#keyVaultGrad)" stroke="#0078d4" stroke-width="2"/>
+    <rect x="510" y="125" width="150" height="22" rx="8" fill="#0078d4"/>
+    <text x="585" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🔐 Fabrikam Key Vault</text>
+    <text x="585" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;b</text>
+    <text x="585" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#0078d4">🔑 fabrikam-secret-key</text>
+    <text x="585" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sevsnpvm required</text>
   </g>
   
   <g filter="url(#shadow)">
-    <rect x="710" y="125" width="160" height="85" rx="8" fill="url(#bankGrad)" stroke="#1a472a" stroke-width="2"/>
-    <rect x="710" y="125" width="160" height="22" rx="8" fill="#1a472a"/>
-    <text x="790" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🏦 Woodgrove Key Vault</text>
-    <text x="790" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;c</text>
-    <text x="790" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#1a472a">🔑 woodgrove-secret-key</text>
-    <text x="790" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">+ Partner Access</text>
+    <rect x="675" y="125" width="150" height="85" rx="8" fill="url(#bankGrad)" stroke="#1a472a" stroke-width="2"/>
+    <rect x="675" y="125" width="150" height="22" rx="8" fill="#1a472a"/>
+    <text x="750" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🏦 Woodgrove Key Vault</text>
+    <text x="750" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;c</text>
+    <text x="750" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#1a472a">🔑 woodgrove-secret-key</text>
+    <text x="750" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">+ Partner Access</text>
+  </g>
+  
+  <g filter="url(#shadow)">
+    <rect x="840" y="125" width="150" height="85" rx="8" fill="url(#wingtipGrad)" stroke="#E8700A" stroke-width="2"/>
+    <rect x="840" y="125" width="150" height="22" rx="8" fill="#E8700A"/>
+    <text x="915" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🧸 Wingtip Key Vault</text>
+    <text x="915" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">kv&lt;registry&gt;d</text>
+    <text x="915" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#E8700A">🔑 wingtip-secret-key</text>
+    <text x="915" y="198" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sevsnpvm required</text>
   </g>
   
   <!-- MAA -->
   <g filter="url(#shadow)">
-    <rect x="900" y="125" width="150" height="85" rx="8" fill="#fff" stroke="#0078d4" stroke-width="2"/>
-    <rect x="900" y="125" width="150" height="22" rx="8" fill="#0078d4"/>
-    <text x="975" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🛡️ Azure Attestation</text>
-    <text x="975" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Verifies TEE Evidence</text>
-    <text x="975" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Issues JWT Token</text>
-    <text x="975" y="195" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sharedeus.eus.attest.azure.net</text>
+    <rect x="1010" y="125" width="150" height="85" rx="8" fill="#fff" stroke="#0078d4" stroke-width="2"/>
+    <rect x="1010" y="125" width="150" height="22" rx="8" fill="#0078d4"/>
+    <text x="1085" y="141" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff" font-weight="bold">🛡️ Azure Attestation</text>
+    <text x="1085" y="162" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Verifies TEE Evidence</text>
+    <text x="1085" y="178" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Issues JWT Token</text>
+    <text x="1085" y="195" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#666">sharedeus.eus.attest.azure.net</text>
   </g>
   
   <!-- TEE Container Area -->
   <g filter="url(#shadow)">
-    <rect x="350" y="230" width="700" height="280" rx="12" fill="url(#teeGrad)" stroke="#28a745" stroke-width="3"/>
-    <rect x="350" y="230" width="700" height="30" rx="12" fill="#28a745"/>
-    <text x="700" y="251" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#fff" font-weight="bold">🔒 Confidential Containers (AMD SEV-SNP TEE) - Hardware Memory Encryption</text>
+    <rect x="345" y="230" width="820" height="300" rx="12" fill="url(#teeGrad)" stroke="#28a745" stroke-width="3"/>
+    <rect x="345" y="230" width="820" height="30" rx="12" fill="#28a745"/>
+    <text x="755" y="251" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#fff" font-weight="bold">🔒 Confidential Containers (AMD SEV-SNP TEE) - Hardware Memory Encryption</text>
     
     <!-- Hardware boundary note -->
-    <rect x="365" y="270" width="670" height="25" rx="5" fill="#155724"/>
-    <text x="700" y="287" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff">Even hypervisor and Azure operators cannot see memory contents - CPU-level encryption</text>
+    <rect x="360" y="270" width="790" height="25" rx="5" fill="#155724"/>
+    <text x="755" y="287" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#fff">Even hypervisor and Azure operators cannot see memory contents - CPU-level encryption</text>
     
     <!-- Contoso Container -->
-    <rect x="375" y="305" width="150" height="90" rx="8" fill="#fff" stroke="#28a745" stroke-width="2"/>
-    <text x="450" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">🏢 Contoso</text>
-    <text x="450" y="345" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Flask :80 + SKR :8080</text>
-    <text x="450" y="365" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">✅ Own key access</text>
-    <text x="450" y="382" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#dc3545">❌ Cannot get Fabrikam key</text>
+    <rect x="370" y="305" width="140" height="90" rx="8" fill="#fff" stroke="#28a745" stroke-width="2"/>
+    <text x="440" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">🏢 Contoso</text>
+    <text x="440" y="342" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#333">Flask :80 + SKR :8080</text>
+    <text x="440" y="358" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#28a745">📊 Local decrypt &amp; analysis</text>
+    <text x="440" y="375" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#28a745">🔗 Exports aggregates only</text>
     
     <!-- Fabrikam Container -->
-    <rect x="545" y="305" width="150" height="90" rx="8" fill="#fff" stroke="#28a745" stroke-width="2"/>
-    <text x="620" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">👗 Fabrikam Fashion</text>
-    <text x="620" y="345" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Flask :80 + SKR :8080</text>
-    <text x="620" y="365" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">✅ Own key access</text>
-    <text x="620" y="382" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#dc3545">❌ Cannot get Contoso key</text>
+    <rect x="525" y="305" width="140" height="90" rx="8" fill="#fff" stroke="#28a745" stroke-width="2"/>
+    <text x="595" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">👗 Fabrikam</text>
+    <text x="595" y="342" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#333">Flask :80 + SKR :8080</text>
+    <text x="595" y="358" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#28a745">📊 Local decrypt &amp; analysis</text>
+    <text x="595" y="375" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#28a745">🔗 Exports aggregates only</text>
+    
+    <!-- Wingtip Container -->
+    <rect x="680" y="305" width="140" height="90" rx="8" fill="#fff" stroke="#E8700A" stroke-width="2"/>
+    <text x="750" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#7a3c00" font-weight="bold">🧸 Wingtip Toys</text>
+    <text x="750" y="342" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#333">Flask :80 + SKR :8080</text>
+    <text x="750" y="358" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#E8700A">📊 Local decrypt &amp; analysis</text>
+    <text x="750" y="375" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#E8700A">🔗 Exports aggregates only</text>
     
     <!-- Woodgrove Container -->
-    <rect x="715" y="305" width="170" height="90" rx="8" fill="#fff" stroke="#1a472a" stroke-width="2"/>
-    <text x="800" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#1a472a" font-weight="bold">🏦 Woodgrove Bank</text>
-    <text x="800" y="345" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#333">Flask :80 + SKR :8080</text>
-    <text x="800" y="365" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">✅ Own key + Partner keys</text>
-    <text x="800" y="382" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#1a472a">📊 Partner Analysis</text>
+    <rect x="835" y="305" width="155" height="90" rx="8" fill="#fff" stroke="#1a472a" stroke-width="2"/>
+    <text x="912" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#1a472a" font-weight="bold">🏦 Woodgrove Bank</text>
+    <text x="912" y="342" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#333">Flask :80 + SKR :8080</text>
+    <text x="912" y="358" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#1a472a">📊 Collects partner aggregates</text>
+    <text x="912" y="375" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#1a472a">No raw partner data access</text>
     
     <!-- Decryption result box -->
-    <rect x="375" y="410" width="510" height="85" rx="8" fill="#fff" stroke="#28a745" stroke-width="1"/>
-    <text x="630" y="432" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#155724" font-weight="bold">✅ Decrypted Data (Visible Only Inside TEE)</text>
-    <text x="400" y="455" font-family="Courier New, monospace" font-size="9" fill="#28a745">Contoso: Name: "John Doe"    Phone: "555-1234"</text>
-    <text x="400" y="472" font-family="Courier New, monospace" font-size="9" fill="#28a745">Fabrikam: Name: "Jane Smith"  Phone: "555-5678"</text>
-    <text x="400" y="489" font-family="Courier New, monospace" font-size="9" fill="#1a472a">Woodgrove: Can decrypt BOTH (partner access granted)</text>
+    <rect x="370" y="410" width="620" height="105" rx="8" fill="#fff" stroke="#28a745" stroke-width="1"/>
+    <text x="680" y="432" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#155724" font-weight="bold">📊 Local Processing → Aggregate Insights (Inside Each TEE)</text>
+    <text x="395" y="455" font-family="Courier New, monospace" font-size="8" fill="#28a745">Contoso:  avg_revenue=$1,234  total_records=250  (local)</text>
+    <text x="395" y="470" font-family="Courier New, monospace" font-size="8" fill="#28a745">Fabrikam: avg_revenue=$2,345  total_records=250  (local)</text>
+    <text x="395" y="485" font-family="Courier New, monospace" font-size="8" fill="#E8700A">Wingtip:  avg_revenue=$3,456  total_records=250  (local)</text>
+    <text x="395" y="505" font-family="Courier New, monospace" font-size="8" fill="#1a472a">Woodgrove: Combines partner aggregates (no raw data access)</text>
     
     <!-- Key only in memory note -->
-    <rect x="905" y="305" width="130" height="90" rx="8" fill="#d4edda" stroke="#28a745" stroke-width="2"/>
-    <text x="970" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">🔓 Keys in</text>
-    <text x="970" y="340" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">TEE Memory</text>
-    <text x="970" y="360" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Never exported</text>
-    <text x="970" y="375" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Hardware protected</text>
-    <text x="970" y="390" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#666">Decryption inside</text>
+    <rect x="1005" y="305" width="130" height="90" rx="8" fill="#d4edda" stroke="#28a745" stroke-width="2"/>
+    <text x="1070" y="325" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">🔓 Keys in</text>
+    <text x="1070" y="340" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">TEE Memory</text>
+    <text x="1070" y="360" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Never exported</text>
+    <text x="1070" y="375" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Hardware protected</text>
+    <text x="1070" y="390" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#666">Decryption inside</text>
   </g>
   
   <!-- ============ FLOW ARROWS ============ -->
   
   <!-- Encrypted data from external to TEE -->
-  <path d="M 285 195 L 340 350" stroke="#ffc107" stroke-width="3" fill="none" marker-end="url(#arrowOrange)"/>
-  <text x="300" y="280" font-family="Segoe UI, Arial" font-size="9" fill="#856404">1️⃣ Encrypted</text>
-  <text x="300" y="293" font-family="Segoe UI, Arial" font-size="9" fill="#856404">data</text>
+  <path d="M 285 210 L 340 370" stroke="#ffc107" stroke-width="3" fill="none" marker-end="url(#arrowOrange)"/>
+  <text x="295" y="295" font-family="Segoe UI, Arial" font-size="9" fill="#856404">1️⃣ Encrypted</text>
+  <text x="295" y="308" font-family="Segoe UI, Arial" font-size="9" fill="#856404">data</text>
   
   <!-- TEE to MAA -->
-  <path d="M 700 265 L 900 165" stroke="#0078d4" stroke-width="2" fill="none" marker-end="url(#arrowBlue)" stroke-dasharray="5,3"/>
-  <text x="815" y="205" font-family="Segoe UI, Arial" font-size="8" fill="#0078d4">2️⃣ Attest</text>
+  <path d="M 755 265 L 1010 165" stroke="#0078d4" stroke-width="2" fill="none" marker-end="url(#arrowBlue)" stroke-dasharray="5,3"/>
+  <text x="900" y="205" font-family="Segoe UI, Arial" font-size="8" fill="#0078d4">2️⃣ Attest</text>
   
   <!-- MAA to TEE (JWT) -->
-  <path d="M 930 210 L 800 265" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
-  <text x="880" y="245" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">JWT</text>
+  <path d="M 1040 210 L 900 265" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  <text x="980" y="245" font-family="Segoe UI, Arial" font-size="8" fill="#28a745">JWT</text>
   
   <!-- TEE to Key Vaults -->
-  <path d="M 450 305 L 430 210" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
-  <text x="420" y="260" font-family="Segoe UI, Arial" font-size="7" fill="#28a745">3️⃣ Key</text>
+  <path d="M 440 305 L 420 210" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  <text x="410" y="260" font-family="Segoe UI, Arial" font-size="7" fill="#28a745">3️⃣ Key</text>
   
-  <path d="M 620 305 L 610 210" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  <path d="M 595 305 L 585 210" stroke="#28a745" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
   
-  <path d="M 800 305 L 790 210" stroke="#1a472a" stroke-width="2" fill="none" marker-end="url(#arrowBank)"/>
+  <path d="M 750 305 L 915 210" stroke="#E8700A" stroke-width="2" fill="none" marker-end="url(#arrowOrange)"/>
+  
+  <path d="M 912 305 L 750 210" stroke="#1a472a" stroke-width="2" fill="none" marker-end="url(#arrowBank)"/>
   
   <!-- Woodgrove to partner Key Vaults -->
-  <path d="M 750 320 Q 580 280 450 210" stroke="#1a472a" stroke-width="1.5" stroke-dasharray="3,2" fill="none" marker-end="url(#arrowBank)"/>
-  <path d="M 780 315 Q 700 280 620 210" stroke="#1a472a" stroke-width="1.5" stroke-dasharray="3,2" fill="none" marker-end="url(#arrowBank)"/>
-  <text x="600" y="275" font-family="Segoe UI, Arial" font-size="7" fill="#1a472a">Partner keys</text>
+  <path d="M 860 320 Q 640 280 440 210" stroke="#1a472a" stroke-width="1.5" stroke-dasharray="3,2" fill="none" marker-end="url(#arrowBank)"/>
+  <path d="M 870 315 Q 730 275 600 210" stroke="#1a472a" stroke-width="1.5" stroke-dasharray="3,2" fill="none" marker-end="url(#arrowBank)"/>
+  <path d="M 880 310 Q 900 270 915 210" stroke="#1a472a" stroke-width="1.5" stroke-dasharray="3,2" fill="none" marker-end="url(#arrowBank)"/>
+  <text x="700" y="275" font-family="Segoe UI, Arial" font-size="7" fill="#1a472a">Partner keys</text>
   
   <!-- ============ LEGEND ============ -->
-  <rect x="25" y="290" width="280" height="120" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
-  <text x="45" y="315" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Data Flow Legend:</text>
+  <rect x="25" y="315" width="280" height="120" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
+  <text x="45" y="340" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Data Flow Legend:</text>
   
-  <line x1="45" y1="335" x2="85" y2="335" stroke="#ffc107" stroke-width="3"/>
-  <text x="95" y="340" font-family="Segoe UI, Arial" font-size="9" fill="#333">1️⃣ Encrypted data to TEE</text>
+  <line x1="45" y1="360" x2="85" y2="360" stroke="#ffc107" stroke-width="3"/>
+  <text x="95" y="365" font-family="Segoe UI, Arial" font-size="9" fill="#333">1️⃣ Encrypted data to TEE</text>
   
-  <line x1="45" y1="355" x2="85" y2="355" stroke="#0078d4" stroke-width="2" stroke-dasharray="5,3"/>
-  <text x="95" y="360" font-family="Segoe UI, Arial" font-size="9" fill="#333">2️⃣ TEE attestation to MAA</text>
+  <line x1="45" y1="380" x2="85" y2="380" stroke="#0078d4" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="95" y="385" font-family="Segoe UI, Arial" font-size="9" fill="#333">2️⃣ TEE attestation to MAA</text>
   
-  <line x1="45" y1="375" x2="85" y2="375" stroke="#28a745" stroke-width="2"/>
-  <text x="95" y="380" font-family="Segoe UI, Arial" font-size="9" fill="#333">3️⃣ Key release to TEE</text>
+  <line x1="45" y1="400" x2="85" y2="400" stroke="#28a745" stroke-width="2"/>
+  <text x="95" y="405" font-family="Segoe UI, Arial" font-size="9" fill="#333">3️⃣ Key release to TEE</text>
   
-  <line x1="45" y1="395" x2="85" y2="395" stroke="#1a472a" stroke-width="2" stroke-dasharray="3,2"/>
-  <text x="95" y="400" font-family="Segoe UI, Arial" font-size="9" fill="#333">Woodgrove partner access</text>
+  <line x1="45" y1="420" x2="85" y2="420" stroke="#1a472a" stroke-width="2" stroke-dasharray="3,2"/>
+  <text x="95" y="425" font-family="Segoe UI, Arial" font-size="9" fill="#333">Woodgrove partner access</text>
   
   <!-- Result summary -->
-  <rect x="330" y="530" width="550" height="100" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
-  <text x="350" y="555" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Decryption Results by Container:</text>
+  <rect x="330" y="555" width="680" height="110" rx="10" fill="#fff" stroke="#ccc" stroke-width="1"/>
+  <text x="350" y="580" font-family="Segoe UI, Arial" font-size="11" fill="#333" font-weight="bold">Decryption Results by Container:</text>
   
-  <rect x="350" y="570" width="160" height="45" rx="5" fill="#d4edda" stroke="#28a745"/>
-  <text x="430" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">Contoso ✅</text>
-  <text x="430" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Decrypts own 800 records</text>
+  <rect x="350" y="595" width="145" height="55" rx="5" fill="#d4edda" stroke="#28a745"/>
+  <text x="422" y="615" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">Contoso ✅</text>
+  <text x="422" y="632" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#155724">Analyzes own 250 locally</text>
   
-  <rect x="530" y="570" width="160" height="45" rx="5" fill="#d4edda" stroke="#28a745"/>
-  <text x="610" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#155724" font-weight="bold">Fabrikam ✅</text>
-  <text x="610" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#155724">Decrypts own 800 records</text>
+  <rect x="510" y="595" width="145" height="55" rx="5" fill="#d4edda" stroke="#28a745"/>
+  <text x="582" y="615" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#155724" font-weight="bold">Fabrikam ✅</text>
+  <text x="582" y="632" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#155724">Analyzes own 250 locally</text>
   
-  <rect x="710" y="570" width="160" height="45" rx="5" fill="#d4edda" stroke="#1a472a"/>
-  <text x="790" y="590" text-anchor="middle" font-family="Segoe UI, Arial" font-size="10" fill="#1a472a" font-weight="bold">Woodgrove Bank ✅</text>
-  <text x="790" y="605" text-anchor="middle" font-family="Segoe UI, Arial" font-size="8" fill="#1a472a">Decrypts all partner data</text>
+  <rect x="670" y="595" width="145" height="55" rx="5" fill="#fde8d0" stroke="#E8700A"/>
+  <text x="742" y="615" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#7a3c00" font-weight="bold">Wingtip Toys ✅</text>
+  <text x="742" y="632" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#7a3c00">Analyzes own 250 locally</text>
+  
+  <rect x="830" y="595" width="165" height="55" rx="5" fill="#d4edda" stroke="#1a472a"/>
+  <text x="912" y="615" text-anchor="middle" font-family="Segoe UI, Arial" font-size="9" fill="#1a472a" font-weight="bold">Woodgrove Bank ✅</text>
+  <text x="912" y="632" text-anchor="middle" font-family="Segoe UI, Arial" font-size="7" fill="#1a472a">Aggregates partner insights</text>
 </svg>
