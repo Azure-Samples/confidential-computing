@@ -1,13 +1,13 @@
 # Federated Confidential Computing Demo Script
 
-> **Duration:** ~4 minutes  
+> **Duration:** ~3 minutes  
 > **Focus:** Federated privacy-preserving analysis where each company processes its own data locally inside a TEE and only shares aggregate insights — never raw PII.
 
 ---
 
 ## Setup (Before Demo)
 
-1. Deploy all four containers using the deploy script:
+1. Deploy all four containers:
    ```powershell
    .\Deploy-MultiParty.ps1 -Prefix sgall -RegistryName acrhjlxsrnc -Build -Deploy
    ```
@@ -16,119 +16,79 @@
    - **Contoso** (data provider) — port 8081
    - **Fabrikam** (data provider) — port 8082
    - **Wingtip Toys** (data provider) — port 8083
-3. Open **Woodgrove Bank's URL** in a browser (e.g. `http://woodgrove-MMDDTTTT.eastus.azurecontainer.io`).
+3. Open **Woodgrove Bank** in a browser. Optionally open a data provider (e.g. Contoso) in a second tab.
 
 ---
 
-## [0:00 – 0:40] Architecture Overview & Audio Narration
+## [0:00 – 0:30] Architecture & How It Works
 
-**Action:** The page loads with the **🏗️ Federated Multi-Party Architecture** section expanded at the top, showing the architecture diagram SVG.
+*Woodgrove Bank container*
 
-**Talk track:**
+**Action:** The page loads with the **🏗️ Federated Multi-Party Architecture** diagram expanded at the top.
 
-> "Let me start by showing you the architecture of what we've built. This diagram shows four companies — Contoso, Fabrikam, Wingtip Toys, and Woodgrove Bank — each running inside their own AMD SEV-SNP Trusted Execution Environment on Azure."
-
-**Action:** Click the **"🔊 Explain It"** button next to the diagram. The narration controls panel appears with play/pause, ±5s seek, stop, volume slider, and a progress scrub bar. Click **▶️ Play** to start the ~50-second audio narration (English woman's voice).
-
-> *(Let the TTS narration play while you point to the relevant parts of the diagram. The narration script covers: four companies in TEEs, data encrypted at rest, Woodgrove as analytics partner requesting aggregates only, remote attestation and policy hash matching, hardware-enforced trust.)*
-
-**Action:** When the narration finishes (or stop it early with ⏹), click **"🔇 Hide Narration"** to collapse the controls.
+> "This is a federated multi-party confidential computing demo. Four companies — Contoso, Fabrikam, Wingtip Toys, and Woodgrove Bank — each run their workloads inside AMD SEV-SNP Trusted Execution Environments on Azure. Each company's data is encrypted at rest and only decrypted inside its own TEE — not even the cloud provider can see the plaintext. Woodgrove Bank acts as the analytics partner. It requests aggregate statistics from each company's container but never receives any raw personal data. Before accepting results, Woodgrove cryptographically verifies each partner's identity through remote attestation and policy hash matching, ensuring the code running in each TEE hasn't been tampered with. The result: multiple organizations collaborate on shared analytics without ever exposing their sensitive data to each other or to the infrastructure."
 
 ---
 
-## [0:40 – 1:15] Show the Data & Encryption
+## [0:30 – 0:50] Security & Attestation
 
-**Talk track:**
+**Action:** The **🛡️ Security Features** section shows six properties with ○ pending indicators. Expand **🔍 Remote Attestation** and click **"Request Attestation Token"** — all six flip to ✓ green. Then expand **🔑 Secure Key Release** and click **"🔐 Test Secure Key Release"**.
 
-> "Let me show you what's actually in each company's data. Each has 250 employee records with 18 highly sensitive fields — names, emails, phone numbers, dates of birth, national IDs, salary, credit card numbers, bank accounts, passport numbers, medical conditions, and blood types."
-
-**Action:** Click **"List Saved Data"** on the Woodgrove container. Show the encrypted view.
-
-> "Notice that even Woodgrove — the orchestrator — can only see encrypted ciphertext. The data was encrypted at rest with each company's own key, released only via AMD SEV-SNP attestation. No one — not even Microsoft or the cloud provider — can read this data outside the TEE."
-
-**Action:** Point out the encrypted columns and the "Unable to Decrypt Contents" rows for other companies' records.
+> "The attestation token from Microsoft Azure Attestation confirms this container is running inside a genuine AMD SEV-SNP TEE. Now Azure Key Vault releases the decryption key — but only because attestation proved this is the approved container."
 
 ---
 
-## [1:15 – 2:15] Run Federated Analysis
+## [0:50 – 1:05] TEE Is Locked Down
 
-**Talk track:**
+**Action:** Expand **"🖥️ Try to Access Container OS"** and click **"🔓 Attempt to Connect"**. All three access methods fail.
 
-> "Now here's the key innovation. Instead of gathering all data centrally, we use a **federated model**. Watch what happens when I start the analysis."
+> "Can an operator shell in? No. SSH — blocked, no daemon and the policy prevents adding one. `az container exec` — disabled at the policy level. Shell spawn — blocked even if malware got in. This is hardware-enforced isolation, not just configuration."
 
-**Action:** Scroll to the **"Federated Partner Analysis"** section and click **"Start Federated Analysis"**. A progress bar appears showing the current phase.
-
-> "Each company's container is now:
-> 1. Receiving the analysis request
-> 2. Decrypting its own data **locally inside its own TEE**
-> 3. Computing aggregate statistics — averages, counts, distributions
-> 4. Signing the results with a hardware-attested key
-> 5. Sending back **only the aggregates** — no names, no IDs, no PII
->
-> Watch the status cards — Contoso... done. Fabrikam... done. Wingtip... done."
-
-**Action:** As results stream in, point to the green status indicators and the progress bar completing.
+**Action:** Optionally expand **"📦 Container Image Information"** to show hostname, SEV-SNP device status, and SHA-256 checksums of application files.
 
 ---
 
-## [2:15 – 2:45] Attestation Verification & "Explain This"
+## [1:05 – 1:20] Live Encryption & Cross-Company Isolation
 
-**Talk track:**
+**Action:** Expand **"🔐 Encrypt Data Using [Company] Key"**. Type a message — ciphertext appears in real-time (RSA-OAEP-SHA256). Then on a data provider tab, expand **"🚫 Attempt to Use Key from Other Company"** and click **"🚫 Attempt to Access Other Company's Key"** — it fails.
 
-> "Notice the **Container Attestation Verification** panel that appeared. This proves each company is running the exact approved container image — verified by hardware."
-
-**Action:** Point to the attestation panel showing three cards (Contoso, Fabrikam, Wingtip Toys).
-
-> "For each partner you can see:
-> - The **TEE type** — AMD SEV-SNP — the hardware enclave protecting their data
-> - **SKR Key Released: Yes** — Azure Key Vault confirmed, through Microsoft Azure Attestation, that this is the genuine approved container before releasing the decryption key
-> - **Image Verified: Yes** — the container image hash matches what was approved
-> - The **Policy Hash** — a cryptographic fingerprint that binds the exact container code, environment variables, and mount points
-> - **File Integrity hashes** — SHA-256 of key application files proving no tampering"
-
-**Action:** Click the **"ℹ️ Explain This"** button in the attestation header. A flyout panel expands explaining the two-phase trust chain:
-
-> "This flyout describes the three verification steps:
-> 1. **Hardware attestation** — AMD SEV-SNP generates a unique security policy hash for the exact code running in the enclave
-> 2. **Key release gate** — MAA confirms the container's `x-ms-sevsnpvm-hostdata` claim matches the approved hash before Key Vault releases any key
-> 3. **Cross-verification** — Woodgrove compares each partner's self-reported hash against the expected value baked into its own confcom policy
->
-> If *anyone* — including the cloud provider — modified even one line of code, the policy hash would change, attestation would fail, and the key would **never** be released. This is hardware-enforced trust."
-
-**Action:** Click the **✕** or the button again to close the flyout.
+> "With the key released we can encrypt in real-time. But each company can only access its own key — Contoso trying to use Fabrikam's key is denied. Shared infrastructure, cryptographic isolation."
 
 ---
 
-## [2:45 – 3:30] Explore the Combined Results
+## [1:20 – 2:00] Federated Analysis
 
-**Talk track:**
+*Woodgrove Bank container*
 
-> "Now Woodgrove combines the aggregate statistics from all three companies into a unified view. Look at what we can see:"
+**Action:** Expand **"📊 Federated Partner Analysis"** and click **"📊 Start Federated Analysis"**. A progress bar tracks the phases.
 
-**Action:** Scroll through the demographics summary showing:
-- **750 total staff** across all companies (four colour-coded cards)
-- **Average salaries** compared side-by-side per company
-- **Generation breakdown** (Gen Z / Millennial / Gen X / Baby Boomer) with per-company percentage bars
-- **Blood type distribution** — aggregated counts, not individual records
-- **Medical conditions** — only "X people have hypertension", not "John Smith has hypertension"
-- **World map** showing salary distribution by country (coloured by salary level)
-- **Top countries** with city breakdowns
-
-> "Every single insight here was computed **inside** each company's TEE. Woodgrove received only the numbers — the counts, averages, and percentages you see. **Zero PII crossed any network boundary.**"
+> "Instead of gathering data centrally, each company's container decrypts its own data locally inside its TEE, computes aggregate statistics, and sends back only the aggregates — no names, no IDs, no PII. Watch the status cards: Contoso… done. Fabrikam… done. Wingtip… done."
 
 ---
 
-## [3:30 – 4:00] Proof of Privacy
+## [2:00 – 2:20] Attestation Verification & Explain This
 
-**Talk track:**
+**Action:** Point to the **Container Attestation Verification** panel (three cards). Click **"ℹ️ Explain This"** to open the flyout.
 
-> "But don't take my word for it. Scroll down to the Privacy Proof section."
+> "Each card shows TEE type, SKR key released, image verified, policy hash, and file integrity hashes. The flyout explains: AMD SEV-SNP generates a policy hash for the running code; MAA confirms it before Key Vault releases any key; Woodgrove cross-verifies each partner's hash. Modify one line of code and the key is never released."
 
-**Action:** Scroll to the **"🔍 Raw Partner Responses (Privacy Proof)"** section. This shows the raw JSON that Woodgrove received from each partner in a scrollable table.
+**Action:** Close the flyout.
 
-> "This table shows the **exact data** Woodgrove received from each partner. Every cell is an aggregate — record counts, salary averages, generation percentages, blood type counts. There are no names, no social security numbers, no credit card numbers, no addresses.
->
-> This is the power of confidential computing with federated analytics: **full collaboration, zero data exposure**. Each company retains sovereignty over its data while everyone benefits from the combined insights."
+---
+
+## [2:20 – 2:45] Combined Results
+
+**Action:** Scroll through the demographics summary: 750 total staff cards, per-company salary comparison, generation breakdown bars, blood type distribution, medical condition counts, world map with salary-by-country colouring, top countries with city breakdowns.
+
+> "Every insight was computed inside each company's TEE. Woodgrove received only counts, averages, and percentages. Zero PII crossed any network boundary."
+
+---
+
+## [2:45 – 3:00] Proof of Privacy
+
+**Action:** Scroll to **"🔍 Raw Partner Responses (Privacy Proof)"** showing formatted JSON per partner.
+
+> "This is the exact data Woodgrove received — record counts, salary averages, generation percentages, blood type counts. No names, no SSNs, no credit cards. Full collaboration, zero data exposure."
 
 ---
 
@@ -138,8 +98,10 @@
 |-----------|----------------------|
 | **Data sovereignty** | Each company's PII never leaves its TEE |
 | **Hardware attestation** | AMD SEV-SNP verifies code integrity before key release |
+| **Operator lockout** | No SSH, no exec, no shell — policy-enforced |
 | **Federated analytics** | Local processing, aggregate-only sharing |
-| **Cryptographic proof** | Results signed with TEE-attested keys |
+| **Key isolation** | Cross-company key access fails even between TEEs |
+| **Cryptographic proof** | Results include attestation_evidence with policy hash and file integrity |
 | **Zero trust** | Even the orchestrator (Woodgrove) cannot decrypt raw data |
 
 ---
@@ -148,14 +110,21 @@
 
 | Feature | Location | Visibility |
 |---------|----------|------------|
-| Architecture diagram (SVG) | Top of page, collapsible `<details>` | Woodgrove only |
+| 🏗️ Architecture diagram (SVG) | Top of page, collapsible `<details>` | Woodgrove only |
 | 🔊 Explain It (TTS narration) | Button next to diagram | Woodgrove only |
-| Narration controls (play/pause, seek, stop, volume, scrub) | Expands below diagram | Woodgrove only |
+| Narration controls (⏪ 5s, ▶️/⏸, 5s ⏩, ⏹, volume, progress scrub) | Expands below diagram | Woodgrove only |
+| 🛡️ Security Features | Six checkable properties | All containers |
+| 🔍 Remote Attestation | Request Attestation Token / Get Raw Report | All containers |
+| 🔑 Secure Key Release | 🔐 Test Secure Key Release button | All containers |
+| 🚫 Attempt to Use Key from Other Company | Cross-company key access test | Contoso, Fabrikam, Wingtip only |
+| 📊 Company Demographics | Per-company local TEE analysis with progress bar | Contoso, Fabrikam, Wingtip only |
+| 📊 Federated Partner Analysis | Multi-company orchestrated analysis | Woodgrove only |
 | ℹ️ Explain This (attestation flyout) | Attestation panel header | Woodgrove only |
-| Progress bar | Below "Start Federated Analysis" | Woodgrove only |
-| Demographics summary (cards, charts, map) | Below progress bar | Woodgrove only |
-| Raw Partner Responses (JSON table) | Bottom of results | Woodgrove only |
-| List Saved Data / Save Data / Retrieve Key | Main section | All containers |
+| Demographics summary (cards, charts, map) | Below federated analysis results | Woodgrove only |
+| 🔍 Raw Partner Responses (JSON) | Bottom of federated results | Woodgrove only |
+| 🔐 Encrypt Data Using [Company] Key | Live RSA-OAEP-SHA256 encryption (after SKR) | All containers |
+| 🖥️ Try to Access Container OS | 🔓 Attempt to Connect button | All containers |
+| 📦 Container Image Information | Hostname, OS, SEV-SNP status, SHA-256 checksums | All containers |
 
 ---
 
