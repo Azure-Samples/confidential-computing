@@ -45,3 +45,6 @@ __pycache__/
 
 # Docker
 .docker/
+
+# Demo recording artifacts
+record-demo/

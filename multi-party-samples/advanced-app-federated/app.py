@@ -1470,32 +1470,24 @@ def partner_analyze():
         fav_colors = Counter(r.get('favorite_color') for r in all_records if r.get('favorite_color'))
         top_3_fav_colors = [{'color': color, 'count': cnt} for color, cnt in fav_colors.most_common(3)]
         
-        # Build sample records for display (first 10 from each)
+        # Build sample records for display (first 10 from each) with full decrypted PII
         sample_records = []
-        for r in contoso_records[:10]:
-            sample_records.append({
-                'source': 'Contoso',
-                'name': r.get('name', 'N/A'),
-                'city': r.get('city', 'N/A'),
-                'country': r.get('country', 'N/A'),
-                'generation': r.get('generation', 'N/A')
-            })
-        for r in fabrikam_records[:10]:
-            sample_records.append({
-                'source': 'Fabrikam',
-                'name': r.get('name', 'N/A'),
-                'city': r.get('city', 'N/A'),
-                'country': r.get('country', 'N/A'),
-                'generation': r.get('generation', 'N/A')
-            })
-        for r in wingtip_records[:10]:
-            sample_records.append({
-                'source': 'Wingtip Toys',
-                'name': r.get('name', 'N/A'),
-                'city': r.get('city', 'N/A'),
-                'country': r.get('country', 'N/A'),
-                'generation': r.get('generation', 'N/A')
-            })
+        for source_name, source_records in [('Contoso', contoso_records), ('Fabrikam', fabrikam_records), ('Wingtip Toys', wingtip_records)]:
+            for r in source_records[:10]:
+                sample_records.append({
+                    'source': source_name,
+                    'name': r.get('name', 'N/A'),
+                    'phone': r.get('phone', 'N/A'),
+                    'address': r.get('address', 'N/A'),
+                    'postal_code': r.get('postal_code', 'N/A'),
+                    'city': r.get('city', 'N/A'),
+                    'country': r.get('country', 'N/A'),
+                    'age': r.get('age', 'N/A'),
+                    'salary': r.get('salary', 'N/A'),
+                    'eye_color': r.get('eye_color', 'N/A'),
+                    'favorite_color': r.get('favorite_color', 'N/A'),
+                    'generation': r.get('generation', 'N/A'),
+                })
         
         return jsonify({
             'status': 'success' if all_records else 'partial',
@@ -1517,6 +1509,7 @@ def partner_analyze():
                 'all': [{'color': c, 'count': n} for c, n in eye_color_list]
             },
             'top_3_favorite_colors': top_3_fav_colors,
+            'sample_records': sample_records,
             
             'errors': errors if errors else None,
             'note': 'Comprehensive analytics from decrypted partner data'
@@ -1921,8 +1914,7 @@ def partner_federated_analysis():
                     data = resp.json()
                     if data.get('status') == 'success':
                         partner_results[partner_key] = data
-                        attestation = data.get('attestation_evidence', {})
-                        yield f"data: {json.dumps({'type': 'partner_result', 'partner': partner_display, 'record_count': data.get('record_count', 0), 'time': data.get('analysis_time_seconds', 0), 'attestation': {'tee_type': attestation.get('tee_type', 'AMD SEV-SNP'), 'policy_hash': attestation.get('container_policy_hash', '')[:16], 'key_released': attestation.get('skr_key_released', False), 'image_verified': attestation.get('container_image_verified', False)}})}\n\n"
+                        yield f"data: {json.dumps({'type': 'partner_result', 'partner': partner_display, 'record_count': data.get('record_count', 0), 'time': data.get('analysis_time_seconds', 0)})}\n\n"
                     else:
                         errors.append(f"{partner_display}: {data.get('message', 'Unknown error')}")
                         yield f"data: {json.dumps({'type': 'partner_error', 'partner': partner_display, 'message': data.get('message', 'Analysis failed')})}\n\n"
@@ -2029,24 +2021,6 @@ def partner_federated_analysis():
                 fav_agg[fc['color']] += fc['count']
         top_3_fav_colors = [{'color': c, 'count': n} for c, n in fav_agg.most_common(3)]
 
-        # Combine blood types
-        blood_agg = Counter()
-        for pkey, pdata in partner_results.items():
-            for bt in pdata.get('blood_types', []):
-                blood_agg[bt['type']] += bt['count']
-        blood_types = [{'type': t, 'count': n} for t, n in blood_agg.most_common()]
-
-        # Combine medical conditions
-        med_agg = Counter()
-        total_with_cond = 0
-        total_without_cond = 0
-        for pkey, pdata in partner_results.items():
-            mc = pdata.get('medical_conditions', {})
-            total_with_cond += mc.get('with_condition', 0)
-            total_without_cond += mc.get('without_condition', 0)
-            for cond in mc.get('top_conditions', []):
-                med_agg[cond['condition']] += cond['count']
-
         total_time = time.time() - start_time
 
         result = {
@@ -2069,43 +2043,10 @@ def partner_federated_analysis():
                 'all': [{'color': c, 'count': n} for c, n in eye_color_list]
             },
             'top_3_favorite_colors': top_3_fav_colors,
-            'blood_types': blood_types,
-            'medical_conditions': {
-                'with_condition': total_with_cond,
-                'without_condition': total_without_cond,
-                'top_conditions': [{'condition': c, 'count': n} for c, n in med_agg.most_common(5)]
-            },
             'raw_partner_responses': raw_responses,
-            'partner_attestation': {},
             'errors': errors if errors else None,
             'privacy_note': 'All data was analyzed INSIDE each company TEE. Woodgrove only received aggregate statistics - no PII was transferred.'
         }
-
-        # Collect attestation evidence from each partner for the UI
-        # Woodgrove verifies each partner's reported policy hash against expected values
-        expected_hashes = {
-            'contoso': os.environ.get('PARTNER_CONTOSO_POLICY_HASH', ''),
-            'fabrikam': os.environ.get('PARTNER_FABRIKAM_POLICY_HASH', ''),
-            'wingtip': os.environ.get('PARTNER_WINGTIP_POLICY_HASH', ''),
-        }
-        for pkey, pdata in partner_results.items():
-            att = pdata.get('attestation_evidence', {})
-            reported_hash = att.get('container_policy_hash', '')
-            expected_hash = expected_hashes.get(pkey, '')
-            hash_verified = bool(reported_hash and expected_hash and reported_hash == expected_hash)
-            result['partner_attestation'][pdata.get('company_display', pkey.title())] = {
-                'tee_type': att.get('tee_type', 'AMD SEV-SNP'),
-                'policy_hash': att.get('container_policy_hash', ''),
-                'expected_policy_hash': expected_hash,
-                'policy_hash_verified': hash_verified,
-                'skr_key_released': att.get('skr_key_released', False),
-                'skr_key_name': att.get('skr_key_name', ''),
-                'container_image_verified': att.get('container_image_verified', False),
-                'container_integrity': att.get('container_integrity', {}),
-                'verification_verdict': 'APPROVED' if (hash_verified and att.get('skr_key_released', False)) else 'UNVERIFIED',
-                'explanation': att.get('explanation', '')
-            }
-
         yield f"data: {json.dumps(result)}\n\n"
 
     return Response(generate(), mimetype='text/event-stream', headers={
@@ -4040,20 +3981,8 @@ def company_analysis_results():
     fav_colors = Counter(r.get('favorite_color') for r in all_records if r.get('favorite_color'))
     top_3_fav = [{'color': c, 'count': n} for c, n in fav_colors.most_common(3)]
 
-    blood_types_count = Counter(r.get('blood_type') for r in all_records if r.get('blood_type'))
-    blood_type_list = blood_types_count.most_common()
-
-    med_conditions = Counter(r.get('medical_condition') for r in all_records if r.get('medical_condition') and r.get('medical_condition') != 'None')
-    has_condition_count = sum(med_conditions.values())
-    no_condition_count = total_records - has_condition_count
-
     total_time = time.time() - start_time
     company_display = company.title() if company != 'wingtip' else 'Wingtip Toys'
-
-    # Attestation evidence: prove this container is genuine
-    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
-    container_integrity = _compute_container_integrity()
-    skr_key_name = os.environ.get('SKR_KEY_NAME', '')
 
     return jsonify({
         'status': 'success',
@@ -4071,31 +4000,6 @@ def company_analysis_results():
             'all': [{'color': c, 'count': n} for c, n in eye_color_list]
         },
         'top_3_favorite_colors': top_3_fav,
-        'blood_types': [{'type': t, 'count': n} for t, n in blood_type_list],
-        'medical_conditions': {
-            'with_condition': has_condition_count,
-            'without_condition': no_condition_count,
-            'top_conditions': [{'condition': c, 'count': n} for c, n in med_conditions.most_common(5)]
-        },
-        'attestation_evidence': {
-            'tee_type': 'AMD SEV-SNP',
-            'container_policy_hash': security_policy_hash,
-            'skr_key_released': bool(_released_key),
-            'skr_key_name': skr_key_name,
-            'container_image_verified': True,
-            'container_integrity': container_integrity,
-            'attestation_passed': bool(_released_key),
-            'explanation': (
-                f'This container ({company_display}) passed AMD SEV-SNP hardware attestation. '
-                f'Azure Key Vault verified the container\'s identity via Microsoft Azure Attestation (MAA) '
-                f'before releasing the decryption key. The security policy hash '
-                f'({security_policy_hash[:16]}...) cryptographically binds the approved container image, '
-                f'environment variables, and mount points. Any modification would change this hash and '
-                f'prevent key release.'
-            ) if security_policy_hash else (
-                'Container is running with TEE protection. Attestation verifies code integrity.'
-            )
-        },
         'privacy_note': f'All analysis computed INSIDE {company_display} TEE. Only aggregate statistics returned - no PII.'
     })
 
@@ -4352,15 +4256,6 @@ def federated_local_analyze():
         fav_colors = Counter(r.get('favorite_color') for r in all_records if r.get('favorite_color'))
         top_3_fav = [{'color': c, 'count': n} for c, n in fav_colors.most_common(3)]
         
-        # Blood type distribution
-        blood_types_count = Counter(r.get('blood_type') for r in all_records if r.get('blood_type'))
-        blood_type_list = blood_types_count.most_common()
-        
-        # Medical conditions (exclude "None")
-        med_conditions = Counter(r.get('medical_condition') for r in all_records if r.get('medical_condition') and r.get('medical_condition') != 'None')
-        has_condition_count = sum(med_conditions.values())
-        no_condition_count = total_records - has_condition_count
-        
         # Build the aggregate result (NO PII - only statistics)
         aggregate_result = {
             'company': company,
@@ -4375,13 +4270,7 @@ def federated_local_analyze():
                 'least_common': {'color': eye_color_list[-1][0], 'count': eye_color_list[-1][1]} if eye_color_list else None,
                 'all': [{'color': c, 'count': n} for c, n in eye_color_list]
             },
-            'top_favorite_colors': top_3_fav,
-            'blood_types': [{'type': t, 'count': n} for t, n in blood_type_list],
-            'medical_conditions': {
-                'with_condition': has_condition_count,
-                'without_condition': no_condition_count,
-                'top_conditions': [{'condition': c, 'count': n} for c, n in med_conditions.most_common(5)]
-            }
+            'top_favorite_colors': top_3_fav
         }
         
         # Sign the results
@@ -4534,10 +4423,6 @@ def _combine_federated_results(partner_results):
     all_gen_counts = Counter()
     all_eye_counts = Counter()
     all_fav_counts = Counter()
-    all_blood_counts = Counter()
-    all_med_conditions = Counter()
-    total_with_condition = 0
-    total_without_condition = 0
     all_salaries_by_country = defaultdict(lambda: {'total': 0, 'count': 0, 'min': float('inf'), 'max': 0})
     salary_totals = {}
     generations_by_company = {}
@@ -4566,17 +4451,6 @@ def _combine_federated_results(partner_results):
         # Aggregate favorite color data
         for fav_info in result.get('top_favorite_colors', []):
             all_fav_counts[fav_info['color']] += fav_info['count']
-        
-        # Aggregate blood type data
-        for bt_info in result.get('blood_types', []):
-            all_blood_counts[bt_info['type']] += bt_info['count']
-        
-        # Aggregate medical condition data
-        med_data = result.get('medical_conditions', {})
-        total_with_condition += med_data.get('with_condition', 0)
-        total_without_condition += med_data.get('without_condition', 0)
-        for mc_info in med_data.get('top_conditions', []):
-            all_med_conditions[mc_info['condition']] += mc_info['count']
         
         # Aggregate salary data
         salary_stats = result.get('salary_stats', {})
@@ -4632,12 +4506,6 @@ def _combine_federated_results(partner_results):
             'all': [{'color': c, 'count': n} for c, n in eye_color_list]
         },
         'top_3_favorite_colors': [{'color': c, 'count': n} for c, n in all_fav_counts.most_common(3)],
-        'blood_types': [{'type': t, 'count': n} for t, n in all_blood_counts.most_common()],
-        'medical_conditions': {
-            'with_condition': total_with_condition,
-            'without_condition': total_without_condition,
-            'top_conditions': [{'condition': c, 'count': n} for c, n in all_med_conditions.most_common(5)]
-        },
         'partner_count': len(partner_results),
         'analysis_note': (
             'Federated analysis: Each partner computed these aggregates locally in their own '
@@ -5272,10 +5140,6 @@ def auto_initialize_container():
 
             company_display = company.title() if company != 'wingtip' else 'Wingtip Toys'
 
-            security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
-            container_integrity = _compute_container_integrity()
-            skr_key_name = os.environ.get('SKR_KEY_NAME', '')
-
             _cached_analysis_results = {
                 'status': 'success',
                 'company': company,
@@ -5292,25 +5156,6 @@ def auto_initialize_container():
                     'all': [{'color': c, 'count': n} for c, n in eye_color_list]
                 },
                 'top_3_favorite_colors': top_3_fav,
-                'attestation_evidence': {
-                    'tee_type': 'AMD SEV-SNP',
-                    'container_policy_hash': security_policy_hash,
-                    'skr_key_released': bool(_released_key),
-                    'skr_key_name': skr_key_name,
-                    'container_image_verified': True,
-                    'container_integrity': container_integrity,
-                    'attestation_passed': bool(_released_key),
-                    'explanation': (
-                        f'This container ({company_display}) passed AMD SEV-SNP hardware attestation. '
-                        f'Azure Key Vault verified the container\'s identity via Microsoft Azure Attestation (MAA) '
-                        f'before releasing the decryption key. The security policy hash '
-                        f'({security_policy_hash[:16]}...) cryptographically binds the approved container image, '
-                        f'environment variables, and mount points. Any modification would change this hash and '
-                        f'prevent key release.'
-                    ) if security_policy_hash else (
-                        'Container is running with TEE protection. Attestation verifies code integrity.'
-                    )
-                },
                 'privacy_note': f'All analysis computed INSIDE {company_display} TEE. Only aggregate statistics returned - no PII.'
             }
             print(f"           [SUCCESS] Analysis results pre-computed and cached")
