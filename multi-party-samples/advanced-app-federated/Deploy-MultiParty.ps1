@@ -872,11 +872,7 @@ function Invoke-Build {
         (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameA --object-id $using:IdentityPrincipalIdA --key-permissions get release 2>&1 }),
         (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameB --object-id $using:IdentityPrincipalIdB --key-permissions get release 2>&1 }),
         (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameC --object-id $using:IdentityPrincipalIdC --key-permissions get release 2>&1 }),
-        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameD --object-id $using:IdentityPrincipalIdD --key-permissions get release 2>&1 }),
-        # Woodgrove-Bank cross-company access
-        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameA --object-id $using:IdentityPrincipalIdC --key-permissions get release 2>&1 }),
-        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameB --object-id $using:IdentityPrincipalIdC --key-permissions get release 2>&1 }),
-        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameD --object-id $using:IdentityPrincipalIdC --key-permissions get release 2>&1 })
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:KeyVaultNameD --object-id $using:IdentityPrincipalIdD --key-permissions get release 2>&1 })
     )
     $null = Wait-Job -Job $policyJobs
     $kvPolicyFailures = @()
@@ -903,28 +899,13 @@ function Invoke-Build {
                 az keyvault set-policy --name $retry.KV --object-id $retry.OID --key-permissions get release 2>&1 | Out-Null
             }
         }
-        # Also ensure Woodgrove cross-company access
-        foreach ($crossKV in @($KeyVaultNameA, $KeyVaultNameB, $KeyVaultNameD)) {
-            $existingPerms = az keyvault show --name $crossKV --query "properties.accessPolicies[?objectId=='$IdentityPrincipalIdC'].permissions.keys" -o json 2>$null | ConvertFrom-Json
-            if (-not $existingPerms -or $existingPerms.Count -eq 0 -or ($existingPerms[0] -and 'release' -notin $existingPerms[0])) {
-                Write-Host "  Retrying Woodgrove cross-access on $crossKV..." -ForegroundColor Yellow
-                az keyvault set-policy --name $crossKV --object-id $IdentityPrincipalIdC --key-permissions get release 2>&1 | Out-Null
-            }
-        }
     }
     
     Write-Success "Contoso: Key Vault '$KeyVaultNameA' created (key created during Deploy)"
     Write-Success "Fabrikam: Key Vault '$KeyVaultNameB' created (key created during Deploy)"
     Write-Success "Woodgrove-Bank: Key Vault '$KeyVaultNameC' created (key created during Deploy)"
     Write-Success "Wingtip Toys: Key Vault '$KeyVaultNameD' created (key created during Deploy)"
-    Write-Success "Woodgrove-Bank cross-company access to Contoso + Fabrikam + Wingtip Key Vaults granted"
-    
-    Write-Host ""
-    Write-Host "Woodgrove-Bank Multi-Party Access Configured:" -ForegroundColor Green
-    Write-Host "  - Own Key Vault: $KeyVaultNameC ($SkrKeyNameC)" -ForegroundColor White
-    Write-Host "  - Partner Access: $KeyVaultNameA ($SkrKeyNameA)" -ForegroundColor White
-    Write-Host "  - Partner Access: $KeyVaultNameB ($SkrKeyNameB)" -ForegroundColor White
-    Write-Host "  - Partner Access: $KeyVaultNameD ($SkrKeyNameD)" -ForegroundColor White
+
     
     # Clean up temporary policy file
     if (Test-Path $releasePolicyPath) {
@@ -1035,7 +1016,7 @@ function Invoke-Build {
     Write-Host "  Key Vault: $KeyVaultNameC"
     Write-Host "  SKR Key: $SkrKeyNameC"
     Write-Host "  Identity: $IdentityNameC"
-    Write-Host "  Cross-Company Access: Contoso + Fabrikam + Wingtip Key Vaults"
+
     Write-Host ""
     Write-Host "Wingtip Toys Resources:" -ForegroundColor Green
     Write-Host "  Key Vault: $KeyVaultNameD"
@@ -1265,7 +1246,7 @@ function Invoke-BuildAKS {
     
     Write-Success "MC_ RG identities created: $mcIdNameA, $mcIdNameB, $mcIdNameC"
     
-    # Grant Key Vault access policies (same cross-company pattern as Build)
+    # Grant Key Vault access policies (each identity to its own vault)
     Write-Host "  Granting Key Vault access to MC_ RG identities..." -ForegroundColor Gray
     $mcPidA = $mcIdInfoA.principalId
     $mcPidB = $mcIdInfoB.principalId
@@ -1274,9 +1255,7 @@ function Invoke-BuildAKS {
     $kvPolicyJobs = @(
         (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameA --object-id $using:mcPidA --key-permissions get release 2>&1 }),
         (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameB --object-id $using:mcPidB --key-permissions get release 2>&1 }),
-        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameC --object-id $using:mcPidC --key-permissions get release 2>&1 }),
-        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameA --object-id $using:mcPidC --key-permissions get release 2>&1 }),
-        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameB --object-id $using:mcPidC --key-permissions get release 2>&1 })
+        (Start-Job -ScriptBlock { az keyvault set-policy --name $using:kvNameC --object-id $using:mcPidC --key-permissions get release 2>&1 })
     )
     $null = Wait-Job -Job $kvPolicyJobs
     $kvPolicyFailures = @()
@@ -1297,7 +1276,7 @@ function Invoke-BuildAKS {
         Write-Warning "Verify each identity has 'get' and 'release' key permissions on its Key Vault."
     }
     
-    Write-Success "Key Vault access granted (same cross-company pattern as Build)"
+    Write-Success "Key Vault access granted (each identity to its own vault)"
     
     # Update config with MC_ RG identity resource IDs
     $config.contoso.identityResourceId = $mcIdInfoA.id
@@ -1713,7 +1692,7 @@ function Invoke-Deploy {
     # We need all policy hashes BEFORE creating keys so we can set up multi-party access
     
     Write-Header "Phase 1: Generating Security Policies for All Companies"
-    Write-Host "All policies must be generated first to enable cross-company key access" -ForegroundColor Yellow
+    Write-Host "All policies must be generated first to create release-policy-bound keys" -ForegroundColor Yellow
     Write-Host ""
     
     # --- Contoso Policy Generation ---
@@ -1834,11 +1813,8 @@ function Invoke-Deploy {
             'identityResourceId' = @{ 'value' = $woodgroveConfig.identityResourceId }
             'storageConnectionString' = @{ 'value' = $StorageConnectionString }
             'resourceGroupName' = @{ 'value' = $resource_group }
-            'partnerContosoAkvEndpoint' = @{ 'value' = $config.contoso.skrAkvEndpoint }
-            'partnerFabrikamAkvEndpoint' = @{ 'value' = $config.fabrikam.skrAkvEndpoint }
             'partnerContosoUrl' = @{ 'value' = $contosoContainerUrl }
             'partnerFabrikamUrl' = @{ 'value' = $fabrikamContainerUrl }
-            'partnerWingtipAkvEndpoint' = @{ 'value' = $config.wingtip.skrAkvEndpoint }
             'partnerWingtipUrl' = @{ 'value' = $wingtipContainerUrl }
             'partnerContosoPolicyHash' = @{ 'value' = $contosoPolicyInfo.PolicyHash }
             'partnerFabrikamPolicyHash' = @{ 'value' = $fabrikamPolicyInfo.PolicyHash }
@@ -3375,7 +3351,6 @@ function Invoke-Cleanup {
         Write-Host "  - Wingtip Toys Key Vault: $($config.wingtip.keyVaultName)"
     }
     Write-Host "  - All container instances and managed identities"
-    Write-Host "  - Consolidated records from blob storage"
     Write-Host ""
     
     if (-not $Confirm) {
@@ -3384,37 +3359,6 @@ function Invoke-Cleanup {
             Write-Warning "Cleanup cancelled."
             return
         }
-    }
-    
-    # Delete consolidated-records blob from blob storage (unique per resource group)
-    Write-Host ""
-    Write-Host "Cleaning up blob storage..."
-    
-    # Construct the blob name that matches the deployment
-    $blobName = "consolidated-records-$resource_group.json"
-    
-    # Load storage connection string from .env file
-    if (Test-Path ".env") {
-        $envContent = Get-Content ".env" -Raw
-        # Handle both quoted and unquoted values
-        if ($envContent -match 'AZURE_STORAGE_CONNECTION_STRING=([^\r\n]+)') {
-            $connectionString = $matches[1].Trim('"').Trim("'")
-            
-            # Delete consolidated records blob from external storage
-            Write-Host "  Deleting $blobName..."
-            $deleteResult = az storage blob delete `
-                --name $blobName `
-                --container-name "privateappdata" `
-                --connection-string $connectionString `
-                --only-show-errors 2>&1
-            
-            # Any result is fine - either deleted or didn't exist
-            Write-Host "  Blob cleanup complete" -ForegroundColor Green
-        } else {
-            Write-Warning "Could not find storage connection string in .env file"
-        }
-    } else {
-        Write-Warning "No .env file found - skipping blob cleanup"
     }
     
     Write-Host ""
@@ -3445,12 +3389,12 @@ if (-not $Build -and -not $Deploy -and -not $Cleanup) {
     Write-Host "==================================================="
     Write-Host ""
     Write-Host "This script deploys 4 confidential containers to demonstrate multi-party"
-    Write-Host "federated confidential computing with cross-company data sharing:"
+    Write-Host "federated confidential computing with privacy-preserving analytics:"
     Write-Host ""
     Write-Host "  Contoso:        Confidential (AMD SEV-SNP) - CAN attest" -ForegroundColor Green
     Write-Host "  Fabrikam:       Confidential (AMD SEV-SNP) - CAN attest" -ForegroundColor Green
     Write-Host "  Wingtip Toys:   Confidential (AMD SEV-SNP) - CAN attest" -ForegroundColor Green
-    Write-Host "  Woodgrove-Bank: Confidential (AMD SEV-SNP) - CAN attest + cross-company access" -ForegroundColor Green
+    Write-Host "  Woodgrove-Bank: Confidential (AMD SEV-SNP) - CAN attest + federated orchestrator" -ForegroundColor Green
     Write-Host ""
     Write-Host "Usage (Direct ACI):" -ForegroundColor Yellow
     Write-Host "  .\Deploy-MultiParty.ps1 -Prefix <code> -Build         # Build container image"

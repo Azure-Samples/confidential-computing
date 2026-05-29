@@ -27,7 +27,7 @@ This project deploys **four containers** running identical code to demonstrate m
 | **Contoso** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | Corporate data provider — local analysis (🏢) |
 | **Fabrikam** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | Fashion retailer — local analysis (👗) |
 | **Wingtip Toys** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | Toy manufacturer — local analysis (🧸) |
-| **Woodgrove Bank** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own + Partner keys | Orchestrator — collects aggregates only (🏦) |
+| **Woodgrove Bank** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | Orchestrator — collects aggregates only (🏦) |
 
 ### Key Features
 
@@ -52,15 +52,10 @@ This project deploys **four containers** running identical code to demonstrate m
 The demo deploys:
 - **4 Confidential Containers** (Contoso, Fabrikam, Wingtip Toys, Woodgrove Bank) - Running on AMD SEV-SNP hardware with TEE protection
 - **4 Key Vaults** - Separate Premium HSM-backed vaults for each company's encryption keys
-- **Shared Blob Storage** - Contains encrypted data from all parties
 
 > **Deployment Modes:** By default, containers deploy directly to ACI. With the `-AKS` parameter, containers deploy as pods on AKS virtual nodes that run as ACI container groups — providing Kubernetes orchestration while preserving the full ACI attestation stack. See [AKS Virtual Node Deployment](#aks-virtual-node-deployment--aks) for details.
 
 > **📄 Security Policy Deep Dive:** See [SECURITY-POLICY.md](SECURITY-POLICY.md) for an annotated example of the Confidential Computing Enforcement Policy (ccePolicy) that cryptographically binds each container's identity.
-
-## Encrypted Data Flow
-
-![Data Flow Diagram](DataFlowDiagram.svg)
 
 ### How the Federated Model Works
 
@@ -157,7 +152,6 @@ This creates:
 - **Wingtip Toys Key Vault** - Premium HSM with `wingtip-secret-key`
 - **Woodgrove Bank Key Vault** - Premium HSM with `woodgrove-secret-key`
 - **Managed Identities** - Separate identity for each company's container
-- **Cross-Company Access** - Woodgrove granted access to Contoso, Fabrikam, and Wingtip Key Vaults
 - **Container Image** - Built and pushed to ACR
 
 ### Step 2: Deploy All Containers
@@ -170,7 +164,7 @@ Deploys four containers:
 - **Contoso** - Confidential SKU with AMD SEV-SNP TEE (corporate data provider)
 - **Fabrikam** - Confidential SKU with AMD SEV-SNP TEE (online retailer)
 - **Wingtip Toys** - Confidential SKU with AMD SEV-SNP TEE (toy manufacturer)
-- **Woodgrove Bank** - Confidential SKU with AMD SEV-SNP TEE and partner access (analytics partner)
+- **Woodgrove Bank** - Confidential SKU with AMD SEV-SNP TEE (analytics orchestrator)
 
 > ⚠️ **Requires Docker to be running** for security policy generation.
 
@@ -349,7 +343,7 @@ After deployment, a browser opens with a 3-pane side-by-side comparison view:
 |       🏢         |       👗         |       🧸         |       🏦         |
 | ✅ Attestation   | ✅ Attestation   | ✅ Attestation   | ✅ Attestation   |
 | ✅ Key Release   | ✅ Key Release   | ✅ Key Release   | ✅ Key Release   |
-| ✅ Encryption    | ✅ Encryption    | ✅ Encryption    | ✅ Partner Keys  |
+| ✅ Encryption    | ✅ Encryption    | ✅ Encryption    | ✅ Federated    |
 | ✅ Own data      | ✅ Own data      | ✅ Own data      | ✅ Federated     |
 +------------------+------------------+------------------+------------------+
 ```
@@ -376,9 +370,9 @@ kubectl get svc nginx-proxy
 ### Woodgrove Bank Special Features
 
 - **Custom branding** - Green bank theme with 🏦 logo
-- **Partner Analysis System** - Dedicated section for cross-company key release
-- **Progress tracking** - Visual indicators for Contoso, Fabrikam, and Wingtip key release
-- **Analysis log** - Real-time log of partner key release operations
+- **Federated Analysis System** - Collects aggregate-only results from all partners
+- **Progress tracking** - Visual indicators for Contoso, Fabrikam, and Wingtip analysis collection
+- **Privacy guarantee** - No PII ever leaves any partner's TEE boundary
 
 ## Demo Script
 
@@ -404,20 +398,13 @@ See **[DEMO-SCRIPT.md](DEMO-SCRIPT.md)** for a focused 3-minute walkthrough of t
 10. **Release Key on Contoso**: Expand "Secure Key Release" → Click release → Key obtained
 11. **Cross-Company Test**: On Contoso, expand "Cross-Company Key Access" → Shows cannot access Fabrikam's key
 
-### Partner Analysis Demo (Woodgrove Bank)
-
-12. **Open Woodgrove Bank**: Notice custom green bank branding with 🏦 logo
-13. **Expand "Partner Demographic Analysis"**: Click "Start Partner Demographic Analysis"
-14. **Watch Progress**: Contoso key release ✅, Fabrikam key release ✅, Wingtip key release ✅
-15. **Review Results**: Demographics by country, generation breakdown by company, salary world map
-16. **Review Log**: Shows attestation passed for each partner
-
 ### Federated Analysis Demo (Woodgrove Bank)
 
-17. **Expand "Federated Analysis"**: Click "Start Federated Analysis"
-18. **Watch Collection**: Woodgrove polls each partner for pre-computed analysis results
-19. **Review Combined Results**: Aggregated analysis across all four companies
-20. **Explain Architecture**: Each partner pre-computes analysis inside their own TEE; Woodgrove collects and aggregates results without accessing raw data
+12. **Open Woodgrove Bank**: Notice custom green bank branding with 🏦 logo
+13. **Expand "Federated Partner Analysis"**: Click "Start Federated Analysis"
+14. **Watch Collection**: Woodgrove polls each partner for pre-computed analysis results
+15. **Review Combined Results**: Aggregated demographics across all four companies
+16. **Explain Architecture**: Each partner pre-computes analysis inside their own TEE; Woodgrove collects and aggregates results without accessing raw data
 
 ## Security Model
 
@@ -436,23 +423,11 @@ Fabrikam Key Vault: kv<registry>b
 
 Woodgrove Bank Key Vault: kv<registry>c
 ├── Key: woodgrove-secret-key (RSA-HSM, exportable)
-├── Release Policy: sevsnpvm attestation required
-└── Cross-Company Access: Can also release Contoso, Fabrikam, and Wingtip keys
+└── Release Policy: sevsnpvm attestation required
 
 Wingtip Toys Key Vault: kv<registry>d
 ├── Key: wingtip-secret-key (RSA-HSM, exportable)
 └── Release Policy: sevsnpvm attestation required
-```
-
-### Woodgrove Partner Access
-
-Woodgrove Bank's managed identity is granted explicit access to partner Key Vaults:
-
-```powershell
-# Granted during Build phase
-az keyvault set-policy --name $ContosoKeyVault --object-id $WoodgroveIdentity --key-permissions get release
-az keyvault set-policy --name $FabrikamKeyVault --object-id $WoodgroveIdentity --key-permissions get release
-az keyvault set-policy --name $WingtipKeyVault --object-id $WoodgroveIdentity --key-permissions get release
 ```
 
 ### Release Policy
@@ -473,8 +448,8 @@ az keyvault set-policy --name $WingtipKeyVault --object-id $WoodgroveIdentity --
 This ensures:
 - Only containers with valid AMD SEV-SNP attestation can release keys
 - Snooper cannot fake attestation (hardware-enforced)
-- Each company's key has its own policy
-- Woodgrove can access partner keys only because of explicit Key Vault access grants
+- Each company's key has its own policy and identity — no cross-company key access
+- Woodgrove orchestrates by collecting **aggregate results** from partners, not by accessing their keys
 
 ### Single-Image Design (Demo Limitation)
 
@@ -507,7 +482,6 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `svc-contoso.yaml` | ClusterIP Service for Contoso pod (AKS mode) |
 | `Federated Mutli Party Demo 1-Slide.svg` | High-level federated topology diagram |
 | `MultiPartyArchitecture.svg` | Detailed architecture diagram |
-| `DataFlowDiagram.svg` | Encrypted data flow diagram showing TEE decryption |
 
 ## API Endpoints
 
@@ -517,16 +491,13 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `/attest/maa` | POST | Request MAA attestation token |
 | `/attest/raw` | POST | Get raw attestation report |
 | `/skr/release` | POST | Release company's SKR key |
-| `/skr/release-other` | POST | Attempt cross-company key access |
-| `/skr/release-partner` | POST | Release partner key (Woodgrove only) |
+| `/skr/release-other` | POST | Attempt cross-company key access (demonstrates isolation) |
 | `/skr/config` | GET | Get SKR configuration |
 | `/encrypt` | POST | Encrypt data with released key |
 | `/decrypt` | POST | Decrypt data with released key |
 | `/company/info` | GET | Get company identity |
 | `/company/list` | GET | List encrypted records stored on this container |
 | `/company/populate` | POST | Encrypt CSV data and store locally |
-| `/partner/analyze` | POST | Run partner demographic analysis (non-streaming) |
-| `/partner/analyze-stream` | GET | SSE streaming partner analysis with progress |
 | `/partner/federated-analysis` | GET | SSE federated analysis across all partners |
 | `/company/init-status` | GET | Container initialization status (for partner polling) |
 | `/company/analysis-results` | GET | Pre-computed analysis results (cached during init) |
@@ -534,8 +505,6 @@ This is acceptable for a demo with synthetic data, but in production each party 
 | `/federated/collect` | POST | Collect analysis results from partner |
 | `/federated/verify` | POST | Verify partner attestation |
 | `/container/access-test` | POST | Attempt SSH/exec/shell access (all blocked by ccePolicy) |
-| `/debug/partner-keys` | GET | Inspect stored partner key structure (diagnostics) |
-| `/debug/test-partner-decrypt` | POST | Test single-record partner decryption with detailed errors |
 
 ## Troubleshooting
 
@@ -568,12 +537,6 @@ az container logs -g <resource-group> -n <container-name>
 
 ### Key release denied
 **Solution:** Verify the managed identity has Key Vault permissions and the container is running on Confidential SKU.
-
-### Partner key release fails (Woodgrove)
-```
-SKR sidecar not available
-```
-**Solution:** Ensure the Woodgrove container is deployed with the correct template that includes partner Key Vault environment variables.
 
 ### AKS: VN2 pod stuck in CrashLoopBackOff
 ```

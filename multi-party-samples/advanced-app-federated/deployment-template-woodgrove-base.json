@@ -87,20 +87,6 @@
         "description": "Resource group name for unique blob naming"
       }
     },
-    "partnerContosoAkvEndpoint": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Contoso's Key Vault endpoint (for Woodgrove partner access)"
-      }
-    },
-    "partnerFabrikamAkvEndpoint": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Fabrikam's Key Vault endpoint (for Woodgrove partner access)"
-      }
-    },
     "partnerContosoUrl": {
       "type": "string",
       "defaultValue": "",
@@ -113,13 +99,6 @@
       "defaultValue": "",
       "metadata": {
         "description": "Fabrikam's container URL (for fetching encrypted data)"
-      }
-    },
-    "partnerWingtipAkvEndpoint": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Wingtip Toys' Key Vault endpoint (for Woodgrove partner access)"
       }
     },
     "partnerWingtipUrl": {
@@ -207,24 +186,12 @@
                   "value": "[parameters('resourceGroupName')]"
                 },
                 {
-                  "name": "PARTNER_CONTOSO_AKV_ENDPOINT",
-                  "value": "[parameters('partnerContosoAkvEndpoint')]"
-                },
-                {
-                  "name": "PARTNER_FABRIKAM_AKV_ENDPOINT",
-                  "value": "[parameters('partnerFabrikamAkvEndpoint')]"
-                },
-                {
                   "name": "PARTNER_CONTOSO_URL",
                   "value": "[parameters('partnerContosoUrl')]"
                 },
                 {
                   "name": "PARTNER_FABRIKAM_URL",
                   "value": "[parameters('partnerFabrikamUrl')]"
-                },
-                {
-                  "name": "PARTNER_WINGTIP_AKV_ENDPOINT",
-                  "value": "[parameters('partnerWingtipAkvEndpoint')]"
                 },
                 {
                   "name": "PARTNER_WINGTIP_URL",
