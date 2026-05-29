@@ -256,6 +256,12 @@ ServiceFabricBackup/
 *.ldf
 *.ndf
 
+# Local sample video staging (must not be committed)
+/automotive-machine-vision/sample-video-local/
+/automotive-machine-vision/acr-config.json
+/automotive-machine-vision/deployment-params.json
+/automotive-machine-vision/deployment-template.json
+
 # Business Intelligence projects
 *.rdl.data
 *.bim.layout

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automotive Machine Vision (Confidential ACI)</title>
+    <style>
+        body { font-family: Segoe UI, sans-serif; margin: 0; background: #f2f6fb; color: #1a1a1a; }
+        .wrap { max-width: 1100px; margin: 24px auto; padding: 16px; }
+        .card { background: #fff; border-radius: 10px; padding: 18px; margin-bottom: 16px; box-shadow: 0 4px 18px rgba(0,0,0,0.08); }
+        h1, h2 { margin-top: 0; color: #005fb8; }
+        button { background: #005fb8; color: #fff; border: none; border-radius: 6px; padding: 10px 16px; cursor: pointer; margin-right: 8px; }
+        button[disabled] { background: #93a1b0; cursor: not-allowed; }
+        input[type=file] { margin: 10px 0; }
+        pre { background: #101820; color: #dbf2ff; padding: 10px; border-radius: 6px; overflow: auto; max-height: 240px; }
+        .ok { color: #0a8a1f; font-weight: 600; }
+        .bad { color: #b81f26; font-weight: 600; }
+        .muted { color: #4b5d70; }
+        #progressBar { width: 100%; height: 20px; }
+        .controls { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        #timeline { flex: 1; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border-bottom: 1px solid #e8edf4; text-align: left; padding: 8px; vertical-align: top; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="card">
+        <h1>Automotive Machine Vision on Confidential ACI</h1>
+        <p>This app runs in a confidential Azure Container Instance (AMD SEV-SNP) and enforces a CCE policy that only permits the approved image and blocks interactive access (<code>--disable-stdio</code>).</p>
+        <p class="muted">Security flow: attestation check → claim review → user proceed/abort decision → HTTPS upload → in-container machine vision processing.</p>
+    </div>
+
+    <div class="card">
+        <h2>1) Attestation Gate</h2>
+        <button id="btnAttest">Run Attestation Check</button>
+        <button id="btnProceed" disabled>Proceed with Processing</button>
+        <button id="btnAbort" disabled>Abort</button>
+        <p id="attestStatus" class="muted">Upload is blocked until attestation succeeds and you explicitly proceed.</p>
+        <table id="claimsTable" style="display:none; margin-top: 12px;">
+            <thead><tr><th>Claim</th><th>Value</th><th>What it means</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>2) Upload & Process (.mp4 over TLS)</h2>
+        <input type="file" id="videoFile" accept=".mp4" disabled>
+        <button id="btnUpload" disabled>Upload and Process</button>
+        <p id="uploadStatus" class="muted">The upload endpoint enforces HTTPS.</p>
+        <progress id="progressBar" value="0" max="100"></progress>
+        <pre id="progressLog"></pre>
+    </div>
+
+    <div class="card">
+        <h2>3) Processed Video Playback</h2>
+        <video id="player" width="100%" controls></video>
+        <div class="controls">
+            <button id="playPause">Play/Pause</button>
+            <button id="rewind">Rewind 10s</button>
+            <button id="forward">Fast Forward 10s</button>
+            <input type="range" id="timeline" min="0" max="100" value="0">
+            <span id="timeLabel">00:00 / 00:00</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>How confidential computing + CCE protect this workflow</h2>
+        <ul>
+            <li>Remote attestation provides cryptographic evidence of platform integrity before video upload is allowed.</li>
+            <li>CCE policy measurements are checked by ACI so the workload must match the approved container image.</li>
+            <li>Policy generation uses <code>az confcom acipolicygen --disable-stdio</code> to block interactive shell/exec access.</li>
+            <li>TLS (HTTPS) protects video data while in transit from browser to container.</li>
+            <li>Machine vision processing runs server-side in the confidential container, not in browser JavaScript.</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+let currentJob = null;
+let statusTimer = null;
+
+const btnAttest = document.getElementById('btnAttest');
+const btnProceed = document.getElementById('btnProceed');
+const btnAbort = document.getElementById('btnAbort');
+const btnUpload = document.getElementById('btnUpload');
+const videoFile = document.getElementById('videoFile');
+const attestStatus = document.getElementById('attestStatus');
+const uploadStatus = document.getElementById('uploadStatus');
+const claimsTable = document.getElementById('claimsTable');
+const claimsBody = claimsTable.querySelector('tbody');
+const progressBar = document.getElementById('progressBar');
+const progressLog = document.getElementById('progressLog');
+const player = document.getElementById('player');
+const timeline = document.getElementById('timeline');
+const timeLabel = document.getElementById('timeLabel');
+
+function safe(s) {
+    return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+btnAttest.onclick = async () => {
+    attestStatus.textContent = 'Running attestation...';
+    const res = await fetch('/api/attestation/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    const data = await res.json();
+    if (!res.ok || data.status !== 'ok') {
+        attestStatus.innerHTML = `<span class="bad">Attestation failed.</span> ${safe(data.message || 'Unknown error')}`;
+        return;
+    }
+
+    attestStatus.innerHTML = `<span class="ok">Attestation passed.</span> Review claims, then choose Proceed or Abort.`;
+    claimsBody.innerHTML = '';
+    (data.claims || []).forEach(c => {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td>${safe(c.claim)}</td><td>${safe(c.value)}</td><td>${safe(c.meaning)}</td>`;
+        claimsBody.appendChild(row);
+    });
+    claimsTable.style.display = 'table';
+    btnProceed.disabled = false;
+    btnAbort.disabled = false;
+};
+
+btnProceed.onclick = async () => {
+    const res = await fetch('/api/attestation/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: 'proceed' }) });
+    const data = await res.json();
+    if (!res.ok) {
+        attestStatus.innerHTML = `<span class="bad">${safe(data.message || 'Unable to proceed')}</span>`;
+        return;
+    }
+    attestStatus.innerHTML = '<span class="ok">Proceed confirmed.</span> Upload is now enabled.';
+    videoFile.disabled = false;
+    btnUpload.disabled = false;
+};
+
+btnAbort.onclick = async () => {
+    await fetch('/api/attestation/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: 'abort' }) });
+    videoFile.disabled = true;
+    btnUpload.disabled = true;
+    attestStatus.innerHTML = '<span class="bad">Operation aborted by user.</span>';
+};
+
+btnUpload.onclick = async () => {
+    const file = videoFile.files[0];
+    if (!file) {
+        uploadStatus.innerHTML = '<span class="bad">Select an .mp4 file first.</span>';
+        return;
+    }
+    if (!file.name.toLowerCase().endsWith('.mp4')) {
+        uploadStatus.innerHTML = '<span class="bad">Only .mp4 files are accepted.</span>';
+        return;
+    }
+
+    const form = new FormData();
+    form.append('video', file);
+    const res = await fetch('/api/process', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok || data.status !== 'ok') {
+        uploadStatus.innerHTML = `<span class="bad">${safe(data.message || 'Upload failed')}</span>`;
+        return;
+    }
+
+    currentJob = data.jobId;
+    uploadStatus.innerHTML = '<span class="ok">Upload accepted. Processing started inside confidential container.</span>';
+    progressLog.textContent = 'Polling processing status every 5 seconds...';
+    progressBar.value = 0;
+
+    if (statusTimer) clearInterval(statusTimer);
+    const fetchStatus = async () => {
+        const sRes = await fetch(`/api/status/${currentJob}`);
+        const sData = await sRes.json();
+        if (!sRes.ok || sData.status !== 'ok') {
+            progressLog.textContent += '\nStatus error';
+            return;
+        }
+
+        const job = sData.job;
+        progressBar.value = job.progress || 0;
+        progressLog.textContent += `\n${new Date().toLocaleTimeString()}: ${job.message} (${job.progress || 0}%)`;
+        progressLog.scrollTop = progressLog.scrollHeight;
+
+        if (job.state === 'completed' && job.outputUrl) {
+            clearInterval(statusTimer);
+            player.src = job.outputUrl;
+            player.load();
+            uploadStatus.innerHTML = '<span class="ok">Processing complete. Use playback controls below.</span>';
+        }
+        if (job.state === 'failed') {
+            clearInterval(statusTimer);
+            uploadStatus.innerHTML = `<span class="bad">${safe(job.message || 'Processing failed')}</span>`;
+        }
+    };
+
+    await fetchStatus();
+    statusTimer = setInterval(fetchStatus, 5000);
+};
+
+function formatTime(v) {
+    const mm = String(Math.floor(v / 60)).padStart(2, '0');
+    const ss = String(Math.floor(v % 60)).padStart(2, '0');
+    return `${mm}:${ss}`;
+}
+
+player.addEventListener('timeupdate', () => {
+    const duration = player.duration || 0;
+    const current = player.currentTime || 0;
+    timeline.value = duration ? (current / duration) * 100 : 0;
+    timeLabel.textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+});
+
+document.getElementById('playPause').onclick = () => player.paused ? player.play() : player.pause();
+document.getElementById('rewind').onclick = () => player.currentTime = Math.max(0, player.currentTime - 10);
+document.getElementById('forward').onclick = () => player.currentTime = Math.min(player.duration || 0, player.currentTime + 10);
+timeline.addEventListener('input', () => {
+    const duration = player.duration || 0;
+    player.currentTime = duration * (timeline.value / 100);
+});
+</script>
+</body>
+</html>
