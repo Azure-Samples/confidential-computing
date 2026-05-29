@@ -124,6 +124,57 @@ def _detect_vehicle_candidates(frame: np.ndarray) -> list[Detection]:
     return detections[:12]
 
 
+def _blur_region(frame: np.ndarray, x: int, y: int, w: int, h: int, kernel: int = 41, sigma: int = 30):
+    x = max(0, x)
+    y = max(0, y)
+    w = max(0, min(w, frame.shape[1] - x))
+    h = max(0, min(h, frame.shape[0] - y))
+    if w == 0 or h == 0:
+        return
+
+    roi = frame[y:y + h, x:x + w]
+    if roi.size == 0:
+        return
+
+    k = max(3, kernel | 1)
+    frame[y:y + h, x:x + w] = cv2.GaussianBlur(roi, (k, k), sigma)
+
+
+def _blur_street_and_road(frame: np.ndarray):
+    start_y = int(frame.shape[0] * 0.6)
+    _blur_region(frame, 0, start_y, frame.shape[1], frame.shape[0] - start_y, kernel=61, sigma=35)
+
+
+def _blur_traffic_signs(frame: np.ndarray):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    red1 = cv2.inRange(hsv, np.array([0, 80, 80]), np.array([10, 255, 255]))
+    red2 = cv2.inRange(hsv, np.array([160, 80, 80]), np.array([180, 255, 255]))
+    blue = cv2.inRange(hsv, np.array([90, 70, 70]), np.array([130, 255, 255]))
+    yellow = cv2.inRange(hsv, np.array([15, 80, 80]), np.array([40, 255, 255]))
+    sign_mask = red1 | red2 | blue | yellow
+
+    kernel = np.ones((3, 3), np.uint8)
+    sign_mask = cv2.morphologyEx(sign_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    sign_mask = cv2.morphologyEx(sign_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(sign_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < 180 or area > 12000:
+            continue
+
+        x, y, w, h = cv2.boundingRect(contour)
+        if w < 14 or h < 14:
+            continue
+
+        aspect = w / max(h, 1)
+        if aspect < 0.6 or aspect > 1.5:
+            continue
+
+        _blur_region(frame, x, y, w, h, kernel=31, sigma=25)
+
+
 def _process_video(job_id: str, input_path: Path, output_path: Path):
     cap = None
     writer = None
@@ -162,14 +213,15 @@ def _process_video(job_id: str, input_path: Path, output_path: Path):
 
             faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
             for (x, y, w, h) in faces:
-                roi = frame[y:y + h, x:x + w]
-                frame[y:y + h, x:x + w] = cv2.GaussianBlur(roi, (41, 41), 30)
+                _blur_region(frame, x, y, w, h, kernel=41, sigma=30)
 
             if plate_cascade is not None:
                 plates = plate_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(25, 25))
                 for (x, y, w, h) in plates:
-                    roi = frame[y:y + h, x:x + w]
-                    frame[y:y + h, x:x + w] = cv2.GaussianBlur(roi, (31, 31), 25)
+                    _blur_region(frame, x, y, w, h, kernel=31, sigma=25)
+
+            _blur_street_and_road(frame)
+            _blur_traffic_signs(frame)
 
             detections = _detect_vehicle_candidates(frame)
             for detection in detections:

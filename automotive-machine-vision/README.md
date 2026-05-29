@@ -16,6 +16,8 @@ This sample deploys a web app to **Azure Container Instances (Confidential SKU)*
 6. Processes video **inside the container**:
    - Blurs faces
    - Blurs detected license plate regions
+   - Blurs street/road regions
+   - Blurs traffic signs
    - Adds overlay labels for detected vehicle-like objects (car/truck/cycle/motorcycle) with confidence
 7. Updates processing status every 5 seconds
 8. Provides playback controls (play/pause, rewind, fast-forward, timeline slider, timestamps)
