@@ -18,9 +18,6 @@ A demonstration of **federated privacy-preserving analytics** using Azure Confid
 
 ![Federated Multi-Party Demo](Federated%20Mutli%20Party%20Demo%201-Slide.svg)
 
-## Demo App Overview
-![Demo App Topology](../demo-app/demo-app-topology.jpg)
-
 ## Overview
 
 This project deploys **four containers** running identical code to demonstrate multi-party federated confidential computing:
