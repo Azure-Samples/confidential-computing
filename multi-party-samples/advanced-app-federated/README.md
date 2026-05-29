@@ -10,6 +10,10 @@
 
 A demonstration of **federated privacy-preserving analytics** using Azure Confidential Container Instances (ACI) with AMD SEV-SNP hardware protection. Each company processes its own sensitive data locally inside a Trusted Execution Environment (TEE) and shares only aggregate statistics — **no PII ever leaves any company's boundary**.
 
+## Demo Recording
+
+![Demo Recording](demo-recording.gif)
+
 ## High-Level Topology
 
 ![Federated Multi-Party Demo](Federated%20Mutli%20Party%20Demo%201-Slide.svg)
