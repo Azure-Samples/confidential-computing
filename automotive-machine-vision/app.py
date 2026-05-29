@@ -273,8 +273,9 @@ def attestation_check():
                 "explanation": "Token proves this workload is running in an attested confidential container with policy-backed measurements.",
             }
         )
-    except Exception as exc:
-        return jsonify({"status": "failed", "message": str(exc)}), 500
+    except Exception:
+        app.logger.exception("Attestation check failed")
+        return jsonify({"status": "failed", "message": "Attestation check could not be completed."}), 500
 
 
 @app.post("/api/attestation/decision")
