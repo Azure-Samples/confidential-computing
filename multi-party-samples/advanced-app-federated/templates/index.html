@@ -471,92 +471,8 @@
         </div>
         
         <div class="content">
-            <details class="section" open>
-                <summary style="cursor: pointer;"><h2 style="display: inline;">🛡️ Security Features</h2></summary>
-                <p id="securityStatus" style="margin-bottom: 15px; font-style: italic; color: #6c757d; margin-top: 15px;">
-                    Click "Request Attestation Token" to verify security features...
-                </p>
-                <ul class="features-list" id="featuresList">
-                    <li class="pending" data-feature="tee"><span class="status-icon">○</span> Hardware-based Trusted Execution Environment (TEE)</li>
-                    <li class="pending" data-feature="memory"><span class="status-icon">○</span> Memory encryption with AMD SEV-SNP technology</li>
-                    <li class="pending" data-feature="confidentiality"><span class="status-icon">○</span> Data confidentiality and integrity protection</li>
-                    <li class="pending" data-feature="policy"><span class="status-icon">○</span> Code integrity verification through security policies</li>
-                    <li class="pending" data-feature="attestation"><span class="status-icon">○</span> Remote attestation with cryptographic proof</li>
-                    <li class="pending" data-feature="protection"><span class="status-icon">○</span> Protection against cloud provider and hardware attacks</li>
-                </ul>
-            </details>
-            
-            <details class="section">
-                <summary style="cursor: pointer;"><h2 style="display: inline;">🔍 Remote Attestation</h2></summary>
-                <div class="attestation-box" style="margin-top: 15px;">
-                    <p><strong>Remote attestation</strong> allows you to cryptographically verify that your workload is running in a genuine confidential computing environment with the expected security configuration.</p>
-                    
-                    <div class="button-group">
-                        <button id="attestBtn" onclick="requestAttestation()">
-                            Request Attestation Token
-                        </button>
-                        <button id="rawBtn" onclick="requestRawAttestation()">
-                            Get Raw Attestation Report
-                        </button>
-                    </div>
-                    
-                    <div id="attestResult"></div>
-                </div>
-            </details>
-            
-            <details class="section">
-                <summary style="cursor: pointer;"><h2 style="display: inline;">🔑 Secure Key Release</h2></summary>
-                <div class="attestation-box" style="margin-top: 15px;">
-                    <p><strong>Secure Key Release (SKR)</strong> allows Azure Key Vault to release cryptographic keys only to verified confidential computing environments. The key is released only if the container proves it's running in a genuine AMD SEV-SNP TEE with the correct security policy.</p>
-                    
-                    <div id="skrConfigInfo" style="margin: 20px 0; padding: 20px; background: #e7f3ff; border-radius: 8px; border: 2px solid #0078d4;">
-                        <p style="color: #004085;"><em>Loading SKR configuration...</em></p>
-                    </div>
-                    
-                    <div class="button-group">
-                        <button id="skrBtn" onclick="testSecureKeyRelease()">
-                            🔐 Test Secure Key Release
-                        </button>
-                    </div>
-                    
-                    <div id="skrResult"></div>
-                </div>
-            </details>
-            
-            <!-- Cross-Company Key Access Attempt Section -->
-            <details class="section" id="crossCompanySection" style="display: none;">
-                <summary style="cursor: pointer;"><h2 style="display: inline;">&#128683; Attempt to Use Key from Other Company</h2></summary>
-                <div class="attestation-box" style="border-left-color: #dc3545; margin-top: 15px;">
-                    <div style="margin-bottom: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545;">
-                        <p style="color: #721c24;"><strong>Cross-Company Access Test:</strong> This demonstrates that even though Contoso, Fabrikam and Wingtip Toys are all running in confidential containers with TEE protection, each company can ONLY access their own cryptographic keys.</p>
-                    </div>
-                    
-                    <div id="crossCompanyInfo" style="margin-bottom: 20px; padding: 15px; background: #e2e3e5; border-radius: 8px;">
-                        <p style="color: #495057;"><em>Loading company information...</em></p>
-                    </div>
-                    
-                    <div class="button-group">
-                        <button id="attemptOtherKeyBtn" onclick="attemptOtherCompanyKey()" style="background: #dc3545;">
-                            &#128683; Attempt to Access Other Company's Key
-                        </button>
-                    </div>
-                    
-                    <div id="crossCompanyResult" style="margin-top: 20px;"></div>
-                    
-                    <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
-                        <h4 style="color: #856404; margin-bottom: 10px;">&#128161; Why This Matters</h4>
-                        <ul style="color: #856404; margin-left: 20px;">
-                            <li><strong>Managed Identity Isolation</strong> - Each company has its own Azure Managed Identity</li>
-                            <li><strong>Key Vault Access Policies</strong> - Each Key Vault only grants access to its company's identity</li>
-                            <li><strong>TEE is Necessary but Not Sufficient</strong> - Being in a TEE proves code integrity, but doesn't grant access to other companies' secrets</li>
-                            <li><strong>Multi-Party Security</strong> - Companies can share infrastructure while maintaining cryptographic isolation</li>
-                        </ul>
-                    </div>
-                </div>
-            </details>
-            
             <!-- Company Demographics Analysis Section (All Companies) -->
-            <details class="section" id="companyAnalysisSection" style="display: none;">
+            <details class="section" id="companyAnalysisSection" open style="display: none;">
                 <summary style="cursor: pointer;"><h2 style="display: inline;">&#128202; <span id="companyAnalysisTitle">Company</span> Demographics</h2></summary>
                 <div class="attestation-box" style="border-left-color: #0078d4; margin-top: 15px;">
                     <div style="margin-bottom: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border: 2px solid #0078d4;">
@@ -664,13 +580,13 @@
             </details>
             
             <!-- Partner Federated Analysis Section (Woodgrove Bank Only) -->
-            <details class="section" id="partnerAnalysisSection" style="display: none;">
+            <details class="section" id="partnerAnalysisSection" open style="display: none;">
                 <summary style="cursor: pointer;"><h2 style="display: inline;">&#128202; Federated Partner Analysis</h2></summary>
                 <div class="attestation-box" style="border-left-color: #1a472a; margin-top: 15px;">
                     <div style="margin-bottom: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border: 2px solid #1a472a;">
                         <p style="color: #155724;"><strong>&#127970; Woodgrove Bank Federated Analysis System</strong></p>
-                        <p style="color: #155724; margin-top: 8px;">Each partner company (Contoso, Fabrikam, Wingtip Toys) analyzes its own data <strong>inside its own TEE</strong>. Woodgrove only receives aggregate statistics &mdash; no raw PII data is ever transferred between containers.</p>
-                        <p style="color: #155724; margin-top: 8px;"><strong>Privacy guarantee:</strong> No key release needed. Each company decrypts and analyzes locally, then exposes only statistical summaries.</p>
+                        <p style="color: #155724; margin-top: 8px;">Each partner company (Contoso, Fabrikam, Wingtip Toys) decrypts and processes its own PII data <strong>inside its own TEE</strong>. Only aggregate demographic statistics are returned to Woodgrove &mdash; no raw PII data is ever transferred between containers.</p>
+                        <p style="color: #155724; margin-top: 8px;"><strong>Privacy guarantee:</strong> All personal data stays within each company's confidential container. To verify this, visit each company's Demographics page to see the local analysis computed inside their TEE.</p>
                     </div>
                     
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 20px;">
@@ -840,53 +756,96 @@
                             <pre style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; overflow-x: auto; max-height: 400px; font-size: 11px; border: 2px solid #f5576c;"><code id="rawWingtip">No data received yet</code></pre>
                         </div>
                     </div>
+
+                </div>
+            </details>
+            
+            <details class="section">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">🛡️ Security Features</h2></summary>
+                <p id="securityStatus" style="margin-bottom: 15px; font-style: italic; color: #6c757d; margin-top: 15px;">
+                    Click "Request Attestation Token" to verify security features...
+                </p>
+                <ul class="features-list" id="featuresList">
+                    <li class="pending" data-feature="tee"><span class="status-icon">○</span> Hardware-based Trusted Execution Environment (TEE)</li>
+                    <li class="pending" data-feature="memory"><span class="status-icon">○</span> Memory encryption with AMD SEV-SNP technology</li>
+                    <li class="pending" data-feature="confidentiality"><span class="status-icon">○</span> Data confidentiality and integrity protection</li>
+                    <li class="pending" data-feature="policy"><span class="status-icon">○</span> Code integrity verification through security policies</li>
+                    <li class="pending" data-feature="attestation"><span class="status-icon">○</span> Remote attestation with cryptographic proof</li>
+                    <li class="pending" data-feature="protection"><span class="status-icon">○</span> Protection against cloud provider and hardware attacks</li>
+                </ul>
+            </details>
+            
+            <details class="section">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">🔍 Remote Attestation</h2></summary>
+                <div class="attestation-box" style="margin-top: 15px;">
+                    <p><strong>Remote attestation</strong> allows you to cryptographically verify that your workload is running in a genuine confidential computing environment with the expected security configuration.</p>
                     
-                    <!-- Raw Decrypted Records Section -->
-                    <div id="rawDecryptedSection" style="display: none; margin-top: 25px;">
-                        <h4 style="color: #dc3545; margin-bottom: 15px;">&#128275; Raw Decrypted Partner Records</h4>
-                        <div style="padding: 15px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545; margin-bottom: 15px;">
-                            <p style="color: #721c24; margin: 0;"><strong>&#9888;&#65039; Full PII Data &mdash; Decrypted Inside This TEE</strong></p>
-                            <p style="color: #721c24; margin-top: 8px;">The table below shows <strong>actual decrypted records</strong> from partner companies. Woodgrove obtained the decryption keys via Secure Key Release (SKR) after this container's TEE passed attestation. This data includes names, addresses, salaries, and other PII that was encrypted at rest in partner containers.</p>
-                        </div>
-                        
-                        <div class="button-group">
-                            <button id="fetchDecryptedBtn" onclick="fetchDecryptedRecords()" style="background: #dc3545;">
-                                &#128275; Fetch &amp; Decrypt Partner Records
-                            </button>
-                        </div>
-                        
-                        <div id="decryptedProgress" style="display: none; margin-top: 15px;">
-                            <p style="color: #6c757d;"><span class="loading"></span> Fetching and decrypting partner records...</p>
-                        </div>
-                        
-                        <div id="decryptedRecordsContainer" style="margin-top: 15px; display: none;">
-                            <div id="decryptedRecordsSummary" style="margin-bottom: 15px;"></div>
-                            <div style="overflow-x: auto;">
-                                <table id="decryptedRecordsTable" style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; font-size: 12px;">
-                                    <thead>
-                                        <tr style="background: #dc3545; color: white;">
-                                            <th style="padding: 10px; text-align: left;">Source</th>
-                                            <th style="padding: 10px; text-align: left;">Name</th>
-                                            <th style="padding: 10px; text-align: left;">Phone</th>
-                                            <th style="padding: 10px; text-align: left;">Address</th>
-                                            <th style="padding: 10px; text-align: left;">City</th>
-                                            <th style="padding: 10px; text-align: left;">Country</th>
-                                            <th style="padding: 10px; text-align: center;">Age</th>
-                                            <th style="padding: 10px; text-align: right;">Salary</th>
-                                            <th style="padding: 10px; text-align: center;">Eye Color</th>
-                                            <th style="padding: 10px; text-align: center;">Fav Color</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="decryptedRecordsBody"></tbody>
-                                </table>
-                            </div>
-                            <div style="margin-top: 15px; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">
-                                <p style="color: #721c24; font-size: 13px;"><strong>&#128274; TEE Proof:</strong> This data was decrypted using keys obtained via Secure Key Release. The keys were only released because this container proved it is running inside an AMD SEV-SNP Trusted Execution Environment with the correct security policy. Outside of a TEE, this data would remain encrypted and inaccessible.</p>
-                            </div>
-                        </div>
+                    <div class="button-group">
+                        <button id="attestBtn" onclick="requestAttestation()">
+                            Request Attestation Token
+                        </button>
+                        <button id="rawBtn" onclick="requestRawAttestation()">
+                            Get Raw Attestation Report
+                        </button>
+                    </div>
+                    
+                    <div id="attestResult"></div>
+                </div>
+            </details>
+            
+            <details class="section">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">🔑 Secure Key Release</h2></summary>
+                <div class="attestation-box" style="margin-top: 15px;">
+                    <p><strong>Secure Key Release (SKR)</strong> allows Azure Key Vault to release cryptographic keys only to verified confidential computing environments. The key is released only if the container proves it's running in a genuine AMD SEV-SNP TEE with the correct security policy.</p>
+                    
+                    <div id="skrConfigInfo" style="margin: 20px 0; padding: 20px; background: #e7f3ff; border-radius: 8px; border: 2px solid #0078d4;">
+                        <p style="color: #004085;"><em>Loading SKR configuration...</em></p>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button id="skrBtn" onclick="testSecureKeyRelease()">
+                            🔐 Test Secure Key Release
+                        </button>
+                    </div>
+                    
+                    <div id="skrResult"></div>
+                </div>
+            </details>
+            
+            <!-- Cross-Company Key Access Attempt Section -->
+            <details class="section" id="crossCompanySection" style="display: none;">
+                <summary style="cursor: pointer;"><h2 style="display: inline;">&#128683; Attempt to Use Key from Other Company</h2></summary>
+                <div class="attestation-box" style="border-left-color: #dc3545; margin-top: 15px;">
+                    <div style="margin-bottom: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border: 2px solid #dc3545;">
+                        <p style="color: #721c24;"><strong>Cross-Company Access Test:</strong> This demonstrates that even though Contoso, Fabrikam and Wingtip Toys are all running in confidential containers with TEE protection, each company can ONLY access their own cryptographic keys.</p>
+                    </div>
+                    
+                    <div id="crossCompanyInfo" style="margin-bottom: 20px; padding: 15px; background: #e2e3e5; border-radius: 8px;">
+                        <p style="color: #495057;"><em>Loading company information...</em></p>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button id="attemptOtherKeyBtn" onclick="attemptOtherCompanyKey()" style="background: #dc3545;">
+                            &#128683; Attempt to Access Other Company's Key
+                        </button>
+                    </div>
+                    
+                    <div id="crossCompanyResult" style="margin-top: 20px;"></div>
+                    
+                    <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+                        <h4 style="color: #856404; margin-bottom: 10px;">&#128161; Why This Matters</h4>
+                        <ul style="color: #856404; margin-left: 20px;">
+                            <li><strong>Managed Identity Isolation</strong> - Each company has its own Azure Managed Identity</li>
+                            <li><strong>Key Vault Access Policies</strong> - Each Key Vault only grants access to its company's identity</li>
+                            <li><strong>TEE is Necessary but Not Sufficient</strong> - Being in a TEE proves code integrity, but doesn't grant access to other companies' secrets</li>
+                            <li><strong>Multi-Party Security</strong> - Companies can share infrastructure while maintaining cryptographic isolation</li>
+                        </ul>
                     </div>
                 </div>
             </details>
+            
+            <!-- (Company Demographics Section moved to top of content area) -->
+            <!-- (Partner Federated Analysis Section moved to top of content area) -->
             
             <details class="section">
                 <summary style="cursor: pointer; display: flex; align-items: center; gap: 10px;">
@@ -2815,6 +2774,15 @@
                 subtitle: 'Online Retail Data Protection',
                 faviconColor: '#e83e8c',
                 faviconLabel: 'F'
+            },
+            wingtip: {
+                gradient: 'linear-gradient(135deg, #f5576c 0%, #c62828 100%)',
+                bodyGradient: 'linear-gradient(135deg, #ffcdd2 0%, #f5576c 100%)',
+                icon: '🧸',
+                title: 'Wingtip Toys',
+                subtitle: 'Toy Retail Data Protection',
+                faviconColor: '#f5576c',
+                faviconLabel: 'W'
             }
         };
 
@@ -2848,6 +2816,8 @@
                 branding = companyBranding.contoso;
             } else if (name.includes('fabrikam')) {
                 branding = companyBranding.fabrikam;
+            } else if (name.includes('wingtip')) {
+                branding = companyBranding.wingtip;
             }
             
             if (branding) {
@@ -2882,10 +2852,7 @@
                         if (partnerAnalysisSection) {
                             partnerAnalysisSection.style.display = 'block';
                         }
-                        const rawDecryptedSection = document.getElementById('rawDecryptedSection');
-                        if (rawDecryptedSection) {
-                            rawDecryptedSection.style.display = 'block';
-                        }
+
                         partnerConfigs = data.partner_configs || true;
                     }
                     
@@ -3394,82 +3361,6 @@
             };
         }
         
-        async function fetchDecryptedRecords() {
-            const btn = document.getElementById('fetchDecryptedBtn');
-            const progressDiv = document.getElementById('decryptedProgress');
-            const container = document.getElementById('decryptedRecordsContainer');
-            const summaryDiv = document.getElementById('decryptedRecordsSummary');
-            const tbody = document.getElementById('decryptedRecordsBody');
-            
-            btn.disabled = true;
-            btn.innerHTML = '&#128275; Decrypting Partner Records<span class="loading"></span>';
-            progressDiv.style.display = 'block';
-            container.style.display = 'none';
-            
-            try {
-                const response = await fetch('/partner/analyze');
-                const data = await response.json();
-                
-                if (data.status === 'error') {
-                    progressDiv.innerHTML = '<p style="color: #dc3545;"><strong>Error:</strong> ' + escapeHtml(data.message || 'Failed to decrypt records') + '</p>';
-                    btn.disabled = false;
-                    btn.innerHTML = '&#128275; Fetch &amp; Decrypt Partner Records';
-                    return;
-                }
-                
-                const records = data.sample_records || [];
-                if (records.length === 0) {
-                    progressDiv.innerHTML = '<p style="color: #856404;">No records could be decrypted. Ensure partner keys have been released via SKR.</p>';
-                    btn.disabled = false;
-                    btn.innerHTML = '&#128275; Fetch &amp; Decrypt Partner Records';
-                    return;
-                }
-                
-                // Build summary
-                const contosoCount = records.filter(r => r.source === 'Contoso').length;
-                const fabrikamCount = records.filter(r => r.source === 'Fabrikam').length;
-                const wingtipCount = records.filter(r => r.source === 'Wingtip Toys').length;
-                summaryDiv.innerHTML = '<p style="color: #721c24;"><strong>Showing ' + records.length + ' decrypted records:</strong> ' +
-                    contosoCount + ' from Contoso, ' + fabrikamCount + ' from Fabrikam, ' + wingtipCount + ' from Wingtip Toys ' +
-                    '(sample of 10 per company from ' + (data.total_count || 0) + ' total records)</p>';
-                
-                // Populate table
-                const sourceColors = {
-                    'Contoso': '#667eea',
-                    'Fabrikam': '#11998e',
-                    'Wingtip Toys': '#f5576c'
-                };
-                
-                let html = '';
-                records.forEach(function(r, idx) {
-                    const bgColor = idx % 2 === 0 ? '#fff5f5' : 'white';
-                    const sourceColor = sourceColors[r.source] || '#495057';
-                    const salary = r.salary !== 'N/A' ? '$' + parseInt(r.salary).toLocaleString() : 'N/A';
-                    html += '<tr style="background: ' + bgColor + ';">';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb; font-weight: bold; color: ' + sourceColor + ';">' + escapeHtml(r.source) + '</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb;">' + escapeHtml(r.name) + '</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb;">' + escapeHtml(r.phone) + '</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb; font-size: 11px;">' + escapeHtml(r.address) + '</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb;">' + escapeHtml(r.city) + '</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb;">' + escapeHtml(r.country) + '</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb; text-align: center;">' + escapeHtml(String(r.age)) + '</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb; text-align: right; font-weight: bold;">' + salary + '</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb; text-align: center;">' + escapeHtml(r.eye_color) + '</td>';
-                    html += '<td style="padding: 8px; border-bottom: 1px solid #f5c6cb; text-align: center;">' + escapeHtml(r.favorite_color) + '</td>';
-                    html += '</tr>';
-                });
-                tbody.innerHTML = html;
-                
-                progressDiv.style.display = 'none';
-                container.style.display = 'block';
-                
-            } catch (err) {
-                progressDiv.innerHTML = '<p style="color: #dc3545;"><strong>Error:</strong> ' + escapeHtml(err.message) + '</p>';
-            }
-            
-            btn.disabled = false;
-            btn.innerHTML = '&#128275; Fetch &amp; Decrypt Partner Records';
-        }
         
         function updateKeyStatus(company, status, message) {
             const iconEl = document.getElementById(company + 'StatusIcon');

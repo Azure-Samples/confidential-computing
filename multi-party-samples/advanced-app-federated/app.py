@@ -3164,10 +3164,11 @@ def container_access_test():
 def get_company_name_from_key():
     """Extract company name from the released key name"""
     global _released_key_name
-    if not _released_key_name:
+    key_name_source = _released_key_name or os.environ.get('SKR_KEY_NAME', '')
+    if not key_name_source:
         return None
     # Key names are like "contoso-secret-key" or "fabrikam-secret-key"
-    key_name = _released_key_name.lower()
+    key_name = key_name_source.lower()
     if 'contoso' in key_name:
         return 'contoso'
     elif 'fabrikam' in key_name:
@@ -3641,6 +3642,13 @@ def populate_from_csv():
         try:
             with open(local_file, 'w', encoding='utf-8') as f:
                 json.dump(existing_data, f, indent=2)
+            
+            # Update init status so federated analysis doesn't waste 120s polling
+            _init_status['state'] = 'ready'
+            _init_status['ready'] = True
+            _init_status['records_encrypted'] = len(encrypted_records)
+            _init_status['total_records'] = len(existing_data)
+            _init_status['message'] = f'Ready - {len(existing_data)} records encrypted'
             
             return jsonify({
                 'status': 'success',

@@ -857,14 +857,15 @@ function Invoke-Build {
     $IdentityResourceIdD = $idInfoD.id
     $IdentityPrincipalIdD = $idInfoD.principalId
 
-    # Validate all identity details were captured
-    if (-not $IdentityClientIdA -or -not $IdentityResourceIdA) { throw "Failed to retrieve Contoso identity details. Check if identity '$IdentityNameA' exists in resource group '$ResourceGroup'." }
-    if (-not $IdentityClientIdB -or -not $IdentityResourceIdB) { throw "Failed to retrieve Fabrikam identity details. Check if identity '$IdentityNameB' exists in resource group '$ResourceGroup'." }
-    if (-not $IdentityClientIdC -or -not $IdentityResourceIdC) { throw "Failed to retrieve Woodgrove identity details. Check if identity '$IdentityNameC' exists in resource group '$ResourceGroup'." }
-    if (-not $IdentityClientIdD -or -not $IdentityResourceIdD) { throw "Failed to retrieve Wingtip identity details. Check if identity '$IdentityNameD' exists in resource group '$ResourceGroup'." }
+    # Validate all identity details were captured (clientId, resourceId, AND principalId)
+    if (-not $IdentityClientIdA -or -not $IdentityResourceIdA -or -not $IdentityPrincipalIdA) { throw "Failed to retrieve Contoso identity details. Check if identity '$IdentityNameA' exists in resource group '$ResourceGroup'." }
+    if (-not $IdentityClientIdB -or -not $IdentityResourceIdB -or -not $IdentityPrincipalIdB) { throw "Failed to retrieve Fabrikam identity details. Check if identity '$IdentityNameB' exists in resource group '$ResourceGroup'." }
+    if (-not $IdentityClientIdC -or -not $IdentityResourceIdC -or -not $IdentityPrincipalIdC) { throw "Failed to retrieve Woodgrove identity details. Check if identity '$IdentityNameC' exists in resource group '$ResourceGroup'." }
+    if (-not $IdentityClientIdD -or -not $IdentityResourceIdD -or -not $IdentityPrincipalIdD) { throw "Failed to retrieve Wingtip identity details. Check if identity '$IdentityNameD' exists in resource group '$ResourceGroup'." }
     Write-Success "All identity details retrieved successfully"
     
     # Grant Key Vault access policies in parallel
+    # Note: Identity principal IDs must be fully propagated before set-policy will succeed
     Write-Host "Granting Key Vault access policies in parallel..." -ForegroundColor Green
     $policyJobs = @(
         # Each company's identity gets access to its own KV
@@ -887,9 +888,29 @@ function Invoke-Build {
     }
     Remove-Job -Job $policyJobs -Force
     if ($kvPolicyFailures.Count -gt 0) {
-        Write-Warning "Some Key Vault policy assignments may have failed:"
-        $kvPolicyFailures | ForEach-Object { Write-Warning "  - $_" }
-        Write-Warning "Verify each identity has 'get' and 'release' key permissions on its Key Vault."
+        Write-Warning "Some Key Vault policy assignments may have failed. Retrying individually..."
+        # Retry failed policies sequentially (handles AAD replication delays)
+        $policyRetries = @(
+            @{ KV = $KeyVaultNameA; OID = $IdentityPrincipalIdA; Name = "Contoso" },
+            @{ KV = $KeyVaultNameB; OID = $IdentityPrincipalIdB; Name = "Fabrikam" },
+            @{ KV = $KeyVaultNameC; OID = $IdentityPrincipalIdC; Name = "Woodgrove" },
+            @{ KV = $KeyVaultNameD; OID = $IdentityPrincipalIdD; Name = "Wingtip" }
+        )
+        foreach ($retry in $policyRetries) {
+            $existingPerms = az keyvault show --name $retry.KV --query "properties.accessPolicies[?objectId=='$($retry.OID)'].permissions.keys" -o json 2>$null | ConvertFrom-Json
+            if (-not $existingPerms -or $existingPerms.Count -eq 0 -or ($existingPerms[0] -and 'release' -notin $existingPerms[0])) {
+                Write-Host "  Retrying policy for $($retry.Name) on $($retry.KV)..." -ForegroundColor Yellow
+                az keyvault set-policy --name $retry.KV --object-id $retry.OID --key-permissions get release 2>&1 | Out-Null
+            }
+        }
+        # Also ensure Woodgrove cross-company access
+        foreach ($crossKV in @($KeyVaultNameA, $KeyVaultNameB, $KeyVaultNameD)) {
+            $existingPerms = az keyvault show --name $crossKV --query "properties.accessPolicies[?objectId=='$IdentityPrincipalIdC'].permissions.keys" -o json 2>$null | ConvertFrom-Json
+            if (-not $existingPerms -or $existingPerms.Count -eq 0 -or ($existingPerms[0] -and 'release' -notin $existingPerms[0])) {
+                Write-Host "  Retrying Woodgrove cross-access on $crossKV..." -ForegroundColor Yellow
+                az keyvault set-policy --name $crossKV --object-id $IdentityPrincipalIdC --key-permissions get release 2>&1 | Out-Null
+            }
+        }
     }
     
     Write-Success "Contoso: Key Vault '$KeyVaultNameA' created (key created during Deploy)"

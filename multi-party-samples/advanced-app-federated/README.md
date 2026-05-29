@@ -389,7 +389,7 @@ See **[DEMO-SCRIPT.md](DEMO-SCRIPT.md)** for a focused 3-minute walkthrough of t
 2. **Explain Claims**: Click "📖 Detailed Explanation of Each Claim" → Walk through categories (JWT Standard, Platform Identity, Hardware Identity, Security State, etc.) showing what each claim proves
 3. **Highlight Key Claims**: Point out `x-ms-sevsnpvm-hostdata` (security policy hash), `x-ms-sevsnpvm-is-debuggable: false`, and `x-ms-attestation-type: sevsnpvm`
 4. **Show Fabrikam**: Same actions → Also succeeds (pink fashion theme)
-5. **Show Wingtip Toys**: Same actions → Also succeeds (orange toy theme)
+5. **Show Wingtip Toys**: Same actions → Also succeeds (coral toy theme)
 6. **Show Woodgrove Bank**: Same actions → Also succeeds (green bank theme)
 
 ### Container Access Test Demo
