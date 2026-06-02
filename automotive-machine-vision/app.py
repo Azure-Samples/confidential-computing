@@ -54,6 +54,10 @@ H264_CODECS = {"avc1", "H264", "X264"}
 DISPLAY_CONFIDENCE_THRESHOLD = max(0.0, min(1.0, float(os.environ.get("DISPLAY_CONFIDENCE_THRESHOLD", "0.60"))))
 ENABLE_PLATE_CONTOUR_FALLBACK = os.environ.get("ENABLE_PLATE_CONTOUR_FALLBACK", "false").lower() == "true"
 ENABLE_VEHICLE_PLATE_INFERENCE = os.environ.get("ENABLE_VEHICLE_PLATE_INFERENCE", "true").lower() == "true"
+PLATE_REDACTION_STRATEGY = os.environ.get("PLATE_REDACTION_STRATEGY", "vehicle-first").lower()
+FORCE_VEHICLE_REFRESH_EVERY_FRAME = os.environ.get("FORCE_VEHICLE_REFRESH_EVERY_FRAME", "true").lower() == "true"
+VEHICLE_TRACK_HOLD_FRAMES = max(1, min(60, int(os.environ.get("VEHICLE_TRACK_HOLD_FRAMES", "24"))))
+VEHICLE_TRACK_MATCH_IOU = max(0.05, min(0.9, float(os.environ.get("VEHICLE_TRACK_MATCH_IOU", "0.18"))))
 PLATE_TRACK_HOLD_FRAMES = max(0, min(45, int(os.environ.get("PLATE_TRACK_HOLD_FRAMES", "18"))))
 PLATE_TRACK_MATCH_IOU = max(0.05, min(0.9, float(os.environ.get("PLATE_TRACK_MATCH_IOU", "0.20"))))
 PLATE_RED_GLARE_PIXEL_RATIO = max(0.0, min(1.0, float(os.environ.get("PLATE_RED_GLARE_PIXEL_RATIO", "0.08"))))
@@ -418,6 +422,99 @@ def _stabilize_plate_detections(detections: list[Detection], frame: np.ndarray) 
     return _dedupe_detections(stabilized, iou_threshold=0.18)
 
 
+def _stabilize_vehicle_detections(detections: list[Detection], frame_shape: tuple[int, ...]) -> list[Detection]:
+    frame_h, frame_w = frame_shape[:2]
+    current_shape = (frame_h, frame_w)
+    if getattr(worker_state, "vehicle_track_shape", None) != current_shape:
+        worker_state.vehicle_track_shape = current_shape
+        worker_state.vehicle_track_cache = []
+
+    cache = list(getattr(worker_state, "vehicle_track_cache", []))
+    refreshed_cache: list[dict] = []
+    stabilized: list[Detection] = []
+    matched_indices: set[int] = set()
+
+    vehicle_detections = [d for d in detections if d.label in {"car", "truck"}]
+    for detection in _dedupe_detections(vehicle_detections, iou_threshold=0.28):
+        best_idx = -1
+        best_iou = 0.0
+
+        for idx, cached_entry in enumerate(cache):
+            if idx in matched_indices:
+                continue
+            cached_detection = cached_entry.get("detection")
+            if not isinstance(cached_detection, Detection):
+                continue
+            overlap = _rect_iou(cached_detection, detection)
+            if overlap > best_iou:
+                best_iou = overlap
+                best_idx = idx
+
+        if best_idx >= 0 and best_iou >= VEHICLE_TRACK_MATCH_IOU:
+            cached_detection = cache[best_idx]["detection"]
+            blended = Detection(
+                label=detection.label,
+                confidence=max(detection.confidence, cached_detection.confidence * 0.95),
+                x=int(round((cached_detection.x * 0.30) + (detection.x * 0.70))),
+                y=int(round((cached_detection.y * 0.30) + (detection.y * 0.70))),
+                w=int(round((cached_detection.w * 0.30) + (detection.w * 0.70))),
+                h=int(round((cached_detection.h * 0.30) + (detection.h * 0.70))),
+                color=detection.color,
+            )
+            matched_indices.add(best_idx)
+            stabilized.append(blended)
+            refreshed_cache.append({"detection": blended, "ttl": VEHICLE_TRACK_HOLD_FRAMES})
+            continue
+
+        stabilized.append(detection)
+        refreshed_cache.append({"detection": detection, "ttl": VEHICLE_TRACK_HOLD_FRAMES})
+
+    for idx, cached_entry in enumerate(cache):
+        if idx in matched_indices:
+            continue
+        cached_detection = cached_entry.get("detection")
+        if not isinstance(cached_detection, Detection):
+            continue
+
+        ttl = int(cached_entry.get("ttl", 0)) - 1
+        if ttl <= 0:
+            continue
+
+        carried = Detection(
+            label=cached_detection.label,
+            confidence=max(0.5, cached_detection.confidence * 0.92),
+            x=cached_detection.x,
+            y=cached_detection.y,
+            w=cached_detection.w,
+            h=cached_detection.h,
+            color=cached_detection.color,
+        )
+        stabilized.append(carried)
+        refreshed_cache.append({"detection": carried, "ttl": ttl})
+
+    worker_state.vehicle_track_cache = refreshed_cache[:24]
+    return _dedupe_detections(stabilized, iou_threshold=0.25)
+
+
+def _filter_plate_detections_near_vehicles(plates: list[Detection], vehicles: list[Detection]) -> list[Detection]:
+    if not vehicles:
+        return plates
+
+    kept: list[Detection] = []
+    for plate in plates:
+        plate_cx = plate.x + (plate.w // 2)
+        plate_cy = plate.y + (plate.h // 2)
+        for vehicle in vehicles:
+            vx1 = vehicle.x
+            vy1 = vehicle.y
+            vx2 = vehicle.x + vehicle.w
+            vy2 = vehicle.y + vehicle.h
+            if vx1 <= plate_cx <= vx2 and vy1 <= plate_cy <= vy2:
+                kept.append(plate)
+                break
+    return kept
+
+
 def _blur_region(frame: np.ndarray, detection: Detection, pad_scale: float = 0.18, sigma: int = 30) -> None:
     frame_h, frame_w = frame.shape[:2]
     pad_x = max(4, int(detection.w * pad_scale))
@@ -773,15 +870,15 @@ def _infer_plate_regions_from_vehicles(detections: list[Detection], frame_shape:
     for detection in detections:
         if detection.label not in {"car", "truck"}:
             continue
-        plate_w = min(max(24, int(detection.w * 0.34)), max(24, int(frame_w * 0.24)))
-        plate_h = min(max(14, int(detection.h * 0.13)), max(14, int(frame_h * 0.10)))
+        plate_w = min(max(20, int(detection.w * 0.30)), max(20, int(frame_w * 0.20)))
+        plate_h = min(max(12, int(detection.h * 0.11)), max(12, int(frame_h * 0.08)))
         plate_x = detection.x + int((detection.w - plate_w) * 0.5)
-        plate_y = detection.y + int(detection.h * 0.68)
+        plate_y = detection.y + int(detection.h * 0.70)
         plate_x, plate_y, plate_w, plate_h = _expand_rect(plate_x, plate_y, plate_w, plate_h, frame_w, frame_h, 2, 2)
         inferred.append(
             Detection(
                 label="license plate",
-                confidence=max(0.6, detection.confidence - 0.08),
+                confidence=max(0.66, detection.confidence - 0.05),
                 x=plate_x,
                 y=plate_y,
                 w=plate_w,
@@ -810,10 +907,12 @@ def _process_frame(frame: np.ndarray, run_vehicle_detection: bool) -> np.ndarray
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     dynamic_detections = list(getattr(worker_state, "dynamic_detections", []))
 
-    if ENABLE_VEHICLE_PLATE_INFERENCE and run_vehicle_detection:
-        # Vehicle detection is retained only to improve plate-region inference.
-        dynamic_detections = _dedupe_detections(_detect_vehicle_candidates(frame), iou_threshold=0.32)
-        worker_state.dynamic_detections = dynamic_detections
+    if ENABLE_VEHICLE_PLATE_INFERENCE:
+        should_refresh_vehicle_tracks = FORCE_VEHICLE_REFRESH_EVERY_FRAME or run_vehicle_detection
+        if should_refresh_vehicle_tracks:
+            detected_vehicles = _detect_vehicle_candidates(frame)
+            dynamic_detections = _stabilize_vehicle_detections(detected_vehicles, frame.shape)
+            worker_state.dynamic_detections = dynamic_detections
     elif not ENABLE_VEHICLE_PLATE_INFERENCE:
         dynamic_detections = []
 
@@ -821,9 +920,17 @@ def _process_frame(frame: np.ndarray, run_vehicle_detection: bool) -> np.ndarray
     for (x, y, w, h) in faces:
         _blur_region(frame, Detection("face", 1.0, x, y, w, h, (255, 255, 255)), pad_scale=0.12, sigma=30)
 
-    plate_detections = _detect_license_plate_candidates(gray, plate_cascade)
+    direct_plate_detections = _detect_license_plate_candidates(gray, plate_cascade)
+    inferred_plate_detections: list[Detection] = []
     if ENABLE_VEHICLE_PLATE_INFERENCE:
-        plate_detections.extend(_infer_plate_regions_from_vehicles(dynamic_detections, frame.shape))
+        inferred_plate_detections = _infer_plate_regions_from_vehicles(dynamic_detections, frame.shape)
+        direct_plate_detections = _filter_plate_detections_near_vehicles(direct_plate_detections, dynamic_detections)
+
+    if PLATE_REDACTION_STRATEGY == "vehicle-first" and ENABLE_VEHICLE_PLATE_INFERENCE:
+        plate_detections = inferred_plate_detections + direct_plate_detections
+    else:
+        plate_detections = direct_plate_detections + inferred_plate_detections
+
     for detection in _stabilize_plate_detections(plate_detections, frame):
         _blur_region(frame, detection, pad_scale=0.28, sigma=32)
 
