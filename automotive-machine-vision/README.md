@@ -1,47 +1,49 @@
 # Automotive Machine Vision (Confidential ACI + CCE)
 
-This sample deploys a web app to **Azure Container Instances (Confidential SKU)** and applies a **Confidential Compute Enforcement (CCE)** policy so the workload:
+This sample deploys a Flask-based video redaction app to Azure Container Instances (Confidential SKU), protected by a Confidential Compute Enforcement (CCE) policy and remote attestation gate.
 
-- Runs only from the approved container image
-- Blocks interactive access (`--disable-stdio`)
-- Requires remote attestation before sensitive upload/processing actions proceed
+## What the app does
 
-## What this sample does
+1. Serves the web app over HTTPS.
+2. Requires attestation validation before upload/processing can proceed.
+3. Accepts `.mp4` uploads and processes video inside the confidential container.
+4. Blurs sensitive content in processed output:
+   - Faces (cascade detection)
+   - License plates (direct plate detection plus vehicle-guided inference and temporal stabilization)
+5. Shows processing status with per-worker progress and a final playback view.
+6. Exposes live plate-tracking tuning controls in the UI (`holdFrames`, `matchIou`) and applies them without redeploy.
 
-1. Presents a web app over **HTTPS/TLS**
-2. Requires **attestation check** before upload is enabled
-3. Shows attestation claims and claim explanations to the user
-4. Lets the user explicitly **Proceed** or **Abort**
-5. Accepts `.mp4` upload only after proceed confirmation
-6. Processes video **inside the container**:
-   - Blurs faces
-   - Applies stronger, more consistent license-plate blurring (cascade + contour fallback + vehicle-region fallback)
-   - Adds rounded overlay boxes with labels/confidence for recognized objects (car, truck, pedestrian, street sign)
-7. Updates processing status every 5 seconds with overall and per-worker progress indicators
-8. Provides playback controls (play/pause, rewind, fast-forward, timeline slider, timestamps)
+## Live app screenshot
 
-## App screengrab
+Updated screenshot captured from the running app:
 
-The latest app capture below shows the processed playback view, progress indicators, and rounded recognition overlays.
+![Automotive machine vision app](docs/app-screengrab.png)
 
-![Automotive machine vision app screengrab](docs/app-screengrab.png)
+An additional copy is kept at `AutomotiveVisionApp.png` for convenience.
 
-## Folder layout
+## Current redaction behavior
 
-- `app.py` - Flask API + machine vision processing
-- `templates/index.html` - web UI (attestation, upload, progress, playback)
-- `Dockerfile` - combined app + SKR binary + TLS reverse proxy
-- `nginx.conf` - HTTPS termination and proxy to Flask
-- `supervisord.conf` - process manager for SKR, Flask, NGINX
-- `deployment-template-original.json` - confidential ACI ARM template with CCE policy placeholder
-- `Deploy-AutomotiveMachineVision.ps1` - build/deploy/cleanup script
-- `sample-video-local/` - local-only place for sample videos (gitignored)
+- Blurs only faces and license plates.
+- Uses a lead-vehicle-first strategy to reduce false-positive plate blur regions.
+- Keeps plate blur stable across short detector dropouts via temporal hold logic.
+- Uses red-glare-aware carryover to avoid losing blur under brake-light glare.
+
+## Project files
+
+- `app.py`: Flask API, detection/redaction pipeline, job orchestration, settings APIs.
+- `templates/index.html`: web UI for attestation, upload, progress, playback, and plate-tracking settings.
+- `Deploy-AutomotiveMachineVision.ps1`: build/deploy script for ACR + confidential ACI deployment.
+- `deployment-template.json`: ACI deployment template with CCE policy integration.
+- `deployment-params.json`: deployment parameters for the template.
+- `Dockerfile`, `nginx.conf`, `supervisord.conf`: runtime container stack.
+- `docs/app-screengrab.png`: screenshot embedded in this README.
 
 ## Prerequisites
 
-- Azure CLI (`az`) with `confcom` extension
+- Azure CLI (`az`)
+- Azure CLI `confcom` extension
 - PowerShell 7+
-- Docker Desktop (required by `az confcom acipolicygen`)
+- Docker Desktop (required for CCE policy generation)
 
 ```powershell
 az extension add --name confcom --upgrade
@@ -51,55 +53,29 @@ az confcom --version
 ## Build and deploy
 
 ```powershell
-cd automotive-machine-vision
+Set-Location automotive-machine-vision
 
-# Build image in ACR
+# Build and push image to ACR
 .\Deploy-AutomotiveMachineVision.ps1 -Build
 
-# Deploy confidential container and generate CCE policy
+# Deploy confidential ACI with CCE policy generation
 .\Deploy-AutomotiveMachineVision.ps1 -Deploy
 ```
 
-The deploy step runs:
+For deterministic deployments, use an explicit image tag:
 
 ```powershell
-az confcom acipolicygen -a deployment-template.json --parameters deployment-params.json --disable-stdio
+.\Deploy-AutomotiveMachineVision.ps1 -Build -ImageTag amv-20260602-<suffix>
+.\Deploy-AutomotiveMachineVision.ps1 -Deploy -ImageTag amv-20260602-<suffix>
 ```
 
-This policy generation step is what enforces:
+## Attestation and policy highlights
 
-- **Approved image measurement** (container policy bound to image layers)
-- **No interactive shell/exec** (stdio disabled)
-
-## Attestation claims shown in UI
-
-The app decodes token claims returned by MAA and displays each claim with an explanation. Typical claims include:
-
-- `x-ms-attestation-type`: hardware attestation technology indicator
-- `x-ms-compliance-status`: compliance state from attestation flow
-- `x-ms-sevsnpvm-is-debuggable`: debug mode status
-- `x-ms-policy-hash`: hash of policy measurement
-- `x-ms-runtime`: runtime evidence details
-
-## Local sample video handling
-
-Use the provided YouTube link only as a source reference and keep any downloaded sample in:
-
-```text
-automotive-machine-vision/sample-video-local/
-```
-
-This folder is intentionally gitignored and should never be committed.
+- CCE policy generation enforces approved image measurement and non-interactive execution (`--disable-stdio`).
+- The UI shows decoded claim values and explanations for attestation evidence before enabling upload.
 
 ## Security notes
 
-- TLS certificate in the container is self-signed for demonstration.
-- For production, use a CA-issued certificate and stronger identity/network controls.
-- Processing logic executes on the server side inside the ACI confidential container.
-
-## Recognition and blurring notes
-
-- License plate protection is multi-layered: Haar-cascade plate detection, contour-based plate candidate detection, and fallback plate-region masking inferred from car/truck boxes.
-- Street-sign detection remains visible as an overlay for review, but the sign content is no longer blurred in the processed playback.
-- Pedestrian overlays use HOG-based person detection; vehicle overlays use contour-based motion/object heuristics.
-- Overlay boxes are rendered with rounded corners and per-class colors for easier visual inspection in playback.
+- Included TLS certificate is self-signed for demo/testing.
+- Use CA-issued certificates and production identity/network controls for real deployments.
+- Video processing is server-side within the confidential container boundary.
