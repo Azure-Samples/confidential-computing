@@ -76,6 +76,28 @@ For Let's Encrypt specifically, use Certbot output files:
 - `fullchain.pem` for `-TlsCertPath`
 - `privkey.pem` for `-TlsKeyPath`
 
+### Generate Let's Encrypt artifacts
+
+This repo includes a helper that runs Certbot in Docker and writes local PEM artifacts under `certs/live/<domain>/`:
+
+```powershell
+Set-Location automotive-machine-vision
+
+# DNS challenge (manual TXT record entry)
+.\Get-LetsEncryptCertificate.ps1 -Domain "your.domain.com" -Email "you@example.com" -Challenge dns-manual
+
+# Optional: HTTP challenge (requires inbound port 80 to this machine)
+.\Get-LetsEncryptCertificate.ps1 -Domain "your.domain.com" -Email "you@example.com" -Challenge http-standalone
+```
+
+Then deploy using generated files:
+
+```powershell
+.\Deploy-AutomotiveMachineVision.ps1 -Deploy \
+   -TlsCertPath ".\certs\live\your.domain.com\fullchain.pem" \
+   -TlsKeyPath ".\certs\live\your.domain.com\privkey.pem"
+```
+
 For deterministic deployments, use an explicit image tag:
 
 ```powershell
