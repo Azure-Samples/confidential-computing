@@ -5,7 +5,7 @@ FROM python:3.13-slim-bookworm
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor nginx openssl \
+    supervisor nginx openssl ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=skr-source /bin/skr /usr/local/bin/skr

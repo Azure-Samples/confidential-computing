@@ -15,12 +15,16 @@ This sample deploys a web app to **Azure Container Instances (Confidential SKU)*
 5. Accepts `.mp4` upload only after proceed confirmation
 6. Processes video **inside the container**:
    - Blurs faces
-   - Blurs detected license plate regions
-   - Blurs street/road regions
-   - Blurs traffic signs
-   - Adds overlay labels for detected vehicle-like objects (car/truck/cycle/motorcycle) with confidence
-7. Updates processing status every 5 seconds
+   - Applies stronger, more consistent license-plate blurring (cascade + contour fallback + vehicle-region fallback)
+   - Adds rounded overlay boxes with labels/confidence for recognized objects (car, truck, pedestrian, street sign)
+7. Updates processing status every 5 seconds with overall and per-worker progress indicators
 8. Provides playback controls (play/pause, rewind, fast-forward, timeline slider, timestamps)
+
+## App screengrab
+
+The latest app capture below shows the processed playback view, progress indicators, and rounded recognition overlays.
+
+![Automotive machine vision app screengrab](docs/app-screengrab.png)
 
 ## Folder layout
 
@@ -92,3 +96,10 @@ This folder is intentionally gitignored and should never be committed.
 - TLS certificate in the container is self-signed for demonstration.
 - For production, use a CA-issued certificate and stronger identity/network controls.
 - Processing logic executes on the server side inside the ACI confidential container.
+
+## Recognition and blurring notes
+
+- License plate protection is multi-layered: Haar-cascade plate detection, contour-based plate candidate detection, and fallback plate-region masking inferred from car/truck boxes.
+- Street-sign detection remains visible as an overlay for review, but the sign content is no longer blurred in the processed playback.
+- Pedestrian overlays use HOG-based person detection; vehicle overlays use contour-based motion/object heuristics.
+- Overlay boxes are rendered with rounded corners and per-class colors for easier visual inspection in playback.

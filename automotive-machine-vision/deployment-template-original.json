@@ -9,7 +9,13 @@
     "registryUsername": { "type": "string" },
     "registryPassword": { "type": "securestring" },
     "dnsNameLabel": { "type": "string" },
-    "flaskSecretKey": { "type": "securestring", "defaultValue": "replace-me" }
+    "flaskSecretKey": { "type": "securestring", "defaultValue": "replace-me" },
+    "cpuCores": { "type": "int", "defaultValue": 2 },
+    "memoryInGB": { "type": "int", "defaultValue": 6 },
+    "processingWorkers": { "type": "int", "defaultValue": 3 },
+    "detectEveryNFrames": { "type": "int", "defaultValue": 2 },
+    "instanceName": { "type": "string", "defaultValue": "automotive-machine-vision" },
+    "peerEndpoints": { "type": "string", "defaultValue": "" }
   },
   "resources": [
     {
@@ -30,13 +36,17 @@
               "ports": [{ "protocol": "TCP", "port": 443 }],
               "resources": {
                 "requests": {
-                  "memoryInGB": 6,
-                  "cpu": 2
+                  "memoryInGB": "[parameters('memoryInGB')]",
+                  "cpu": "[parameters('cpuCores')]"
                 }
               },
               "environmentVariables": [
                 { "name": "FLASK_SECRET_KEY", "secureValue": "[parameters('flaskSecretKey')]" },
-                { "name": "MAA_ENDPOINT", "value": "sharedeus.eus.attest.azure.net" }
+                { "name": "MAA_ENDPOINT", "value": "sharedeus.eus.attest.azure.net" },
+                { "name": "PROCESSING_WORKERS", "value": "[string(parameters('processingWorkers'))]" },
+                { "name": "DETECT_EVERY_N_FRAMES", "value": "[string(parameters('detectEveryNFrames'))]" },
+                { "name": "INSTANCE_NAME", "value": "[parameters('instanceName')]" },
+                { "name": "PEER_ENDPOINTS", "value": "[parameters('peerEndpoints')]" }
               ]
             }
           }
