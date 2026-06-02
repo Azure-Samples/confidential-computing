@@ -52,6 +52,21 @@ REMOTE_SEGMENT_TIMEOUT_SECONDS = max(120, min(7200, int(os.environ.get("REMOTE_S
 VIDEO_OUTPUT_CODECS = ["avc1", "H264", "X264", "mp4v"]
 H264_CODECS = {"avc1", "H264", "X264"}
 DISPLAY_CONFIDENCE_THRESHOLD = max(0.0, min(1.0, float(os.environ.get("DISPLAY_CONFIDENCE_THRESHOLD", "0.60"))))
+ENABLE_PLATE_CONTOUR_FALLBACK = os.environ.get("ENABLE_PLATE_CONTOUR_FALLBACK", "false").lower() == "true"
+ENABLE_VEHICLE_PLATE_INFERENCE = os.environ.get("ENABLE_VEHICLE_PLATE_INFERENCE", "true").lower() == "true"
+PLATE_TRACK_HOLD_FRAMES = max(0, min(45, int(os.environ.get("PLATE_TRACK_HOLD_FRAMES", "18"))))
+PLATE_TRACK_MATCH_IOU = max(0.05, min(0.9, float(os.environ.get("PLATE_TRACK_MATCH_IOU", "0.20"))))
+PLATE_RED_GLARE_PIXEL_RATIO = max(0.0, min(1.0, float(os.environ.get("PLATE_RED_GLARE_PIXEL_RATIO", "0.08"))))
+PLATE_TRACK_SETTINGS_LOCK = threading.Lock()
+
+
+def _current_plate_tracking_settings() -> dict:
+    with PLATE_TRACK_SETTINGS_LOCK:
+        return {
+            "holdFrames": int(PLATE_TRACK_HOLD_FRAMES),
+            "matchIou": float(PLATE_TRACK_MATCH_IOU),
+            "redGlarePixelRatio": float(PLATE_RED_GLARE_PIXEL_RATIO),
+        }
 
 
 def _job_state_path(job_id: str) -> Path:
@@ -300,6 +315,107 @@ def _dedupe_detections(detections: list[Detection], iou_threshold: float = 0.35)
             continue
         kept.append(detection)
     return kept
+
+
+def _plate_region_has_red_glare(frame: np.ndarray, detection: Detection, red_glare_threshold: float) -> bool:
+    frame_h, frame_w = frame.shape[:2]
+    x, y, w, h = _expand_rect(detection.x, detection.y, detection.w, detection.h, frame_w, frame_h, 6, 6)
+    if w <= 0 or h <= 0:
+        return False
+
+    roi = frame[y:y + h, x:x + w]
+    if roi.size == 0:
+        return False
+
+    b = roi[:, :, 0].astype(np.int16)
+    g = roi[:, :, 1].astype(np.int16)
+    r = roi[:, :, 2].astype(np.int16)
+    bright_red = (r > 150) & (r > (g + 35)) & (r > (b + 35))
+    red_ratio = float(np.count_nonzero(bright_red)) / float(bright_red.size)
+    return red_ratio >= red_glare_threshold
+
+
+def _stabilize_plate_detections(detections: list[Detection], frame: np.ndarray) -> list[Detection]:
+    settings = _current_plate_tracking_settings()
+    hold_frames = int(settings["holdFrames"])
+    match_iou = float(settings["matchIou"])
+    red_glare_threshold = float(settings["redGlarePixelRatio"])
+
+    if hold_frames <= 0:
+        return _dedupe_detections(detections, iou_threshold=0.2)
+
+    frame_h, frame_w = frame.shape[:2]
+    current_shape = (frame_h, frame_w)
+    if getattr(worker_state, "plate_track_shape", None) != current_shape:
+        worker_state.plate_track_shape = current_shape
+        worker_state.plate_track_cache = []
+
+    cache = list(getattr(worker_state, "plate_track_cache", []))
+    refreshed_cache: list[dict] = []
+    stabilized: list[Detection] = []
+    matched_indices: set[int] = set()
+
+    for detection in _dedupe_detections(detections, iou_threshold=0.2):
+        best_idx = -1
+        best_iou = 0.0
+
+        for idx, cached_entry in enumerate(cache):
+            if idx in matched_indices:
+                continue
+            cached_detection = cached_entry.get("detection")
+            if not isinstance(cached_detection, Detection):
+                continue
+            overlap = _rect_iou(cached_detection, detection)
+            if overlap > best_iou:
+                best_iou = overlap
+                best_idx = idx
+
+        if best_idx >= 0 and best_iou >= match_iou:
+            cached_detection = cache[best_idx]["detection"]
+            blended = Detection(
+                label="license plate",
+                confidence=max(detection.confidence, cached_detection.confidence * 0.92),
+                x=int(round((cached_detection.x * 0.35) + (detection.x * 0.65))),
+                y=int(round((cached_detection.y * 0.35) + (detection.y * 0.65))),
+                w=int(round((cached_detection.w * 0.35) + (detection.w * 0.65))),
+                h=int(round((cached_detection.h * 0.35) + (detection.h * 0.65))),
+                color=detection.color,
+            )
+            matched_indices.add(best_idx)
+            stabilized.append(blended)
+            refreshed_cache.append({"detection": blended, "ttl": hold_frames})
+            continue
+
+        stabilized.append(detection)
+        refreshed_cache.append({"detection": detection, "ttl": hold_frames})
+
+    for idx, cached_entry in enumerate(cache):
+        if idx in matched_indices:
+            continue
+        cached_detection = cached_entry.get("detection")
+        if not isinstance(cached_detection, Detection):
+            continue
+
+        ttl = int(cached_entry.get("ttl", 0)) - 1
+        if _plate_region_has_red_glare(frame, cached_detection, red_glare_threshold):
+            ttl = max(ttl, int(cached_entry.get("ttl", 0)))
+        if ttl <= 0:
+            continue
+
+        carried = Detection(
+            label="license plate",
+            confidence=max(0.5, cached_detection.confidence * 0.9),
+            x=cached_detection.x,
+            y=cached_detection.y,
+            w=cached_detection.w,
+            h=cached_detection.h,
+            color=cached_detection.color,
+        )
+        stabilized.append(carried)
+        refreshed_cache.append({"detection": carried, "ttl": ttl})
+
+    worker_state.plate_track_cache = refreshed_cache[:32]
+    return _dedupe_detections(stabilized, iou_threshold=0.18)
 
 
 def _blur_region(frame: np.ndarray, detection: Detection, pad_scale: float = 0.18, sigma: int = 30) -> None:
@@ -587,11 +703,21 @@ def _detect_street_sign_candidates(frame: np.ndarray) -> list[Detection]:
 
 def _detect_license_plate_candidates(gray: np.ndarray, plate_cascade) -> list[Detection]:
     frame_h, frame_w = gray.shape[:2]
+    frame_area = max(1, frame_h * frame_w)
     detections: list[Detection] = []
 
     if plate_cascade is not False:
         plates = plate_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(24, 18))
         for (x, y, w, h) in plates:
+            aspect = w / max(h, 1)
+            if not (1.7 <= aspect <= 6.4):
+                continue
+            if w > int(frame_w * 0.20) or h > int(frame_h * 0.10):
+                continue
+            if (w * h) > int(frame_area * 0.02):
+                continue
+            if y < int(frame_h * 0.08) or (y + h) > int(frame_h * 0.96):
+                continue
             detections.append(
                 Detection(
                     label="license plate",
@@ -604,34 +730,39 @@ def _detect_license_plate_candidates(gray: np.ndarray, plate_cascade) -> list[De
                 )
             )
 
-    blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, np.ones((5, 17), np.uint8))
-    grad_x = cv2.Sobel(blackhat, cv2.CV_32F, 1, 0, ksize=3)
-    grad_x = cv2.convertScaleAbs(grad_x)
-    grad_x = cv2.GaussianBlur(grad_x, (5, 5), 0)
-    _, thresh = cv2.threshold(grad_x, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, np.ones((5, 19), np.uint8), iterations=2)
-    thresh = cv2.dilate(thresh, np.ones((3, 3), np.uint8), iterations=1)
+    if ENABLE_PLATE_CONTOUR_FALLBACK:
+        blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, np.ones((5, 17), np.uint8))
+        grad_x = cv2.Sobel(blackhat, cv2.CV_32F, 1, 0, ksize=3)
+        grad_x = cv2.convertScaleAbs(grad_x)
+        grad_x = cv2.GaussianBlur(grad_x, (5, 5), 0)
+        _, thresh = cv2.threshold(grad_x, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, np.ones((5, 19), np.uint8), iterations=2)
+        thresh = cv2.dilate(thresh, np.ones((3, 3), np.uint8), iterations=1)
 
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area < 280:
-            continue
-        x, y, w, h = cv2.boundingRect(contour)
-        aspect = w / max(h, 1)
-        if w < 34 or h < 12 or y < int(frame_h * 0.08) or not (1.8 <= aspect <= 6.8):
-            continue
-        detections.append(
-            Detection(
-                label="license plate",
-                confidence=0.72,
-                x=x,
-                y=y,
-                w=w,
-                h=h,
-                color=_detection_color("license plate"),
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < 280:
+                continue
+            x, y, w, h = cv2.boundingRect(contour)
+            aspect = w / max(h, 1)
+            if w < 34 or h < 12 or y < int(frame_h * 0.08) or not (1.8 <= aspect <= 6.4):
+                continue
+            if w > int(frame_w * 0.16) or h > int(frame_h * 0.08):
+                continue
+            if (w * h) > int(frame_area * 0.015):
+                continue
+            detections.append(
+                Detection(
+                    label="license plate",
+                    confidence=0.72,
+                    x=x,
+                    y=y,
+                    w=w,
+                    h=h,
+                    color=_detection_color("license plate"),
+                )
             )
-        )
 
     return _dedupe_detections(detections, iou_threshold=0.22)
 
@@ -664,7 +795,6 @@ def _infer_plate_regions_from_vehicles(detections: list[Detection], frame_shape:
 def _get_detectors():
     face_cascade = getattr(worker_state, "face_cascade", None)
     plate_cascade = getattr(worker_state, "plate_cascade", None)
-    people_detector = getattr(worker_state, "people_detector", None)
     if face_cascade is None:
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
         worker_state.face_cascade = face_cascade
@@ -672,41 +802,30 @@ def _get_detectors():
         plate_path = cv2.data.haarcascades + "haarcascade_russian_plate_number.xml"
         plate_cascade = cv2.CascadeClassifier(plate_path) if os.path.exists(plate_path) else False
         worker_state.plate_cascade = plate_cascade
-    if people_detector is None:
-        people_detector = cv2.HOGDescriptor()
-        people_detector.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-        worker_state.people_detector = people_detector
-    return face_cascade, plate_cascade, people_detector
+    return face_cascade, plate_cascade
 
 
 def _process_frame(frame: np.ndarray, run_vehicle_detection: bool) -> np.ndarray:
-    face_cascade, plate_cascade, people_detector = _get_detectors()
+    face_cascade, plate_cascade = _get_detectors()
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     dynamic_detections = list(getattr(worker_state, "dynamic_detections", []))
 
-    if run_vehicle_detection:
-        dynamic_detections = _dedupe_detections(
-            _detect_vehicle_candidates(frame) + _detect_pedestrian_candidates(frame, people_detector),
-            iou_threshold=0.32,
-        )
+    if ENABLE_VEHICLE_PLATE_INFERENCE and run_vehicle_detection:
+        # Vehicle detection is retained only to improve plate-region inference.
+        dynamic_detections = _dedupe_detections(_detect_vehicle_candidates(frame), iou_threshold=0.32)
         worker_state.dynamic_detections = dynamic_detections
+    elif not ENABLE_VEHICLE_PLATE_INFERENCE:
+        dynamic_detections = []
 
     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
     for (x, y, w, h) in faces:
         _blur_region(frame, Detection("face", 1.0, x, y, w, h, (255, 255, 255)), pad_scale=0.12, sigma=30)
 
     plate_detections = _detect_license_plate_candidates(gray, plate_cascade)
-    plate_detections.extend(_infer_plate_regions_from_vehicles(dynamic_detections, frame.shape))
-    for detection in _dedupe_detections(plate_detections, iou_threshold=0.2):
+    if ENABLE_VEHICLE_PLATE_INFERENCE:
+        plate_detections.extend(_infer_plate_regions_from_vehicles(dynamic_detections, frame.shape))
+    for detection in _stabilize_plate_detections(plate_detections, frame):
         _blur_region(frame, detection, pad_scale=0.28, sigma=32)
-
-    sign_detections = _detect_street_sign_candidates(frame)
-
-    scene_detections = _dedupe_detections(dynamic_detections + sign_detections, iou_threshold=0.3)
-    for detection in scene_detections:
-        if detection.confidence < DISPLAY_CONFIDENCE_THRESHOLD:
-            continue
-        _draw_detection(frame, detection)
 
     return frame
 
@@ -770,6 +889,43 @@ def _resolve_processing_profile(job_profile: str) -> dict:
     return PROCESSING_PROFILE_PRESETS.get(str(job_profile).lower(), PROCESSING_PROFILE_PRESETS["balanced"])
 
 
+def _runtime_worker_diagnostics(job_profile: str = "balanced") -> dict:
+    profile_settings = _resolve_processing_profile(job_profile)
+    raw_configured_workers = os.environ.get("PROCESSING_WORKERS", "0")
+    configured_workers = int(raw_configured_workers)
+    cpu_count = os.cpu_count() or 2
+    default_workers = max(1, min(16, cpu_count))
+    base_workers = default_workers if configured_workers <= 0 else max(1, min(16, configured_workers))
+    worker_count = max(1, min(16, int(round(base_workers * float(profile_settings["worker_factor"])))) )
+
+    return {
+        "instanceName": INSTANCE_NAME,
+        "jobProfile": job_profile,
+        "profileSettings": profile_settings,
+        "processId": os.getpid(),
+        "cpuCount": cpu_count,
+        "rawProcessingWorkers": raw_configured_workers,
+        "configuredWorkers": configured_workers,
+        "defaultWorkers": default_workers,
+        "baseWorkers": base_workers,
+        "workerCount": worker_count,
+        "plateTracking": _current_plate_tracking_settings(),
+    }
+
+
+def _parse_plate_tracking_value(payload: dict, key: str, cast_type, min_value, max_value):
+    if key not in payload:
+        return None
+    raw = payload.get(key)
+    try:
+        value = cast_type(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid value for {key}.")
+    if value < min_value or value > max_value:
+        raise ValueError(f"{key} must be between {min_value} and {max_value}.")
+    return value
+
+
 def _run_video_processing(input_path: Path, output_path: Path, job_profile: str, progress_callback=None) -> dict:
     cap = None
     writer = None
@@ -793,7 +949,7 @@ def _run_video_processing(input_path: Path, output_path: Path, job_profile: str,
         detect_every_n_frames = max(1, min(12, min(configured_detect_stride, int(profile_settings["detect_stride"]))))
 
         configured_workers = int(os.environ.get("PROCESSING_WORKERS", "0"))
-        default_workers = max(1, min(4, os.cpu_count() or 2))
+        default_workers = max(1, min(16, os.cpu_count() or 2))
         base_workers = default_workers if configured_workers <= 0 else max(1, min(16, configured_workers))
         worker_count = max(1, min(16, int(round(base_workers * float(profile_settings["worker_factor"])))) )
         max_inflight = worker_count * 3
@@ -1313,6 +1469,39 @@ def job_status(job_id: str):
 def api_load():
     instance = request.host.split(":", 1)[0] if request.host else INSTANCE_NAME
     return jsonify({"status": "ok", "load": _local_load_metrics(instance_name=instance)})
+
+
+@app.get("/api/debug/runtime")
+def api_debug_runtime():
+    profile = str(request.args.get("profile", "balanced")).lower()
+    if profile not in PROCESSING_PROFILE_PRESETS:
+        profile = "balanced"
+    return jsonify({"status": "ok", "runtime": _runtime_worker_diagnostics(profile)})
+
+
+@app.get("/api/settings/plate-tracking")
+def api_get_plate_tracking_settings():
+    return jsonify({"status": "ok", "settings": _current_plate_tracking_settings()})
+
+
+@app.post("/api/settings/plate-tracking")
+def api_update_plate_tracking_settings():
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        hold_frames = _parse_plate_tracking_value(payload, "holdFrames", int, 0, 45)
+        match_iou = _parse_plate_tracking_value(payload, "matchIou", float, 0.05, 0.9)
+    except ValueError as exc:
+        return jsonify({"status": "failed", "message": str(exc)}), 400
+
+    global PLATE_TRACK_HOLD_FRAMES, PLATE_TRACK_MATCH_IOU
+    with PLATE_TRACK_SETTINGS_LOCK:
+        if hold_frames is not None:
+            PLATE_TRACK_HOLD_FRAMES = hold_frames
+        if match_iou is not None:
+            PLATE_TRACK_MATCH_IOU = match_iou
+
+    return jsonify({"status": "ok", "settings": _current_plate_tracking_settings()})
 
 
 @app.get("/processed/<path:filename>")

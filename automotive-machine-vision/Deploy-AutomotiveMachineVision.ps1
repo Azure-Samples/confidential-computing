@@ -3,16 +3,16 @@ param(
     [switch]$Deploy,
     [switch]$Cleanup,
     [string]$RegistryName,
-    [ValidateRange(1, 16)][int]$CpuCores = 2,
+    [string]$ImageTag = "latest",
+    [ValidateRange(1, 30)][int]$CpuCores = 4,
     [ValidateRange(2, 128)][int]$MemoryInGB = 6,
-    [ValidateRange(1, 16)][int]$ProcessingWorkers = 3,
+    [ValidateRange(0, 30)][int]$ProcessingWorkers = 0,
     [ValidateRange(1, 12)][int]$DetectEveryNFrames = 1
 )
 
 $ErrorActionPreference = "Stop"
 $Location = "eastus"
 $ImageName = "automotive-machine-vision"
-$ImageTag = "latest"
 
 function Invoke-Az {
     param(
@@ -85,10 +85,16 @@ if ($Deploy) {
         throw "Run -Build first (acr-config.json is missing)."
     }
 
+    if ($ImageTag -and $ImageTag -ne "latest") {
+        $config.imageTag = $ImageTag
+        $config.fullImage = "$($config.loginServer)/$($config.imageName):$ImageTag"
+    }
+
     $suffix = -join ((97..122) | Get-Random -Count 6 | ForEach-Object {[char]$_})
     $dnsLabel = "amv-$suffix"
     $containerName = "amv-container-$suffix"
     $secret = [guid]::NewGuid().ToString()
+    $effectiveWorkers = if ($ProcessingWorkers -gt 0) { $ProcessingWorkers } else { [Math]::Max(6, [Math]::Min(24, $CpuCores)) }
 
     $params = @{
         containerGroupName = @{ value = $containerName }
@@ -101,7 +107,7 @@ if ($Deploy) {
         flaskSecretKey = @{ value = $secret }
         cpuCores = @{ value = $CpuCores }
         memoryInGB = @{ value = $MemoryInGB }
-        processingWorkers = @{ value = $ProcessingWorkers }
+        processingWorkers = @{ value = $effectiveWorkers }
         detectEveryNFrames = @{ value = $DetectEveryNFrames }
     }
 
@@ -146,5 +152,5 @@ if ($Cleanup) {
 }
 
 if (-not ($Build -or $Deploy -or $Cleanup)) {
-    Write-Host "Usage: .\Deploy-AutomotiveMachineVision.ps1 -Build | -Deploy [-CpuCores 16 -MemoryInGB 128 -ProcessingWorkers 16 -DetectEveryNFrames 1] | -Cleanup"
+    Write-Host "Usage: .\Deploy-AutomotiveMachineVision.ps1 -Build [-ImageTag amv-20260602] | -Deploy [-ImageTag amv-20260602 -CpuCores 30 -MemoryInGB 120 -ProcessingWorkers 24 -DetectEveryNFrames 1] | -Cleanup"
 }
