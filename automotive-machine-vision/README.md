@@ -1,6 +1,8 @@
 # Automotive Machine Vision (Confidential ACI + CCE)
 
-This sample deploys a Flask-based video redaction app to Azure Container Instances (Confidential SKU), protected by a Confidential Compute Enforcement (CCE) policy and remote attestation gate.
+This is an example of an application protecting data in-use and in-transit (it has no persistent storage), the end user uploads a dashcam video that could contain PII like faces or license plates. The application blurs our all the PII and produces a video you can view in the app minus the PII.
+
+It deploys a Flask-based video redaction app to Azure Container Instances (Confidential SKU), protected by a Confidential Compute Enforcement (CCE) policy and remote attestation gate.
 
 ## What the app does
 
@@ -104,6 +106,39 @@ For deterministic deployments, use an explicit image tag:
 .\Deploy-AutomotiveMachineVision.ps1 -Build -ImageTag amv-20260602-<suffix>
 .\Deploy-AutomotiveMachineVision.ps1 -Deploy -ImageTag amv-20260602-<suffix>
 ```
+
+### Deploy with Azure Front Door (Microsoft-managed HTTPS)
+
+To simplify HTTPS access and avoid certificate management, deploy the app behind **Azure Front Door** with Microsoft-managed TLS:
+
+```powershell
+.\Deploy-AutomotiveMachineVision.ps1 -Deploy -DeployAFD
+```
+
+This will:
+1. Deploy the confidential ACI container (with self-signed cert fallback).
+2. Create an Azure Front Door profile with a Microsoft-managed domain (`*.azurefd.net`).
+3. Configure Front Door to route traffic to your ACI FQDN over HTTPS.
+4. Return both endpoints:
+   - **Front Door (Azure-managed HTTPS)**: `https://amv-endpoint-XXXXX.azurefd.net`
+   - **Direct ACI (self-signed)**: `https://amv-XXXXX.eastus.azurecontainer.io`
+
+You can access the app via the Front Door endpoint with automatic HTTPS (no self-signed cert warnings).
+
+**Optional: Bring your own certificate**
+
+If you want to use the direct ACI endpoint with a real CA certificate (e.g., Let's Encrypt), combine both:
+
+```powershell
+.\Deploy-AutomotiveMachineVision.ps1 -Deploy \
+   -DeployAFD \
+   -TlsCertPath ".\certs\live\yourdomain.com\fullchain.pem" \
+   -TlsKeyPath ".\certs\live\yourdomain.com\privkey.pem"
+```
+
+This gives you both options:
+- **Front Door endpoint**: Always available with Microsoft-managed HTTPS.
+- **Direct ACI endpoint**: Works with your provided certificate.
 
 ## Attestation and policy highlights
 

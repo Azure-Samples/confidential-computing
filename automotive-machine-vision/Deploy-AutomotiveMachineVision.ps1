@@ -2,6 +2,7 @@ param(
     [switch]$Build,
     [switch]$Deploy,
     [switch]$Cleanup,
+    [switch]$DeployAFD,
     [string]$RegistryName,
     [string]$ImageTag = "latest",
     [ValidateRange(1, 30)][int]$CpuCores = 4,
@@ -166,12 +167,37 @@ if ($Deploy) {
         throw "Deployment finished but no container FQDN was returned for $containerName."
     }
 
-    Write-Host "Deployment complete. Endpoint:" -ForegroundColor Green
-    Write-Host " - https://$fqdn" -ForegroundColor Green
-    if ($TlsCertPath -and $TlsKeyPath) {
-        Write-Host "TLS mode: using provided certificate and key." -ForegroundColor Green
+    if ($DeployAFD) {
+        Write-Host "Deploying Azure Front Door for HTTPS access..." -ForegroundColor Cyan
+        Invoke-Az "Deploy Azure Front Door" {
+            az deployment group create `
+                --resource-group $config.resourceGroup `
+                --template-file deployment-afd.bicep `
+                --parameters aciOriginFqdn=$fqdn `
+                | Out-Null
+        }
+        
+        $afdEndpoint = Invoke-AzValue "Get AFD endpoint" {
+            az deployment group show `
+                --resource-group $config.resourceGroup `
+                --name deployment `
+                --query "properties.outputs.frontDoorEndpoint.value" -o tsv
+        }
+
+        Write-Host "Azure Front Door deployment complete!" -ForegroundColor Green
+        Write-Host "Endpoint (Azure-managed HTTPS):" -ForegroundColor Green
+        Write-Host " - https://$afdEndpoint" -ForegroundColor Green
+        Write-Host "" -ForegroundColor Green
+        Write-Host "Direct ACI endpoint (self-signed or provided cert):" -ForegroundColor Yellow
+        Write-Host " - https://$fqdn" -ForegroundColor Yellow
     } else {
-        Write-Host "TLS mode: self-signed fallback (demo only)." -ForegroundColor Yellow
+        Write-Host "Deployment complete. Endpoint:" -ForegroundColor Green
+        Write-Host " - https://$fqdn" -ForegroundColor Green
+        if ($TlsCertPath -and $TlsKeyPath) {
+            Write-Host "TLS mode: using provided certificate and key." -ForegroundColor Green
+        } else {
+            Write-Host "TLS mode: self-signed fallback (demo only)." -ForegroundColor Yellow
+        }
     }
 }
 
@@ -186,5 +212,5 @@ if ($Cleanup) {
 }
 
 if (-not ($Build -or $Deploy -or $Cleanup)) {
-    Write-Host "Usage: .\Deploy-AutomotiveMachineVision.ps1 -Build [-ImageTag amv-20260602] | -Deploy [-ImageTag amv-20260602 -CpuCores 30 -MemoryInGB 120 -ProcessingWorkers 24 -DetectEveryNFrames 1 -TlsCertPath .\certs\fullchain.pem -TlsKeyPath .\certs\privkey.pem] | -Cleanup"
+    Write-Host "Usage: .\Deploy-AutomotiveMachineVision.ps1 -Build [-ImageTag amv-20260602] | -Deploy [-ImageTag amv-20260602 -CpuCores 30 -MemoryInGB 120 -ProcessingWorkers 24 -DetectEveryNFrames 1 -TlsCertPath .\certs\fullchain.pem -TlsKeyPath .\certs\privkey.pem] [-DeployAFD] | -Cleanup"
 }
