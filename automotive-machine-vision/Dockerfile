@@ -16,16 +16,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 COPY templates/ templates/
+COPY start.sh /app/start.sh
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY nginx.conf /etc/nginx/nginx.conf
 
 RUN mkdir -p /var/log/supervisor /tmp/uploads /tmp/processed \
-    && openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
-    -keyout /etc/ssl/private/server.key \
-    -out /etc/ssl/private/server.crt \
-    -subj "/C=US/ST=WA/L=Redmond/O=ConfidentialComputing/CN=localhost"
+    && chmod +x /app/start.sh
 
 ENV FLASK_SECRET_KEY=change-me-in-production
 EXPOSE 443
 
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+CMD ["/app/start.sh"]

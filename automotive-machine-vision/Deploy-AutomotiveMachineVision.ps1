@@ -7,7 +7,9 @@ param(
     [ValidateRange(1, 30)][int]$CpuCores = 4,
     [ValidateRange(2, 128)][int]$MemoryInGB = 6,
     [ValidateRange(0, 30)][int]$ProcessingWorkers = 0,
-    [ValidateRange(1, 12)][int]$DetectEveryNFrames = 1
+    [ValidateRange(1, 12)][int]$DetectEveryNFrames = 1,
+    [string]$TlsCertPath = "",
+    [string]$TlsKeyPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -95,6 +97,32 @@ if ($Deploy) {
     $containerName = "amv-container-$suffix"
     $secret = [guid]::NewGuid().ToString()
     $effectiveWorkers = if ($ProcessingWorkers -gt 0) { $ProcessingWorkers } else { [Math]::Max(6, [Math]::Min(24, $CpuCores)) }
+    $tlsCertPem = ""
+    $tlsKeyPem = ""
+
+    if (($TlsCertPath -and -not $TlsKeyPath) -or (-not $TlsCertPath -and $TlsKeyPath)) {
+        throw "To use a real TLS certificate, provide both -TlsCertPath and -TlsKeyPath."
+    }
+
+    if ($TlsCertPath -and $TlsKeyPath) {
+        if (-not (Test-Path $TlsCertPath)) {
+            throw "TLS certificate file not found: $TlsCertPath"
+        }
+        if (-not (Test-Path $TlsKeyPath)) {
+            throw "TLS private key file not found: $TlsKeyPath"
+        }
+
+        $tlsCertPem = Get-Content -Path $TlsCertPath -Raw
+        $tlsKeyPem = Get-Content -Path $TlsKeyPath -Raw
+
+        if ([string]::IsNullOrWhiteSpace($tlsCertPem) -or [string]::IsNullOrWhiteSpace($tlsKeyPem)) {
+            throw "TLS certificate and key files must not be empty."
+        }
+
+        Write-Host "Using provided CA-issued TLS certificate for deployment." -ForegroundColor Green
+    } else {
+        Write-Host "No TLS certificate files provided; deployment will fall back to self-signed certificate." -ForegroundColor Yellow
+    }
 
     $params = @{
         containerGroupName = @{ value = $containerName }
@@ -105,6 +133,8 @@ if ($Deploy) {
         registryPassword = @{ value = $config.acrPassword }
         dnsNameLabel = @{ value = $dnsLabel }
         flaskSecretKey = @{ value = $secret }
+        tlsCertificatePem = @{ value = $tlsCertPem }
+        tlsPrivateKeyPem = @{ value = $tlsKeyPem }
         cpuCores = @{ value = $CpuCores }
         memoryInGB = @{ value = $MemoryInGB }
         processingWorkers = @{ value = $effectiveWorkers }
@@ -138,7 +168,11 @@ if ($Deploy) {
 
     Write-Host "Deployment complete. Endpoint:" -ForegroundColor Green
     Write-Host " - https://$fqdn" -ForegroundColor Green
-    Write-Host "Note: certificate is self-signed for demo purposes." -ForegroundColor Yellow
+    if ($TlsCertPath -and $TlsKeyPath) {
+        Write-Host "TLS mode: using provided certificate and key." -ForegroundColor Green
+    } else {
+        Write-Host "TLS mode: self-signed fallback (demo only)." -ForegroundColor Yellow
+    }
 }
 
 if ($Cleanup) {
@@ -152,5 +186,5 @@ if ($Cleanup) {
 }
 
 if (-not ($Build -or $Deploy -or $Cleanup)) {
-    Write-Host "Usage: .\Deploy-AutomotiveMachineVision.ps1 -Build [-ImageTag amv-20260602] | -Deploy [-ImageTag amv-20260602 -CpuCores 30 -MemoryInGB 120 -ProcessingWorkers 24 -DetectEveryNFrames 1] | -Cleanup"
+    Write-Host "Usage: .\Deploy-AutomotiveMachineVision.ps1 -Build [-ImageTag amv-20260602] | -Deploy [-ImageTag amv-20260602 -CpuCores 30 -MemoryInGB 120 -ProcessingWorkers 24 -DetectEveryNFrames 1 -TlsCertPath .\certs\fullchain.pem -TlsKeyPath .\certs\privkey.pem] | -Cleanup"
 }

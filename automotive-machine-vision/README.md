@@ -62,6 +62,20 @@ Set-Location automotive-machine-vision
 .\Deploy-AutomotiveMachineVision.ps1 -Deploy
 ```
 
+To use a real certificate (including Let's Encrypt), pass your PEM files at deploy time:
+
+```powershell
+.\Deploy-AutomotiveMachineVision.ps1 -Deploy \
+   -ImageTag amv-20260602-<suffix> \
+   -TlsCertPath "C:\path\to\fullchain.pem" \
+   -TlsKeyPath "C:\path\to\privkey.pem"
+```
+
+For Let's Encrypt specifically, use Certbot output files:
+
+- `fullchain.pem` for `-TlsCertPath`
+- `privkey.pem` for `-TlsKeyPath`
+
 For deterministic deployments, use an explicit image tag:
 
 ```powershell
@@ -76,6 +90,6 @@ For deterministic deployments, use an explicit image tag:
 
 ## Security notes
 
-- Included TLS certificate is self-signed for demo/testing.
-- Use CA-issued certificates and production identity/network controls for real deployments.
+- The container supports CA-issued certificates (including Let's Encrypt) via `-TlsCertPath` and `-TlsKeyPath`.
+- If no certificate is provided, the container falls back to a self-signed certificate for demo/testing.
 - Video processing is server-side within the confidential container boundary.

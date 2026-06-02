@@ -10,6 +10,8 @@
     "registryPassword": { "type": "securestring" },
     "dnsNameLabel": { "type": "string" },
     "flaskSecretKey": { "type": "securestring", "defaultValue": "replace-me" },
+    "tlsCertificatePem": { "type": "securestring", "defaultValue": "" },
+    "tlsPrivateKeyPem": { "type": "securestring", "defaultValue": "" },
     "cpuCores": { "type": "int", "defaultValue": 2 },
     "memoryInGB": { "type": "int", "defaultValue": 6 },
     "processingWorkers": { "type": "int", "defaultValue": 3 },
@@ -42,6 +44,8 @@
               },
               "environmentVariables": [
                 { "name": "FLASK_SECRET_KEY", "secureValue": "[parameters('flaskSecretKey')]" },
+                { "name": "TLS_CERT_PEM", "secureValue": "[parameters('tlsCertificatePem')]" },
+                { "name": "TLS_KEY_PEM", "secureValue": "[parameters('tlsPrivateKeyPem')]" },
                 { "name": "MAA_ENDPOINT", "value": "sharedeus.eus.attest.azure.net" },
                 { "name": "PROCESSING_WORKERS", "value": "[string(parameters('processingWorkers'))]" },
                 { "name": "DETECT_EVERY_N_FRAMES", "value": "[string(parameters('detectEveryNFrames'))]" },
