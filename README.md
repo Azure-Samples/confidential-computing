@@ -51,7 +51,7 @@ Confidential computing is the protection of data-in-use through isolating comput
 
 | Addition | Description |
 |---|---|
-| **[Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README-MultiParty.md)** ⭐ | New 4-party (Contoso, Fabrikam, Wingtip Toys, Woodgrove Bank) **federated** analytics demo. Each partner decrypts its own data inside its own AMD SEV-SNP TEE and returns only aggregates — no raw PII ever crosses the trust boundary. Includes a 3-minute [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md). |
+| **[Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README.md)** ⭐ | New 4-party (Contoso, Fabrikam, Wingtip Toys, Woodgrove Bank) **federated** analytics demo. Each partner decrypts its own data inside its own AMD SEV-SNP TEE and returns only aggregates — no raw PII ever crosses the trust boundary. Includes a 3-minute [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md). |
 | **Repo redirect** | [`https://aka.ms/accsamples`](https://aka.ms/accsamples) now points to this repo. The legacy [`confidential-container-samples`](https://github.com/Azure-Samples/confidential-container-samples) repo remains read-only / archived for reference. |
 
 ### Previously (May 2026)
@@ -104,7 +104,7 @@ Azure Container Instances with AMD SEV-SNP confidential computing:
 ### [Multi-Party Samples](/multi-party-samples/README.md) ⭐ FEATURED
 Secure multi-party computation demonstrations with Azure Confidential Containers and Confidential VMs.
 
-#### [Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README-MultiParty.md) ⭐ NEW (June 2026)
+#### [Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README.md) ⭐ NEW (June 2026)
 4 parties — **Contoso**, **Fabrikam**, **Wingtip Toys**, **Woodgrove Bank** — each running the same image with their own data, identity, and Key Vault. Woodgrove orchestrates federated analytics where every partner decrypts **only its own data inside its own TEE** and returns only counts, averages, and percentages. **Zero PII crosses the trust boundary.** Includes a 3-minute live [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md), live RSA-OAEP encryption panel, cross-company key-access denial, operator-lockout demo, and a combined demographics dashboard with country/city/generation/blood-type aggregates and a salary world map.
 
 #### [Advanced App](/multi-party-samples/advanced-app/README.md) - Full-Featured Demo
