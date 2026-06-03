@@ -21,11 +21,17 @@ urlFragment: confidential-computing-samples
 
 ![MIT license badge](https://img.shields.io/badge/license-MIT-green.svg)
 
-**Last Updated:** May 2026
+**Last Updated:** June 2026
+
+> **Heads up — this is the new home for Azure Confidential Computing samples.**
+> [`https://aka.ms/accsamples`](https://aka.ms/accsamples) now redirects here.
+> The previous repository, [`Azure-Samples/confidential-container-samples`](https://github.com/Azure-Samples/confidential-container-samples), is still available for reference but is **no longer actively maintained**. New samples and updates land here.
 
 Security is a key driver accelerating the adoption of cloud computing, but it's also a major concern when you're moving extremely sensitive IP and data scenarios to the cloud.
 
 Confidential computing is the protection of data-in-use through isolating computations to a hardware-based trusted execution environment (TEE). While data is traditionally encrypted at rest and in transit, confidential computing protects your data while it's being processed. A TEE provides a protected container by securing a portion of the hardware's processor and memory. You can run software on top of the protected environment to shield portions of your code and data from view or modification from outside of the TEE. [read more](https://azure.microsoft.com/en-us/solutions/confidential-compute/)
+
+> 📚 **Want to learn more?** See the official Azure Confidential Computing documentation at [`https://aka.ms/accdocs`](https://aka.ms/accdocs).
 
 ## ⚠️ Disclaimer
 
@@ -39,9 +45,16 @@ Confidential computing is the protection of data-in-use through isolating comput
   - Validating cryptographic implementations meet their security requirements
   - Proper key management and secret handling
   - Any data processed using these samples
-- **AI-Generated Content:** The multi-party demonstration samples were created with assistance from AI (GitHub Copilot with Claude) to showcase modern AI-assisted development capabilities. While functional, AI-generated code should always be reviewed by qualified security professionals before use in sensitive scenarios.
+- **AI-Assisted Content:** Several samples in this repository were created with significant assistance from AI coding tools, primarily [GitHub Copilot](https://github.com/features/copilot) inside [Visual Studio Code](https://code.visualstudio.com/), to showcase modern AI-assisted development. While functional, AI-assisted code should always be reviewed by qualified security professionals before use in sensitive scenarios.
 
-## 🆕 What's New (May 2026)
+## 🆕 What's New (June 2026)
+
+| Addition | Description |
+|---|---|
+| **[Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README-MultiParty.md)** ⭐ | New 4-party (Contoso, Fabrikam, Wingtip Toys, Woodgrove Bank) **federated** analytics demo. Each partner decrypts its own data inside its own AMD SEV-SNP TEE and returns only aggregates — no raw PII ever crosses the trust boundary. Includes a 3-minute [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md). |
+| **Repo redirect** | [`https://aka.ms/accsamples`](https://aka.ms/accsamples) now points to this repo. The legacy [`confidential-container-samples`](https://github.com/Azure-Samples/confidential-container-samples) repo remains read-only / archived for reference. |
+
+### Previously (May 2026)
 
 | Addition | Description |
 |---|---|
@@ -89,7 +102,10 @@ Azure Container Instances with AMD SEV-SNP confidential computing:
   - 9 documented threat scenarios with specific mitigations
 
 ### [Multi-Party Samples](/multi-party-samples/README.md) ⭐ FEATURED
-Secure multi-party computation demonstrations with Azure Confidential Containers. Two versions available:
+Secure multi-party computation demonstrations with Azure Confidential Containers and Confidential VMs.
+
+#### [Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README-MultiParty.md) ⭐ NEW (June 2026)
+4 parties — **Contoso**, **Fabrikam**, **Wingtip Toys**, **Woodgrove Bank** — each running the same image with their own data, identity, and Key Vault. Woodgrove orchestrates federated analytics where every partner decrypts **only its own data inside its own TEE** and returns only counts, averages, and percentages. **Zero PII crosses the trust boundary.** Includes a 3-minute live [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md), live RSA-OAEP encryption panel, cross-company key-access denial, operator-lockout demo, and a combined demographics dashboard with country/city/generation/blood-type aggregates and a salary world map.
 
 #### [Advanced App](/multi-party-samples/advanced-app/README.md) - Full-Featured Demo
 Comprehensive 3-container demonstration with partner analytics:
@@ -170,12 +186,12 @@ Enclave-aware container samples for AKS with Intel SGX:
 
 ## 🤖 AI-Assisted Development Note
 
-The **multi-party-samples** in this repository were entirely created using AI-assisted development with **GitHub Copilot** powered by **Claude**. This demonstrates the capabilities of modern AI models for:
+Many of the samples in this repository — in particular the **multi-party**, **sov-examples**, and **finance + OpenAI** demos — were authored with significant assistance from AI coding tools, primarily [GitHub Copilot](https://github.com/features/copilot) running inside [Visual Studio Code](https://code.visualstudio.com/). This demonstrates the capabilities of modern AI-assisted development for:
 
-- Complex infrastructure-as-code (ARM templates, PowerShell)
-- Cryptographic implementations (AES-256-GCM encryption/decryption)
+- Complex infrastructure-as-code (ARM templates, Bicep, PowerShell, Terraform)
+- Cryptographic implementations (RSA-OAEP, AES-256-GCM, SKR flows)
 - Web application development (Flask, HTML/CSS/JavaScript)
-- Security-focused architecture design
+- Security-focused architecture and threat modeling
 - Documentation and diagram generation
 
 While these samples are functional and demonstrate real Azure Confidential Computing capabilities, **they should be reviewed by qualified security professionals** before use in production scenarios.
