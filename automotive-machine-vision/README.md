@@ -25,8 +25,9 @@ An additional copy is kept at `AutomotiveVisionApp.png` for convenience.
 
 ## Current redaction behavior
 
-- Blurs only faces and license plates.
-- Uses a lead-vehicle-first strategy to reduce false-positive plate blur regions.
+- Blurs faces and license plates.
+- Draws rounded overlays around the primary lead vehicle (cars, trucks), pedestrians, and street signs to make detections legible without obscuring them.
+- Uses a lead-vehicle-first strategy: per frame, only the most central, sufficiently large car/truck is selected to anchor plate inference. Tunable via `LEAD_VEHICLE_MIN_AREA_RATIO` (default `0.003`) and `LEAD_VEHICLE_MAX_CENTER_OFFSET` (default `0.42`, fraction of frame width).
 - Keeps plate blur stable across short detector dropouts via temporal hold logic.
 - Uses red-glare-aware carryover to avoid losing blur under brake-light glare.
 
@@ -107,6 +108,31 @@ For deterministic deployments, use an explicit image tag:
 .\Deploy-AutomotiveMachineVision.ps1 -Deploy -ImageTag amv-20260602-<suffix>
 ```
 
+### Scaling: vCPUs, memory, and worker count
+
+The deploy script accepts container sizing flags. Defaults are conservative; raise them for higher throughput on larger videos.
+
+| Parameter | Default | Range | Notes |
+|---|---|---|---|
+| `-CpuCores` | `4` | 1–48 (subscription quota) | Confidential ACI vCPU count |
+| `-MemoryInGB` | `6` | up to subscription limit | RAM for the container group |
+| `-ProcessingWorkers` | `0` (auto) | 0–30 | Sets `PROCESSING_WORKERS` env var; `0` = `max(6, min(24, CpuCores))` |
+| `-DetectEveryNFrames` | `1` | 1–12 | Detector stride; higher = faster, less precise |
+
+The Flask processing pipeline clamps the runtime worker pool at 16 threads regardless of `PROCESSING_WORKERS`, so going above 16 gives diminishing returns. Verify the live worker count via:
+
+```powershell
+curl https://<fqdn>/api/debug/runtime?profile=balanced
+```
+
+Example 16 vCPU / 16 worker deployment:
+
+```powershell
+.\Deploy-AutomotiveMachineVision.ps1 -Deploy -DeployAFD -CpuCores 16 -MemoryInGB 32 -ProcessingWorkers 16
+```
+
+> **CCE policy gotcha**: env values in the ARM template must be plain strings, not nested ARM functions like `[string(parameters('x'))]`. `az confcom acipolicygen` does not evaluate nested functions and embeds the literal expression as the env_rules pattern; with `allow_environment_variable_dropping := true` this silently drops the variable at runtime.
+
 ### Deploy with Azure Front Door (Microsoft-managed HTTPS)
 
 To simplify HTTPS access and avoid certificate management, deploy the app behind **Azure Front Door** with Microsoft-managed TLS:
@@ -124,6 +150,8 @@ This will:
    - **Direct ACI (self-signed)**: `https://amv-XXXXX.eastus.azurecontainer.io`
 
 You can access the app via the Front Door endpoint with automatic HTTPS (no self-signed cert warnings).
+
+> **Why HTTP origin?** AFD forwards HTTPS traffic to the origin over plain HTTP on port 80 (`forwardingProtocol: HttpOnly`). The container's self-signed cert on the ephemeral `*.azurecontainer.io` FQDN can't be trusted by AFD's origin TLS validation, so the edge handles HTTPS termination and the back-channel is HTTP within the Azure backbone. Note: after a redeploy that changes the container FQDN, AFD edge DNS caches can take 5–15 minutes to converge; some PoPs may briefly return 502 with `DNSNameNotResolved`.
 
 **Optional: Bring your own certificate**
 
