@@ -2,10 +2,24 @@
 # Simon Gallagher, Microsoft https://github.com/vinfnet
 # NO warranties implied, use at your own risk
 # Review and customize code before running in your environment
+#
+# DEPRECATED / LEGACY - NO LONGER THE RECOMMENDED APPROACH
+# ----------------------------------------------------------------------------
+# This script is retained for historical reference only. New deployments should
+# use the cross-platform pre-built attestation tooling from:
+#     https://github.com/Azure/cvm-attestation-tools
+# Releases provide ready-to-run binaries for both Linux (`attest-lin.zip`) and
+# Windows (`attest-win.zip`), and support both AMD SEV-SNP (`config_snp.json`)
+# and Intel TDX (`config_tdx.json`) Confidential VMs. `BuildRandomCVM.ps1` in
+# this repo runs that flow automatically inside the freshly deployed CVM.
+# ----------------------------------------------------------------------------
+#
 # Script to run on a Confidential Virtual machine (https://aka.ms/accdocs) to check if it is running on a Confidential VM (CVM) and attested by Azure Attestation service
 # More detailed version https://github.com/Azure/confidential-computing-cvm-guest-attestation/tree/main/cvm-platform-checker-exe
 # it will download a sample app from GitHub to get the JWT token from the attestation service and decode it
 # it will install + uninstall dependencies like VC Redist and JWTDetails (https://github.com/darrenjrobinson/JWTDetails) PowerShell module
+
+Write-Warning "WindowsAttest.ps1 is deprecated. Prefer https://github.com/Azure/cvm-attestation-tools (attest-win.zip / attest-lin.zip) which supports both SEV-SNP and Intel TDX."
 
 #force install of NuGet provider, otherwise script prompts for install on a 'fresh' VM
 Install-PackageProvider -Name NuGet -force
