@@ -11,7 +11,7 @@ var routeName = 'amv-route'
 
 resource frontDoor 'Microsoft.Cdn/profiles@2024-02-01' = {
   name: profileName
-  location: location
+  location: 'global'
   sku: {
     name: 'Standard_AzureFrontDoor'
   }
@@ -30,7 +30,7 @@ resource originGroup 'Microsoft.Cdn/profiles/originGroups@2024-02-01' = {
     healthProbeSettings: {
       probePath: '/'
       probeRequestType: 'GET'
-      probeProtocol: 'Https'
+      probeProtocol: 'Http'
       probeIntervalInSeconds: 100
     }
     sessionAffinityState: 'Disabled'
@@ -54,6 +54,7 @@ resource origin 'Microsoft.Cdn/profiles/originGroups/origins@2024-02-01' = {
 resource endpoint 'Microsoft.Cdn/profiles/afdEndpoints@2024-02-01' = {
   parent: frontDoor
   name: endpointName
+  location: 'global'
   properties: {
     enabledState: 'Enabled'
   }
@@ -75,7 +76,7 @@ resource route 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-02-01' = {
     patternsToMatch: [
       '/*'
     ]
-    forwardingProtocol: 'HttpsOnly'
+    forwardingProtocol: 'HttpOnly'
     linkToDefaultDomain: 'Enabled'
     httpsRedirect: 'Enabled'
   }

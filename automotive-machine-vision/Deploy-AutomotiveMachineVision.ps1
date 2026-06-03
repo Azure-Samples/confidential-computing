@@ -169,9 +169,11 @@ if ($Deploy) {
 
     if ($DeployAFD) {
         Write-Host "Deploying Azure Front Door for HTTPS access..." -ForegroundColor Cyan
+        $afdDeploymentName = "deployment-afd-$(Get-Date -Format 'yyyyMMddHHmmss')"
         Invoke-Az "Deploy Azure Front Door" {
             az deployment group create `
                 --resource-group $config.resourceGroup `
+                --name $afdDeploymentName `
                 --template-file deployment-afd.bicep `
                 --parameters aciOriginFqdn=$fqdn `
                 | Out-Null
@@ -180,7 +182,7 @@ if ($Deploy) {
         $afdEndpoint = Invoke-AzValue "Get AFD endpoint" {
             az deployment group show `
                 --resource-group $config.resourceGroup `
-                --name deployment `
+                --name $afdDeploymentName `
                 --query "properties.outputs.frontDoorEndpoint.value" -o tsv
         }
 

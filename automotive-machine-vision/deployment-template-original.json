@@ -35,7 +35,10 @@
             "name": "automotive-machine-vision",
             "properties": {
               "image": "[parameters('appImage')]",
-              "ports": [{ "protocol": "TCP", "port": 443 }],
+              "ports": [
+                { "protocol": "TCP", "port": 80 },
+                { "protocol": "TCP", "port": 443 }
+              ],
               "resources": {
                 "requests": {
                   "memoryInGB": "[parameters('memoryInGB')]",
@@ -63,7 +66,10 @@
           }
         ],
         "ipAddress": {
-          "ports": [{ "protocol": "TCP", "port": 443 }],
+          "ports": [
+            { "protocol": "TCP", "port": 80 },
+            { "protocol": "TCP", "port": 443 }
+          ],
           "type": "Public",
           "dnsNameLabel": "[parameters('dnsNameLabel')]"
         },
