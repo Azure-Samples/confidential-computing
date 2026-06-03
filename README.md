@@ -82,7 +82,7 @@ Azure Container Instances with AMD SEV-SNP confidential computing:
   - Side-by-side comparison mode (Confidential vs Standard SKU)
   - Real-time encryption with SKR-released keys
   - Live diagnostics and TEE hardware detection
-- **[Automotive Machine Vision](/automotive-machine-vision/README.md)** 🆕 - Confidential ACI app with attestation-gated `.mp4` upload, HTTPS transport, CCE policy enforcement, and in-container video redaction/labeling workflow
+- **[Automotive Machine Vision](/automotive-machine-vision/README.md)** 🆕 - Confidential ACI app with attestation-gated `.mp4` upload, HTTPS transport, CCE policy enforcement, and in-container redaction plus rounded overlays for cars, trucks, pedestrians, and street signs
 - **[App + PostgreSQL Demo](/aci-samples/app-and-postgreSQL-demo/README.md)** - Basic confidential container app with hardware-enforced AMD SEV-SNP security and container policy, connected to a DCa/ECa AMD PostgreSQL Flexible Server with confidential compute protections
   - Single-container Flask dashboard with 5,000 financial transactions
   - Application Gateway (L7) → Private VNet → Confidential ACI → PostgreSQL (DCa/ECa AMD)

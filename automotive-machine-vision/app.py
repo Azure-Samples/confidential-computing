@@ -58,6 +58,8 @@ PLATE_REDACTION_STRATEGY = os.environ.get("PLATE_REDACTION_STRATEGY", "vehicle-f
 FORCE_VEHICLE_REFRESH_EVERY_FRAME = os.environ.get("FORCE_VEHICLE_REFRESH_EVERY_FRAME", "true").lower() == "true"
 VEHICLE_TRACK_HOLD_FRAMES = max(1, min(60, int(os.environ.get("VEHICLE_TRACK_HOLD_FRAMES", "24"))))
 VEHICLE_TRACK_MATCH_IOU = max(0.05, min(0.9, float(os.environ.get("VEHICLE_TRACK_MATCH_IOU", "0.18"))))
+LEAD_VEHICLE_MIN_AREA_RATIO = max(0.001, min(0.08, float(os.environ.get("LEAD_VEHICLE_MIN_AREA_RATIO", "0.003"))))
+LEAD_VEHICLE_MAX_CENTER_OFFSET = max(0.10, min(0.90, float(os.environ.get("LEAD_VEHICLE_MAX_CENTER_OFFSET", "0.42"))))
 PLATE_TRACK_HOLD_FRAMES = max(0, min(45, int(os.environ.get("PLATE_TRACK_HOLD_FRAMES", "18"))))
 PLATE_TRACK_MATCH_IOU = max(0.05, min(0.9, float(os.environ.get("PLATE_TRACK_MATCH_IOU", "0.20"))))
 PLATE_RED_GLARE_PIXEL_RATIO = max(0.0, min(1.0, float(os.environ.get("PLATE_RED_GLARE_PIXEL_RATIO", "0.08"))))
@@ -515,6 +517,44 @@ def _filter_plate_detections_near_vehicles(plates: list[Detection], vehicles: li
     return kept
 
 
+def _select_primary_lead_vehicle(vehicles: list[Detection], frame_shape: tuple[int, ...]) -> Detection | None:
+    if not vehicles:
+        return None
+
+    frame_h, frame_w = frame_shape[:2]
+    frame_area = max(1, frame_h * frame_w)
+    center_x = frame_w / 2.0
+    max_center_offset_px = frame_w * LEAD_VEHICLE_MAX_CENTER_OFFSET
+    best: Detection | None = None
+    best_score = -1e9
+
+    for vehicle in vehicles:
+        if vehicle.label not in {"car", "truck"}:
+            continue
+
+        area_ratio = (vehicle.w * vehicle.h) / frame_area
+        if area_ratio < LEAD_VEHICLE_MIN_AREA_RATIO:
+            continue
+
+        vehicle_cx = vehicle.x + (vehicle.w / 2.0)
+        vehicle_bottom = vehicle.y + vehicle.h
+        center_offset = abs(vehicle_cx - center_x)
+        if center_offset > max_center_offset_px:
+            continue
+
+        if vehicle_bottom < frame_h * 0.45:
+            continue
+
+        center_score = 1.0 - min(1.0, center_offset / max_center_offset_px)
+        bottom_score = min(1.0, max(0.0, (vehicle_bottom - (frame_h * 0.45)) / (frame_h * 0.55)))
+        score = (area_ratio * 10.0) + (center_score * 2.0) + (bottom_score * 1.2) + float(vehicle.confidence)
+        if score > best_score:
+            best_score = score
+            best = vehicle
+
+    return best
+
+
 def _blur_region(frame: np.ndarray, detection: Detection, pad_scale: float = 0.18, sigma: int = 30) -> None:
     frame_h, frame_w = frame.shape[:2]
     pad_x = max(4, int(detection.w * pad_scale))
@@ -911,7 +951,9 @@ def _process_frame(frame: np.ndarray, run_vehicle_detection: bool) -> np.ndarray
         should_refresh_vehicle_tracks = FORCE_VEHICLE_REFRESH_EVERY_FRAME or run_vehicle_detection
         if should_refresh_vehicle_tracks:
             detected_vehicles = _detect_vehicle_candidates(frame)
-            dynamic_detections = _stabilize_vehicle_detections(detected_vehicles, frame.shape)
+            stabilized_vehicles = _stabilize_vehicle_detections(detected_vehicles, frame.shape)
+            primary_vehicle = _select_primary_lead_vehicle(stabilized_vehicles, frame.shape)
+            dynamic_detections = [primary_vehicle] if primary_vehicle is not None else []
             worker_state.dynamic_detections = dynamic_detections
     elif not ENABLE_VEHICLE_PLATE_INFERENCE:
         dynamic_detections = []
