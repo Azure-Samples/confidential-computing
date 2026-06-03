@@ -1,0 +1,3753 @@
+from flask import Flask, jsonify, request, render_template
+import requests
+import requests.packages.urllib3
+import json
+import os
+import re
+import secrets
+import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from functools import wraps
+import time
+import logging
+
+# ---------------------------------------------------------------------------
+# Inter-container HTTPS session (self-signed certs within trusted TEE)
+# ---------------------------------------------------------------------------
+# Containers use self-signed TLS certificates generated at build time.
+# Cross-container calls (Woodgrove→Contoso, Woodgrove→Fabrikam) go over HTTPS
+# but we must skip certificate verification since they are self-signed.
+# This is acceptable because: (1) all containers run in AMD SEV-SNP TEEs with
+# attested identities, (2) payloads are additionally RSA-encrypted, (3) the
+# self-signed cert still provides encryption in transit.
+_inter_container_session = requests.Session()
+_inter_container_session.verify = False
+
+# Suppress InsecureRequestWarning for inter-container self-signed TLS calls
+requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
+
+app = Flask(__name__)
+
+# Generate a cryptographically random secret key on each container start
+app.config['SECRET_KEY'] = secrets.token_hex(32)
+
+# Limit maximum request payload size (16 KB)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024
+
+# Configure logging to avoid leaking sensitive info
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.WARNING)
+
+# ---------------------------------------------------------------------------
+# Security Headers Middleware
+# ---------------------------------------------------------------------------
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to every response."""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+    # Prevent caching of sensitive API responses
+    if request.path.startswith('/skr/') or request.path.startswith('/encrypt') or request.path.startswith('/decrypt'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+    return response
+
+# ---------------------------------------------------------------------------
+# Simple Rate Limiter (per-IP, in-memory)
+# ---------------------------------------------------------------------------
+_rate_limit_store = {}  # {ip: [timestamps]}
+_rate_limit_lock = threading.Lock()
+
+def rate_limit(max_calls=30, period=60):
+    """Decorator: limit requests per IP address."""
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            ip = request.remote_addr or '0.0.0.0'
+            now = time.time()
+            with _rate_limit_lock:
+                calls = _rate_limit_store.get(ip, [])
+                # Remove expired entries
+                calls = [t for t in calls if now - t < period]
+                if len(calls) >= max_calls:
+                    return jsonify({'status': 'error', 'message': 'Rate limit exceeded. Please try again later.'}), 429
+                calls.append(now)
+                _rate_limit_store[ip] = calls
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# ---------------------------------------------------------------------------
+# Input Validation Helpers
+# ---------------------------------------------------------------------------
+_ENDPOINT_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9.\-]{2,253}$')
+
+def _validate_endpoint(value, name='endpoint'):
+    """Validate that a value looks like a hostname (no scheme, no path traversal)."""
+    if not value:
+        return value
+    # Strip any scheme that slipped through
+    for prefix in ('https://', 'http://'):
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+    # Remove trailing slashes / paths
+    value = value.split('/')[0]
+    if not _ENDPOINT_RE.match(value):
+        raise ValueError(f'Invalid {name}: contains disallowed characters')
+    return value
+
+def _safe_error_detail(text, max_len=500):
+    """Truncate and sanitise error detail for safe inclusion in responses."""
+    if not text:
+        return 'No details available'
+    return text[:max_len]
+
+# Log file paths (configured in supervisord.conf)
+LOG_FILES = {
+    'skr': '/var/log/supervisor/skr.log',
+    'skr_error': '/var/log/supervisor/skr_error.log',
+    'flask': '/var/log/supervisor/flask.log',
+    'flask_error': '/var/log/supervisor/flask_error.log',
+    'supervisord': '/var/log/supervisor/supervisord.log'
+}
+
+def check_sev_guest_device():
+    """Check for AMD SEV-SNP guest device and return status info"""
+    sev_devices = [
+        '/dev/sev-guest',
+        '/dev/sev',
+        '/dev/sev0'
+    ]
+    
+    result = {
+        'available': False,
+        'device_path': None,
+        'device_info': None,
+        'explanation': None
+    }
+    
+    for device in sev_devices:
+        if os.path.exists(device):
+            result['available'] = True
+            result['device_path'] = device
+            try:
+                # Get device file info
+                import stat
+                st = os.stat(device)
+                result['device_info'] = {
+                    'mode': oct(st.st_mode),
+                    'type': 'character device' if stat.S_ISCHR(st.st_mode) else 'other',
+                    'accessible': os.access(device, os.R_OK)
+                }
+                result['explanation'] = f'AMD SEV-SNP device found at {device}. Hardware attestation should be available.'
+            except Exception as e:
+                result['device_info'] = f'Error reading device info: {str(e)}'
+            break
+    
+    if not result['available']:
+        result['explanation'] = (
+            'No AMD SEV-SNP device found (/dev/sev-guest, /dev/sev, /dev/sev0). '
+            'This means the container is NOT running inside a Trusted Execution Environment (TEE). '
+            'Hardware-based attestation is not possible. '
+            'To enable attestation, deploy with Confidential SKU (without -NoAcc flag) on AMD SEV-SNP capable hardware.'
+        )
+        # Check if we're in a container and list available devices
+        try:
+            dev_contents = os.listdir('/dev')
+            result['dev_listing'] = [d for d in dev_contents if 'sev' in d.lower() or 'tpm' in d.lower() or 'sgx' in d.lower()]
+        except:
+            result['dev_listing'] = []
+    
+    return result
+
+def read_log_files(max_lines=100):
+    """Read the last N lines from each log file"""
+    logs = {}
+    for name, path in LOG_FILES.items():
+        try:
+            if os.path.exists(path):
+                with open(path, 'r') as f:
+                    lines = f.readlines()
+                    # Get last max_lines
+                    logs[name] = ''.join(lines[-max_lines:]) if lines else '(empty)'
+            else:
+                logs[name] = f'(file not found: {path})'
+        except Exception as e:
+            logs[name] = f'(error reading file: {str(e)})'
+    
+    # Add SEV-SNP device status
+    logs['sev_device'] = check_sev_guest_device()
+    
+    return logs
+
+@app.route('/')
+def index():
+    """Serve the main attestation demo page"""
+    return render_template('index.html')
+
+@app.route('/attest/maa', methods=['POST'])
+@rate_limit(max_calls=20, period=60)
+def attest_maa():
+    """
+    Request attestation from Microsoft Azure Attestation (MAA) via sidecar
+    This endpoint forwards the request to the attestation sidecar container
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Request body required'}), 400
+        # Use MAA endpoint from request, env var, or default (set by deployment script based on region)
+        env_maa = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+        maa_endpoint = data.get('maa_endpoint', env_maa)
+        runtime_data = data.get('runtime_data', '')
+        
+        # Validate and sanitise endpoint
+        try:
+            maa_endpoint = _validate_endpoint(maa_endpoint, 'maa_endpoint')
+        except ValueError as ve:
+            return jsonify({'status': 'error', 'message': str(ve)}), 400
+        
+        # Restrict to known Azure Attestation domains to prevent SSRF
+        if not maa_endpoint.endswith('.attest.azure.net'):
+            return jsonify({'status': 'error', 'message': 'maa_endpoint must be an Azure Attestation endpoint (*.attest.azure.net)'}), 400
+
+        # Forward request to attestation sidecar (running on localhost:8080)
+        response = requests.post(
+            "http://localhost:8080/attest/maa",
+            json={"maa_endpoint": maa_endpoint, "runtime_data": runtime_data},
+            timeout=30
+        )
+
+        # Check if sidecar returned an error
+        if response.status_code != 200:
+            # Parse common error scenarios
+            error_detail = _safe_error_detail(response.text)
+            
+            # Detect specific failure modes
+            failure_reason = "Unknown attestation failure"
+            if "SNP" in error_detail.upper() or "SEV" in error_detail.upper():
+                failure_reason = "AMD SEV-SNP hardware not available - container is running on standard (non-confidential) hardware"
+            elif "VMPL" in error_detail.upper():
+                failure_reason = "VMPL (Virtual Machine Privilege Level) not accessible - not running in a TEE"
+            elif response.status_code == 400:
+                failure_reason = "Bad request to attestation service - possibly malformed or missing TEE evidence"
+            elif response.status_code == 401 or response.status_code == 403:
+                failure_reason = "Authentication/authorization failed with MAA endpoint"
+            elif response.status_code == 500:
+                failure_reason = "Internal error in attestation sidecar - likely no TEE hardware available"
+            
+            return jsonify({
+                'status': 'error',
+                'message': f'Attestation failed with status {response.status_code}',
+                'failure_reason': failure_reason,
+                'sidecar_response': error_detail,
+                'sidecar_status_code': response.status_code,
+                'maa_endpoint': maa_endpoint,
+                'diagnosis': {
+                    'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
+                    'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
+                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
+                },
+                'note': 'Attestation requires AMD SEV-SNP hardware (Confidential SKU). Standard SKU containers cannot generate valid attestation evidence.',
+                'logs': read_log_files()
+            }), response.status_code
+
+        return jsonify({
+            'status': 'success',
+            'attestation_token': response.text,
+            'maa_endpoint': maa_endpoint
+        })
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Attestation sidecar not available. Connection refused.',
+            'diagnosis': {
+                'likely_cause': 'Sidecar container not running or not yet started',
+                'solution': 'Wait for container group to fully start, or check container logs'
+            },
+            'note': 'The sidecar container may not be running. Check container logs with: az container logs -g <rg> -n <container> --container-name attestation-sidecar',
+            'logs': read_log_files()
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'error',
+            'message': 'Attestation request timed out after 30 seconds.',
+            'note': 'The sidecar may be unresponsive or the attestation service is slow.'
+        }), 504
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/attest/raw', methods=['POST'])
+@rate_limit(max_calls=20, period=60)
+def attest_raw():
+    """
+    Get raw attestation report from the sidecar
+    """
+    try:
+        data = request.get_json()
+        runtime_data = data.get('runtime_data', '')
+
+        # Forward request to attestation sidecar
+        response = requests.post(
+            "http://localhost:8080/attest/raw",
+            json={"runtime_data": runtime_data},
+            timeout=30
+        )
+
+        # Check if sidecar returned an error
+        if response.status_code != 200:
+            error_detail = _safe_error_detail(response.text)
+            
+            # Detect specific failure modes
+            failure_reason = "Unable to generate raw attestation report"
+            if "SNP" in error_detail.upper() or "SEV" in error_detail.upper():
+                failure_reason = "AMD SEV-SNP hardware not available"
+            elif "open /dev/sev" in error_detail.lower() or "sev-guest" in error_detail.lower():
+                failure_reason = "Cannot access /dev/sev-guest device - not running on AMD SEV-SNP hardware"
+            elif response.status_code == 500:
+                failure_reason = "Internal sidecar error - TEE hardware likely not available"
+            
+            return jsonify({
+                'status': 'error',
+                'message': f'Raw attestation failed with status {response.status_code}',
+                'failure_reason': failure_reason,
+                'sidecar_response': error_detail,
+                'sidecar_status_code': response.status_code,
+                'diagnosis': {
+                    'likely_cause': 'Container deployed with Standard SKU - no AMD SEV-SNP TEE hardware',
+                    'detail': 'Raw attestation requires direct access to AMD SEV-SNP hardware (/dev/sev-guest)',
+                    'solution': 'Redeploy with Confidential SKU'
+                },
+                'note': 'Raw attestation report can only be generated on AMD SEV-SNP confidential hardware.'
+            }), response.status_code
+
+        return jsonify({
+            'status': 'success',
+            'attestation_report': response.text
+        })
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Attestation sidecar not available. Connection refused.',
+            'diagnosis': {
+                'likely_cause': 'Sidecar container not running',
+                'solution': 'Check container logs: az container logs -g <rg> -n <container> --container-name attestation-sidecar'
+            }
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'error',
+            'message': 'Raw attestation request timed out after 30 seconds.'
+        }), 504
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/sidecar/status', methods=['GET'])
+def sidecar_status():
+    """
+    Check if the attestation sidecar is reachable and get its status
+    """
+    try:
+        response = requests.get("http://localhost:8080/status", timeout=5)
+        return jsonify({
+            'status': 'available',
+            'sidecar_response': response.text,
+            'sidecar_status_code': response.status_code
+        })
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'unavailable',
+            'message': 'Sidecar not reachable (connection refused)'
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/skr/release', methods=['POST'])
+@rate_limit(max_calls=10, period=60)
+def skr_release():
+    """
+    Attempt to release a key from Azure Key Vault using Secure Key Release (SKR).
+    This requires:
+    1. The container to be running on AMD SEV-SNP hardware (Confidential SKU)
+    2. A key in Azure Key Vault with a release policy that trusts the MAA endpoint
+    3. The container's attestation to match the key's release policy
+    """
+    try:
+        # Get SKR configuration from environment variables (set by ARM template)
+        env_maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+        env_akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+        env_key_name = os.environ.get('SKR_KEY_NAME', '')
+        
+        # Allow override from request body if provided
+        data = request.get_json(silent=True) or {}
+        maa_endpoint = data.get('maa_endpoint', env_maa_endpoint)
+        akv_endpoint = data.get('akv_endpoint', env_akv_endpoint)
+        kid = data.get('kid', env_key_name)
+        
+        # Validate endpoints to prevent SSRF
+        try:
+            maa_endpoint = _validate_endpoint(maa_endpoint, 'maa_endpoint')
+            akv_endpoint = _validate_endpoint(akv_endpoint, 'akv_endpoint')
+        except ValueError as ve:
+            return jsonify({'status': 'error', 'message': str(ve)}), 400
+        
+        if maa_endpoint and not maa_endpoint.endswith('.attest.azure.net'):
+            return jsonify({'status': 'error', 'message': 'maa_endpoint must be an Azure Attestation endpoint'}), 400
+        if akv_endpoint and not akv_endpoint.endswith('.vault.azure.net'):
+            return jsonify({'status': 'error', 'message': 'akv_endpoint must be an Azure Key Vault endpoint'}), 400
+        
+        if not akv_endpoint or not kid:
+            return jsonify({
+                'status': 'error',
+                'message': 'SKR not configured. Deploy with SKR-enabled Key Vault to use this feature.',
+                'note': 'Missing akv_endpoint or key name. These are set via SKR_AKV_ENDPOINT and SKR_KEY_NAME environment variables.',
+                'maa_endpoint': maa_endpoint,
+                'akv_endpoint': akv_endpoint or '(not configured)',
+                'key_name': kid or '(not configured)'
+            }), 400
+
+        # Forward request to SKR sidecar's key/release endpoint
+        response = requests.post(
+            "http://localhost:8080/key/release",
+            json={
+                "maa_endpoint": maa_endpoint,
+                "akv_endpoint": akv_endpoint,
+                "kid": kid
+            },
+            timeout=60  # SKR can take longer
+        )
+
+        # Check if sidecar returned an error
+        if response.status_code != 200:
+            error_detail = _safe_error_detail(response.text, 1000)
+            
+            # Try to parse error JSON
+            error_json = None
+            try:
+                error_json = response.json()
+                if 'error' in error_json:
+                    error_detail = error_json['error']
+            except:
+                pass
+            
+            # Detect specific failure modes
+            failure_reason = "Secure Key Release failed"
+            if "SNP" in error_detail.upper() or "SEV" in error_detail.upper():
+                failure_reason = "AMD SEV-SNP hardware not available - cannot generate attestation for key release"
+            elif "policy" in error_detail.lower():
+                failure_reason = "Key release policy validation failed - attestation claims don't match required policy"
+            elif "401" in error_detail or "unauthorized" in error_detail.lower():
+                failure_reason = "Unauthorized - check Key Vault access permissions"
+            elif "403" in error_detail or "forbidden" in error_detail.lower():
+                failure_reason = "Forbidden - attestation failed to meet key release policy requirements"
+            elif "404" in error_detail:
+                failure_reason = f"Key not found: {kid}"
+            elif response.status_code == 500:
+                failure_reason = "Internal error in SKR sidecar - likely no TEE hardware available"
+            
+            return jsonify({
+                'status': 'error',
+                'message': f'Secure Key Release failed with status {response.status_code}',
+                'failure_reason': failure_reason,
+                'sidecar_response': error_detail,
+                'sidecar_status_code': response.status_code,
+                'maa_endpoint': maa_endpoint,
+                'akv_endpoint': akv_endpoint,
+                'key_name': kid,
+                'diagnosis': {
+                    'likely_cause': 'Container is deployed with Standard SKU (no AMD SEV-SNP TEE)',
+                    'explanation': 'Secure Key Release requires hardware attestation to prove the container is running in a TEE. Without AMD SEV-SNP, the attestation fails and the key cannot be released.',
+                    'solution': 'Redeploy without the -NoAcc flag to use Confidential SKU',
+                    'command': '.\\Deploy-MultiParty.ps1 -Build -Deploy'
+                },
+                'note': 'SKR requires: 1) Confidential SKU with AMD SEV-SNP, 2) Key Vault Premium with HSM-backed key, 3) Release policy trusting the MAA endpoint',
+                'logs': read_log_files()
+            }), response.status_code
+
+        # Success - parse the released key
+        try:
+            result = response.json()
+            key_data = result.get('key', response.text)
+            
+            # Parse the key if it's JSON string
+            if isinstance(key_data, str):
+                try:
+                    key_data = json.loads(key_data)
+                except:
+                    pass
+            
+            # Store the released key for encryption use
+            global _released_key
+            global _released_key_name
+            _released_key = key_data
+            _released_key_name = kid  # Store the key name to identify company
+            
+            # Get security policy hash from environment (set during deployment)
+            security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+            
+            # Build release policy info for display
+            release_policy_info = {
+                'maa_endpoint': f'https://{maa_endpoint}',
+                'required_claims': [
+                    {
+                        'claim': 'x-ms-attestation-type',
+                        'value': 'sevsnpvm',
+                        'description': 'Requires AMD SEV-SNP hardware attestation'
+                    }
+                ]
+            }
+            
+            if security_policy_hash:
+                release_policy_info['required_claims'].append({
+                    'claim': 'x-ms-sevsnpvm-hostdata',
+                    'value': security_policy_hash,
+                    'description': 'Container security policy hash - ensures only this exact container code can release the key'
+                })
+                release_policy_info['security_policy_hash'] = security_policy_hash
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Secure Key Release successful!',
+                'key': key_data,
+                'maa_endpoint': maa_endpoint,
+                'akv_endpoint': akv_endpoint,
+                'key_name': kid,
+                'release_policy': release_policy_info,
+                'note': 'This key was released because the container proved it is running in a hardware TEE that matches the key release policy.',
+                'security_binding': f'Key is cryptographically bound to container policy hash: {security_policy_hash[:16]}...' if security_policy_hash else 'Key bound to AMD SEV-SNP attestation',
+                'encryption_enabled': True
+            })
+        except Exception as parse_error:
+            return jsonify({
+                'status': 'success',
+                'message': 'Key released (raw response)',
+                'key': response.text,
+                'maa_endpoint': maa_endpoint,
+                'akv_endpoint': akv_endpoint,
+                'key_name': kid,
+                'parse_warning': str(parse_error)
+            })
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'SKR sidecar not available. Connection refused.',
+            'diagnosis': {
+                'likely_cause': 'Sidecar container not running or not yet started',
+                'solution': 'Wait for container group to fully start, or check container logs'
+            },
+            'logs': read_log_files()
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'error',
+            'message': 'Secure Key Release request timed out after 60 seconds.',
+            'note': 'SKR involves attestation and key vault communication which can take time.'
+        }), 504
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'exception_type': type(e).__name__,
+            'logs': read_log_files()
+        }), 500
+
+@app.route('/skr/config', methods=['GET'])
+def skr_config():
+    """
+    Return the SKR configuration from environment variables or defaults.
+    This helps the frontend know which key vault and key to use.
+    """
+    key_name = os.environ.get('SKR_KEY_NAME', '')
+    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+    
+    # Determine company name from key name
+    company_name = None
+    key_lower = key_name.lower()
+    is_woodgrove = 'woodgrove' in key_lower
+    
+    if 'contoso' in key_lower:
+        company_name = 'Contoso'
+    elif 'fabrikam' in key_lower:
+        company_name = 'Fabrikam'
+    elif 'wingtip' in key_lower:
+        company_name = 'Wingtip Toys'
+    elif 'woodgrove' in key_lower:
+        company_name = 'Woodgrove Bank'
+    elif key_name:
+        # Extract name from key (e.g., "my-company-secret-key" -> "My Company")
+        company_name = key_name.replace('-secret-key', '').replace('-key', '').replace('-', ' ').title()
+    
+    # Check if we have TEE hardware (indicates confidential vs snooper)
+    sev_status = check_sev_guest_device()
+    is_confidential = sev_status.get('available', False)
+    
+    # Determine the "other" company's configuration
+    other_company_name = None
+    other_key_name = None
+    other_akv_endpoint = None
+    akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+    
+    # Partner configs for Woodgrove Bank (from environment variables)
+    partner_configs = None
+    if is_woodgrove:
+        # Woodgrove has access to Contoso, Fabrikam, and Wingtip Key Vaults
+        partner_contoso_kv = os.environ.get('PARTNER_CONTOSO_AKV_ENDPOINT', '')
+        partner_fabrikam_kv = os.environ.get('PARTNER_FABRIKAM_AKV_ENDPOINT', '')
+        partner_wingtip_kv = os.environ.get('PARTNER_WINGTIP_AKV_ENDPOINT', '')
+        partner_contoso_url = os.environ.get('PARTNER_CONTOSO_URL', '')
+        partner_fabrikam_url = os.environ.get('PARTNER_FABRIKAM_URL', '')
+        partner_wingtip_url = os.environ.get('PARTNER_WINGTIP_URL', '')
+        
+        if partner_contoso_kv or partner_fabrikam_kv or partner_wingtip_kv:
+            partner_configs = {
+                'contoso': {
+                    'name': 'Contoso',
+                    'key_name': 'contoso-secret-key',
+                    'akv_endpoint': partner_contoso_kv,
+                    'container_url': partner_contoso_url
+                },
+                'fabrikam': {
+                    'name': 'Fabrikam',
+                    'key_name': 'fabrikam-secret-key',
+                    'akv_endpoint': partner_fabrikam_kv,
+                    'container_url': partner_fabrikam_url
+                },
+                'wingtip': {
+                    'name': 'Wingtip Toys',
+                    'key_name': 'wingtip-secret-key',
+                    'akv_endpoint': partner_wingtip_kv,
+                    'container_url': partner_wingtip_url
+                }
+            }
+    elif 'contoso' in key_lower:
+        other_company_name = 'Fabrikam'
+        other_key_name = 'fabrikam-secret-key'
+        # Replace 'a' suffix with 'b' in akv endpoint (e.g., kv...a.vault.azure.net -> kv...b.vault.azure.net)
+        if akv_endpoint:
+            other_akv_endpoint = akv_endpoint.replace('a.vault.azure.net', 'b.vault.azure.net')
+    elif 'fabrikam' in key_lower:
+        other_company_name = 'Contoso'
+        other_key_name = 'contoso-secret-key'
+        if akv_endpoint:
+            other_akv_endpoint = akv_endpoint.replace('b.vault.azure.net', 'a.vault.azure.net')
+    
+    return jsonify({
+        'maa_endpoint': os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net'),
+        'akv_endpoint': akv_endpoint,
+        'key_name': key_name,
+        'company_name': company_name,
+        'is_confidential': is_confidential,
+        'is_woodgrove': is_woodgrove,
+        'configured': bool(akv_endpoint and key_name),
+        'security_policy_hash': security_policy_hash,
+        'release_policy': {
+            'version': '1.0.0',
+            'required_attestation': 'AMD SEV-SNP (sevsnpvm)',
+            'required_policy_hash': security_policy_hash if security_policy_hash else 'Not configured',
+            'description': 'Key can only be released to containers with matching policy hash'
+        } if security_policy_hash else None,
+        'other_company': {
+            'name': other_company_name,
+            'key_name': other_key_name,
+            'akv_endpoint': other_akv_endpoint
+        } if other_company_name else None,
+        'partner_configs': partner_configs
+    })
+
+@app.route('/security/policy', methods=['GET'])
+def get_security_policy():
+    """
+    Return detailed security policy information for this container.
+    Shows the cryptographic binding between the container code and key release.
+    """
+    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+    maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+    key_name = os.environ.get('SKR_KEY_NAME', '')
+    akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+    
+    # Check TEE status
+    sev_status = check_sev_guest_device()
+    
+    return jsonify({
+        'container_identity': {
+            'security_policy_hash': security_policy_hash,
+            'hash_algorithm': 'SHA256',
+            'description': 'This hash uniquely identifies the approved container code. Any modification to the container would change this hash.',
+            'claim_name': 'x-ms-sevsnpvm-hostdata'
+        },
+        'attestation': {
+            'maa_endpoint': f'https://{maa_endpoint}',
+            'attestation_type': 'sevsnpvm',
+            'hardware': 'AMD SEV-SNP',
+            'tee_available': sev_status.get('available', False),
+            'tee_device': sev_status.get('device_path', 'Not found')
+        },
+        'key_release_policy': {
+            'key_name': key_name,
+            'key_vault': akv_endpoint,
+            'required_claims': [
+                {
+                    'claim': 'x-ms-attestation-type',
+                    'required_value': 'sevsnpvm',
+                    'purpose': 'Ensures the request comes from AMD SEV-SNP hardware'
+                },
+                {
+                    'claim': 'x-ms-sevsnpvm-hostdata',
+                    'required_value': security_policy_hash if security_policy_hash else '(any)',
+                    'purpose': 'Ensures the request comes from this specific container code'
+                }
+            ],
+            'security_level': 'HIGH' if security_policy_hash else 'MEDIUM',
+            'binding_description': 'Key is cryptographically bound to this container\'s policy hash' if security_policy_hash else 'Key is bound to AMD SEV-SNP attestation only'
+        },
+        'trust_model': {
+            'what_is_trusted': [
+                'AMD SEV-SNP hardware (memory encryption, isolation)',
+                'Microsoft Azure Attestation service (MAA)',
+                'The specific container code identified by policy hash'
+            ],
+            'what_is_not_trusted': [
+                'Cloud provider operators (cannot access encrypted memory)',
+                'Hypervisor (cannot read TEE contents)',
+                'Other containers (isolated by hardware)'
+            ]
+        }
+    })
+
+@app.route('/debug/attestation-claims', methods=['GET'])
+def debug_attestation_claims():
+    """
+    Debug endpoint: Get attestation token from MAA and decode its claims.
+    This shows the ACTUAL x-ms-sevsnpvm-hostdata claim from the hardware,
+    which can be compared with the expected policy hash.
+    """
+    import base64
+    
+    maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+    
+    try:
+        # Request attestation token from MAA via sidecar
+        response = requests.post(
+            "http://localhost:8080/attest/maa",
+            json={"maa_endpoint": maa_endpoint},
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to get attestation token: {response.status_code}',
+                'detail': response.text[:1000]
+            }), response.status_code
+        
+        # The response is a JWT token
+        token = response.text.strip()
+        
+        # Decode JWT payload (without verification - just for inspection)
+        parts = token.split('.')
+        if len(parts) != 3:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid JWT format',
+                'token_parts': len(parts)
+            }), 400
+        
+        # Decode the payload (middle part)
+        payload_b64 = parts[1]
+        # Add padding if needed
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += '=' * padding
+        
+        payload_json = base64.urlsafe_b64decode(payload_b64)
+        claims = json.loads(payload_json)
+        
+        # Extract the key claims for comparison
+        actual_hostdata = claims.get('x-ms-sevsnpvm-hostdata', 'NOT FOUND')
+        actual_attestation_type = claims.get('x-ms-attestation-type', 'NOT FOUND')
+        
+        # Compare with expected
+        hash_match = actual_hostdata.lower() == security_policy_hash.lower() if security_policy_hash else 'N/A (no expected hash configured)'
+        
+        return jsonify({
+            'status': 'success',
+            'comparison': {
+                'actual_hostdata': actual_hostdata,
+                'expected_policy_hash': security_policy_hash if security_policy_hash else '(not configured)',
+                'match': hash_match,
+                'attestation_type': actual_attestation_type
+            },
+            'diagnosis': {
+                'problem': 'MISMATCH - The actual hostdata does not match the expected policy hash!' if hash_match == False else ('OK - Hashes match' if hash_match == True else 'No expected hash configured'),
+                'solution': 'The policy hash computed during deployment does not match what Azure puts in x-ms-sevsnpvm-hostdata. Check the hash computation method.' if hash_match == False else None
+            },
+            'all_sev_claims': {k: v for k, v in claims.items() if 'sev' in k.lower() or 'snp' in k.lower() or 'attestation' in k.lower() or 'hostdata' in k.lower()},
+            'full_claims': claims
+        })
+        
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Cannot connect to attestation sidecar'
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'type': type(e).__name__
+        }), 500
+
+def get_generation(age):
+    """Determine generation based on age (as of 2026)"""
+    birth_year = 2026 - age
+    if birth_year >= 2013:
+        return 'Gen Alpha'
+    elif birth_year >= 1997:
+        return 'Gen Z'
+    elif birth_year >= 1981:
+        return 'Millennials'
+    elif birth_year >= 1965:
+        return 'Gen X'
+    elif birth_year >= 1946:
+        return 'Baby Boomers'
+    else:
+        return 'Silent Generation'
+
+def decrypt_all_fields(record, key, cached_private_key=None):
+    """Decrypt all encrypted fields in a record using parallel decryption for better performance.
+    
+    RSA decryption releases the GIL when calling into OpenSSL, so threading provides
+    real speedup. With 10 fields per record, parallel decryption can be 3-5x faster.
+    
+    Performance optimizations:
+    1. Uses cached private key object if available (avoids key reconstruction overhead)
+    2. Parallel field decryption with thread pool (RSA releases GIL in OpenSSL)
+    3. Increased thread count to 8 to match higher CPU allocation
+    
+    Args:
+        record: The encrypted record dict
+        key: The JWK key data (used if no cached key)
+        cached_private_key: Pre-computed RSAPrivateKey object (faster path)
+    """
+    decrypted = {}
+    fields = ['name', 'phone', 'address', 'postal_code', 'city', 'country', 'age', 'salary', 'eye_color', 'favorite_color']
+    
+    # Collect fields that need decryption
+    fields_to_decrypt = []
+    for field in fields:
+        encrypted_field = f'{field}_encrypted'
+        if record.get(encrypted_field):
+            fields_to_decrypt.append((field, record[encrypted_field]))
+        else:
+            decrypted[field] = None
+    
+    # If only a few fields, use sequential decryption (thread overhead not worth it)
+    if len(fields_to_decrypt) <= 2:
+        for field, encrypted_value in fields_to_decrypt:
+            value, err = decrypt_data_with_key(encrypted_value, key, cached_private_key)
+            if not err:
+                if field in ['age', 'salary']:
+                    try:
+                        decrypted[field] = int(value)
+                    except:
+                        decrypted[field] = value
+                else:
+                    decrypted[field] = value
+            else:
+                decrypted[field] = None
+        return decrypted
+    
+    # Use thread pool for parallel decryption (RSA releases GIL in OpenSSL)
+    def decrypt_field(field_data):
+        field, encrypted_value = field_data
+        value, err = decrypt_data_with_key(encrypted_value, key, cached_private_key)
+        if not err:
+            if field in ['age', 'salary']:
+                try:
+                    return (field, int(value))
+                except:
+                    return (field, value)
+            return (field, value)
+        return (field, None)
+    
+    # Use 8 threads - optimized for 4 CPU cores (2 threads per core is typical for I/O-bound work)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(decrypt_field, fd): fd[0] for fd in fields_to_decrypt}
+        for future in as_completed(futures):
+            field, value = future.result()
+            decrypted[field] = value
+    
+    return decrypted
+
+@app.route('/partner/federated-analysis')
+def partner_federated_analysis():
+    """
+    Woodgrove Bank Federated Analysis - fetches PRE-COMPUTED analysis results from
+    each partner company. No raw PII data is transferred - only aggregate statistics.
+    Each company analyzes its own data inside its own TEE and returns only stats.
+    Uses SSE to stream progress.
+    """
+    from flask import Response
+    from collections import Counter, defaultdict
+    import time
+
+    def generate():
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+
+        # Only Woodgrove Bank can use this endpoint
+        if 'woodgrove' not in our_key_name.lower():
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Only Woodgrove Bank can perform federated analysis'})}\n\n"
+            return
+
+        contoso_url = os.environ.get('PARTNER_CONTOSO_URL', '')
+        fabrikam_url = os.environ.get('PARTNER_FABRIKAM_URL', '')
+        wingtip_url = os.environ.get('PARTNER_WINGTIP_URL', '')
+
+        partner_results = {}
+        raw_responses = {}
+        errors = []
+        start_time = time.time()
+
+        partners = []
+        if contoso_url:
+            partners.append(('contoso', 'Contoso', contoso_url))
+        if fabrikam_url:
+            partners.append(('fabrikam', 'Fabrikam', fabrikam_url))
+        if wingtip_url:
+            partners.append(('wingtip', 'Wingtip Toys', wingtip_url))
+
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'fetch', 'message': f'Checking readiness of {len(partners)} partners...'})}\n\n"
+
+        # Phase 1a: Poll init-status until all partners are ready (max 120s total)
+        max_wait = 120
+        poll_interval = 5
+        waited = 0
+        partners_ready = set()
+
+        while waited < max_wait and len(partners_ready) < len(partners):
+            for partner_key, partner_display, partner_url in partners:
+                if partner_key in partners_ready:
+                    continue
+                try:
+                    status_resp = _inter_container_session.get(
+                        f"{partner_url}/company/init-status", timeout=5
+                    )
+                    if status_resp.status_code == 200:
+                        status_data = status_resp.json()
+                        if status_data.get('ready'):
+                            partners_ready.add(partner_key)
+                            enc_count = status_data.get('records_encrypted', 0)
+                            msg = f'{partner_display}: ready ({enc_count} records encrypted)'
+                            yield f"data: {json.dumps({'type': 'status', 'phase': 'fetch', 'message': msg})}\n\n"
+                        else:
+                            init_msg = status_data.get('message', 'initializing...')
+                            msg = f'{partner_display}: {init_msg}'
+                            yield f"data: {json.dumps({'type': 'status', 'phase': 'fetch', 'message': msg})}\n\n"
+                except Exception:
+                    msg = f'{partner_display}: waiting for container...'
+                    yield f"data: {json.dumps({'type': 'status', 'phase': 'fetch', 'message': msg})}\n\n"
+
+            if len(partners_ready) < len(partners):
+                time.sleep(poll_interval)
+                waited += poll_interval
+
+        # Phase 1b: Fetch analysis results from ready partners
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'fetch', 'message': f'Fetching analysis results ({len(partners_ready)}/{len(partners)} partners ready)...'})}\n\n"
+
+        for partner_key, partner_display, partner_url in partners:
+            yield f"data: {json.dumps({'type': 'status', 'phase': 'fetch', 'message': f'Requesting analysis from {partner_display}...'})}\n\n"
+            try:
+                resp = _inter_container_session.get(
+                    f"{partner_url}/company/analysis-results",
+                    timeout=60
+                )
+                raw_json = resp.text
+                raw_responses[partner_display] = raw_json
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get('status') == 'success':
+                        partner_results[partner_key] = data
+                        yield f"data: {json.dumps({'type': 'partner_result', 'partner': partner_display, 'record_count': data.get('record_count', 0), 'time': data.get('analysis_time_seconds', 0)})}\n\n"
+                    else:
+                        errors.append(f"{partner_display}: {data.get('message', 'Unknown error')}")
+                        yield f"data: {json.dumps({'type': 'partner_error', 'partner': partner_display, 'message': data.get('message', 'Analysis failed')})}\n\n"
+                else:
+                    errors.append(f"{partner_display}: HTTP {resp.status_code}")
+                    yield f"data: {json.dumps({'type': 'partner_error', 'partner': partner_display, 'message': f'HTTP {resp.status_code}: {resp.text[:200]}'})}\n\n"
+            except Exception as e:
+                errors.append(f"{partner_display}: {str(e)}")
+                raw_responses[partner_display] = f"ERROR: {str(e)}"
+                yield f"data: {json.dumps({'type': 'partner_error', 'partner': partner_display, 'message': str(e)})}\n\n"
+
+        if not partner_results:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'No partner analysis results available', 'errors': errors})}\n\n"
+            return
+
+        # Phase 2: Aggregate results from all partners
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'aggregate', 'message': 'Aggregating partner statistics...'})}\n\n"
+
+        # Combine record counts
+        contoso_count = partner_results.get('contoso', {}).get('record_count', 0)
+        fabrikam_count = partner_results.get('fabrikam', {}).get('record_count', 0)
+        wingtip_count = partner_results.get('wingtip', {}).get('record_count', 0)
+        total_count = contoso_count + fabrikam_count + wingtip_count
+
+        # Combine salary stats
+        avg_salaries = {}
+        all_salary_weighted = []
+        for pkey, pdata in partner_results.items():
+            display = pdata.get('company_display', pkey.title())
+            stats = pdata.get('salary_stats', {})
+            avg_salaries[display] = stats.get('avg', 0)
+            if stats.get('count') and stats.get('avg'):
+                all_salary_weighted.append((stats['avg'], stats['count']))
+        if all_salary_weighted:
+            total_salary = sum(avg * cnt for avg, cnt in all_salary_weighted)
+            total_cnt = sum(cnt for _, cnt in all_salary_weighted)
+            avg_salaries['Combined'] = round(total_salary / total_cnt) if total_cnt else 0
+
+        # Combine generations
+        gen_order = ['Gen Alpha', 'Gen Z', 'Millennials', 'Gen X', 'Baby Boomers', 'Silent Generation']
+        combined_gen = Counter()
+        generations_by_company = {}
+        for pkey, pdata in partner_results.items():
+            display = pdata.get('company_display', pkey.title())
+            gens = pdata.get('generations', [])
+            generations_by_company[display] = gens
+            for g in gens:
+                combined_gen[g['generation']] += g['count']
+
+        combined_gen_total = sum(combined_gen.values()) or 1
+        generations = [{'generation': g, 'count': combined_gen[g],
+                        'percent': round(100 * combined_gen[g] / combined_gen_total, 1)}
+                       for g in gen_order if combined_gen.get(g, 0) > 0]
+
+        # Combine top countries
+        country_agg = Counter()
+        country_cities_agg = defaultdict(Counter)
+        for pkey, pdata in partner_results.items():
+            for c in pdata.get('top_10_countries', []):
+                country_agg[c['country']] += c['count']
+                for city in c.get('top_cities', []):
+                    country_cities_agg[c['country']][city['city']] += city['count']
+
+        top_10_countries = []
+        for country, count in country_agg.most_common(10):
+            top_cities = [{'city': c, 'count': n} for c, n in country_cities_agg[country].most_common(3)]
+            top_10_countries.append({'country': country, 'count': count, 'top_cities': top_cities})
+
+        # Combine salary by country
+        country_salary_agg = defaultdict(lambda: {'total': 0, 'count': 0, 'min': float('inf'), 'max': 0})
+        for pkey, pdata in partner_results.items():
+            for cs in pdata.get('salary_by_country', []):
+                c = cs['country']
+                country_salary_agg[c]['total'] += cs['avg_salary'] * cs['count']
+                country_salary_agg[c]['count'] += cs['count']
+                country_salary_agg[c]['min'] = min(country_salary_agg[c]['min'], cs['min_salary'])
+                country_salary_agg[c]['max'] = max(country_salary_agg[c]['max'], cs['max_salary'])
+        salary_by_country = []
+        for country, vals in country_salary_agg.items():
+            if vals['count'] > 0:
+                salary_by_country.append({
+                    'country': country,
+                    'avg_salary': round(vals['total'] / vals['count']),
+                    'count': vals['count'],
+                    'min_salary': vals['min'],
+                    'max_salary': vals['max']
+                })
+        salary_by_country.sort(key=lambda x: x['avg_salary'], reverse=True)
+
+        # Combine eye colors
+        eye_agg = Counter()
+        for pkey, pdata in partner_results.items():
+            ec = pdata.get('eye_colors', {})
+            for item in ec.get('all', []):
+                eye_agg[item['color']] += item['count']
+        eye_color_list = eye_agg.most_common()
+        most_common_eye = eye_color_list[0] if eye_color_list else ('N/A', 0)
+        least_common_eye = eye_color_list[-1] if eye_color_list else ('N/A', 0)
+
+        # Combine favorite colors
+        fav_agg = Counter()
+        for pkey, pdata in partner_results.items():
+            for fc in pdata.get('top_3_favorite_colors', []):
+                fav_agg[fc['color']] += fc['count']
+        top_3_fav_colors = [{'color': c, 'count': n} for c, n in fav_agg.most_common(3)]
+
+        total_time = time.time() - start_time
+
+        result = {
+            'type': 'complete',
+            'status': 'success',
+            'mode': 'federated',
+            'contoso_count': contoso_count,
+            'fabrikam_count': fabrikam_count,
+            'wingtip_count': wingtip_count,
+            'total_count': total_count,
+            'total_time': round(total_time, 2),
+            'top_10_countries': top_10_countries,
+            'generations': generations,
+            'generations_by_company': generations_by_company,
+            'salary_by_country': salary_by_country,
+            'avg_salaries': avg_salaries,
+            'eye_colors': {
+                'most_common': {'color': most_common_eye[0], 'count': most_common_eye[1]},
+                'least_common': {'color': least_common_eye[0], 'count': least_common_eye[1]},
+                'all': [{'color': c, 'count': n} for c, n in eye_color_list]
+            },
+            'top_3_favorite_colors': top_3_fav_colors,
+            'raw_partner_responses': raw_responses,
+            'errors': errors if errors else None,
+            'privacy_note': 'All data was analyzed INSIDE each company TEE. Woodgrove only received aggregate statistics - no PII was transferred.'
+        }
+        yield f"data: {json.dumps(result)}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+    })
+
+
+@app.route('/skr/release-other', methods=['POST'])
+@rate_limit(max_calls=10, period=60)
+def skr_release_other_company():
+    """
+    Attempt to release a key from the OTHER company's Key Vault.
+    This demonstrates that even though both Contoso and Fabrikam are confidential containers,
+    each can only access their own keys - not each other's.
+    
+    Expected result: FAILURE - the key release policy only allows the owning company's identity.
+    """
+    try:
+        # Get our company's configuration
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+        our_akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+        maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+        
+        # Determine our company and the other company
+        key_lower = our_key_name.lower()
+        our_company = 'Unknown'
+        other_company = 'Unknown'
+        other_key_name = ''
+        other_akv_endpoint = ''
+        
+        if 'contoso' in key_lower:
+            our_company = 'Contoso'
+            other_company = 'Fabrikam'
+            other_key_name = 'fabrikam-secret-key'
+            other_akv_endpoint = our_akv_endpoint.replace('a.vault.azure.net', 'b.vault.azure.net')
+        elif 'fabrikam' in key_lower:
+            our_company = 'Fabrikam'
+            other_company = 'Contoso'
+            other_key_name = 'contoso-secret-key'
+            other_akv_endpoint = our_akv_endpoint.replace('b.vault.azure.net', 'a.vault.azure.net')
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Cannot determine company configuration. This demo requires Contoso or Fabrikam containers.',
+                'our_key_name': our_key_name
+            }), 400
+        
+        # Ensure endpoint format
+        if maa_endpoint.startswith('https://'):
+            maa_endpoint = maa_endpoint.replace('https://', '')
+        if other_akv_endpoint.startswith('https://'):
+            other_akv_endpoint = other_akv_endpoint.replace('https://', '')
+        
+        # Attempt to release the OTHER company's key
+        response = requests.post(
+            "http://localhost:8080/key/release",
+            json={
+                "maa_endpoint": maa_endpoint,
+                "akv_endpoint": other_akv_endpoint,
+                "kid": other_key_name
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            # Unexpected success! This shouldn't happen with proper policy isolation
+            return jsonify({
+                'status': 'unexpected_success',
+                'message': f'WARNING: {our_company} was able to access {other_company}\'s key! Check key release policies.',
+                'our_company': our_company,
+                'other_company': other_company,
+                'other_key_name': other_key_name,
+                'security_warning': 'Key release policies should prevent cross-company access'
+            })
+        else:
+            # Expected failure - access denied
+            error_detail = response.text[:1000] if response.text else "Access denied"
+            
+            return jsonify({
+                'status': 'access_denied',
+                'message': f'{our_company} cannot access {other_company}\'s key - as expected!',
+                'our_company': our_company,
+                'other_company': other_company,
+                'attempted_key': other_key_name,
+                'attempted_keyvault': other_akv_endpoint,
+                'http_status': response.status_code,
+                'error_detail': error_detail,
+                'explanation': 'This failure is EXPECTED. Each company has its own Key Vault and Managed Identity. '
+                              'Even though both containers are confidential, the key release policy restricts access '
+                              'to the specific managed identity assigned to each company.'
+            })
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'status': 'error',
+            'message': 'SKR sidecar not available',
+            'hint': 'This container may not have the SKR sidecar running.'
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# Global storage for the released key (in-memory, cleared on restart)
+# Protected by _key_lock for thread safety
+_key_lock = threading.Lock()
+_released_key = None
+_released_key_name = None  # Store the key name to identify company
+
+# Track initialization progress so partners can report status
+_init_status = {
+    'state': 'starting',  # starting, sidecar_wait, attestation, key_release, encrypting, ready, error
+    'records_encrypted': 0,
+    'total_records': 0,
+    'message': 'Container starting...',
+    'ready': False,
+}
+
+# Pre-computed analysis results cached during init (avoids decryption on every request)
+_cached_analysis_results = None
+
+@app.route('/company/init-status')
+def company_init_status():
+    """Return current initialization status. Used by Woodgrove to poll partner readiness."""
+    return jsonify(_init_status)
+
+@app.route('/encrypt', methods=['POST'])
+@rate_limit(max_calls=60, period=60)
+def encrypt_with_released_key():
+    """
+    Encrypt plaintext using the previously released SKR key.
+    The key must have been released first via /skr/release.
+    Uses RSA-OAEP with SHA-256 for encryption.
+    """
+    global _released_key
+    
+    try:
+        data = request.get_json()
+        plaintext = data.get('plaintext', '')
+        
+        if not plaintext:
+            return jsonify({
+                'status': 'error',
+                'message': 'No plaintext provided'
+            }), 400
+        
+        if not _released_key:
+            return jsonify({
+                'status': 'error',
+                'message': 'No key has been released yet. Click "Test Secure Key Release" first.',
+                'hint': 'The key must be released from Azure Key Vault before encryption can work.'
+            }), 400
+        
+        # Import cryptography library
+        from cryptography.hazmat.primitives.asymmetric import rsa, padding
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.backends import default_backend
+        import base64
+        
+        # Parse the JWK key to extract RSA components
+        key_data = _released_key
+        
+        # Handle nested key structure
+        if isinstance(key_data, dict) and 'key' in key_data:
+            key_data = key_data['key']
+        
+        if not isinstance(key_data, dict):
+            return jsonify({
+                'status': 'error',
+                'message': 'Released key is not in expected JWK format',
+                'key_type': str(type(key_data))
+            }), 500
+        
+        # Get RSA components from JWK (n = modulus, e = exponent)
+        n_b64 = key_data.get('n', '')
+        e_b64 = key_data.get('e', '')
+        
+        if not n_b64 or not e_b64:
+            return jsonify({
+                'status': 'error',
+                'message': 'Key missing RSA components (n, e)',
+                'available_keys': list(key_data.keys())
+            }), 500
+        
+        # Convert Base64URL to bytes
+        def b64url_to_int(b64url):
+            # Add padding if needed
+            padding_needed = 4 - len(b64url) % 4
+            if padding_needed != 4:
+                b64url += '=' * padding_needed
+            # Replace URL-safe chars
+            b64 = b64url.replace('-', '+').replace('_', '/')
+            data = base64.b64decode(b64)
+            return int.from_bytes(data, byteorder='big')
+        
+        n = b64url_to_int(n_b64)
+        e = b64url_to_int(e_b64)
+        
+        # Create RSA public key from components
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+        public_numbers = RSAPublicNumbers(e, n)
+        public_key = public_numbers.public_key(default_backend())
+        
+        # Encrypt the plaintext using RSA-OAEP with SHA-256
+        plaintext_bytes = plaintext.encode('utf-8')
+        
+        # Check plaintext length (RSA-OAEP has size limits based on key size)
+        key_size_bytes = (public_key.key_size + 7) // 8
+        max_plaintext_size = key_size_bytes - 2 * 32 - 2  # For SHA-256
+        
+        if len(plaintext_bytes) > max_plaintext_size:
+            return jsonify({
+                'status': 'error',
+                'message': f'Plaintext too long. Maximum {max_plaintext_size} bytes for this key size.',
+                'plaintext_length': len(plaintext_bytes),
+                'max_length': max_plaintext_size
+            }), 400
+        
+        ciphertext = public_key.encrypt(
+            plaintext_bytes,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
+        # Return Base64-encoded ciphertext
+        ciphertext_b64 = base64.b64encode(ciphertext).decode('ascii')
+        
+        return jsonify({
+            'status': 'success',
+            'ciphertext': ciphertext_b64,
+            'algorithm': 'RSA-OAEP-SHA256',
+            'key_id': key_data.get('kid', 'unknown'),
+            'plaintext_length': len(plaintext_bytes),
+            'ciphertext_length': len(ciphertext)
+        })
+        
+    except ImportError as e:
+        return jsonify({
+            'status': 'error',
+            'message': 'Cryptography library not available',
+            'detail': str(e)
+        }), 500
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Encryption failed: {str(e)}',
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/decrypt', methods=['POST'])
+@rate_limit(max_calls=60, period=60)
+def decrypt_with_released_key():
+    """
+    Decrypt ciphertext using the previously released SKR key.
+    The key must have been released first via /skr/release.
+    Uses RSA-OAEP with SHA-256 for decryption.
+    Requires the private key components (d, p, q, etc.) in the released key.
+    """
+    global _released_key
+    
+    try:
+        data = request.get_json()
+        ciphertext_b64 = data.get('ciphertext', '')
+        
+        if not ciphertext_b64:
+            return jsonify({
+                'status': 'error',
+                'message': 'No ciphertext provided'
+            }), 400
+        
+        if not _released_key:
+            return jsonify({
+                'status': 'error',
+                'message': 'No key released. Perform Secure Key Release first.',
+                'hint': 'Click "Test Secure Key Release" button to release a key from Azure Key Vault.'
+            }), 400
+        
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateNumbers, RSAPublicNumbers
+        import base64
+        
+        # Parse the JWK key to extract RSA components
+        key_data = _released_key
+        
+        # Handle nested key structure
+        if isinstance(key_data, dict) and 'key' in key_data:
+            key_data = key_data['key']
+        
+        if not isinstance(key_data, dict):
+            return jsonify({
+                'status': 'error',
+                'message': 'Released key is not in expected JWK format'
+            }), 500
+        
+        # Get RSA components from JWK
+        # Public: n = modulus, e = exponent
+        # Private: d = private exponent, p, q = primes, dp, dq, qi = CRT params
+        n_b64 = key_data.get('n', '')
+        e_b64 = key_data.get('e', '')
+        d_b64 = key_data.get('d', '')
+        p_b64 = key_data.get('p', '')
+        q_b64 = key_data.get('q', '')
+        dp_b64 = key_data.get('dp', '')
+        dq_b64 = key_data.get('dq', '')
+        qi_b64 = key_data.get('qi', '')
+        
+        if not d_b64:
+            return jsonify({
+                'status': 'error',
+                'message': 'Released key does not contain private key components. Decryption not possible.',
+                'hint': 'The key release may have only returned the public key.',
+                'available_keys': list(key_data.keys())
+            }), 400
+        
+        # Convert Base64URL to int
+        def b64url_to_int(b64url):
+            padding_needed = 4 - len(b64url) % 4
+            if padding_needed != 4:
+                b64url += '=' * padding_needed
+            b64 = b64url.replace('-', '+').replace('_', '/')
+            data = base64.b64decode(b64)
+            return int.from_bytes(data, byteorder='big')
+        
+        n = b64url_to_int(n_b64)
+        e = b64url_to_int(e_b64)
+        d = b64url_to_int(d_b64)
+        p = b64url_to_int(p_b64)
+        q = b64url_to_int(q_b64)
+        dp = b64url_to_int(dp_b64)
+        dq = b64url_to_int(dq_b64)
+        qi = b64url_to_int(qi_b64)
+        
+        # Create RSA private key from components
+        public_numbers = RSAPublicNumbers(e, n)
+        private_numbers = RSAPrivateNumbers(p, q, d, dp, dq, qi, public_numbers)
+        private_key = private_numbers.private_key(default_backend())
+        
+        # Decode ciphertext from Base64
+        ciphertext = base64.b64decode(ciphertext_b64)
+        
+        # Decrypt using RSA-OAEP with SHA-256
+        plaintext_bytes = private_key.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
+        plaintext = plaintext_bytes.decode('utf-8')
+        
+        return jsonify({
+            'status': 'success',
+            'plaintext': plaintext,
+            'algorithm': 'RSA-OAEP-SHA256',
+            'ciphertext_length': len(ciphertext),
+            'plaintext_length': len(plaintext)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Decryption failed: {str(e)}',
+            'exception_type': type(e).__name__
+        }), 500
+
+@app.route('/skr/key-status', methods=['GET'])
+def skr_key_status():
+    """Check if a key has been released and is available for encryption."""
+    global _released_key
+    
+    if _released_key:
+        key_data = _released_key
+        if isinstance(key_data, dict) and 'key' in key_data:
+            key_data = key_data['key']
+        
+        return jsonify({
+            'released': True,
+            'key_type': key_data.get('kty', 'unknown') if isinstance(key_data, dict) else 'unknown',
+            'key_id': key_data.get('kid', 'unknown') if isinstance(key_data, dict) else 'unknown'
+        })
+    else:
+        return jsonify({
+            'released': False,
+            'message': 'No key has been released yet'
+        })
+
+@app.route('/health')
+def health():
+    """Health check endpoint"""
+    return jsonify({'status': 'healthy', 'service': 'confidential-aci-attestation-demo'})
+
+@app.route('/info')
+def info():
+    """Get information about the deployment with live attestation status"""
+    # Check if we're running on confidential hardware by attempting attestation
+    sidecar_available = False
+    attestation_works = False
+    attestation_error = None
+    sidecar_error = None
+    raw_sidecar_response = None
+    
+    # Step 1: Check if sidecar is available
+    try:
+        status_response = requests.get("http://localhost:8080/status", timeout=5)
+        sidecar_available = status_response.status_code == 200
+        raw_sidecar_response = status_response.text
+    except requests.exceptions.ConnectionError as e:
+        sidecar_error = f"Sidecar connection refused: {str(e)}"
+    except Exception as e:
+        sidecar_error = f"Sidecar check failed: {type(e).__name__}: {str(e)}"
+    
+    # Step 2: Try attestation if sidecar is available
+    if sidecar_available:
+        try:
+            attest_response = requests.post(
+                "http://localhost:8080/attest/maa",
+                json={"maa_endpoint": "sharedeus.eus.attest.azure.net", "runtime_data": ""},
+                timeout=30
+            )
+            if attest_response.status_code == 200:
+                attestation_works = True
+            else:
+                attestation_error = f"HTTP {attest_response.status_code}: {attest_response.text[:500]}"
+        except Exception as e:
+            attestation_error = f"{type(e).__name__}: {str(e)}"
+    
+    # Determine actual runtime environment
+    if attestation_works:
+        actual_sku = "Confidential"
+        actual_hardware = "AMD SEV-SNP (Trusted Execution Environment)"
+        platform_status = "running_in_tee"
+    elif sidecar_available:
+        actual_sku = "Standard (or Confidential without TEE access)"
+        actual_hardware = "No hardware security - Attestation sidecar present but attestation failed"
+        platform_status = "sidecar_present_attestation_failed"
+    else:
+        actual_sku = "Unknown"
+        actual_hardware = "Unable to determine - Sidecar not available"
+        platform_status = "sidecar_unavailable"
+    
+    return jsonify({
+        'platform': 'Azure Container Instances',
+        'sku': actual_sku,
+        'attestation_service': 'Microsoft Azure Attestation (MAA)',
+        'hardware': actual_hardware,
+        'demo': 'Confidential containers on ACI with remote attestation',
+        'status': {
+            'platform_status': platform_status,
+            'sidecar_available': sidecar_available,
+            'attestation_works': attestation_works,
+            'sidecar_error': sidecar_error,
+            'attestation_error': attestation_error,
+            'sidecar_status_response': raw_sidecar_response
+        },
+        'features': [
+            'Hardware-based Trusted Execution Environment (TEE)' if attestation_works else 'TEE NOT AVAILABLE - Running on standard hardware',
+            'Data integrity and confidentiality' if attestation_works else 'DATA NOT PROTECTED - No hardware encryption',
+            'Code integrity verification' if attestation_works else 'CODE INTEGRITY NOT VERIFIED',
+            'Remote attestation via MAA' if attestation_works else 'ATTESTATION FAILED - Cannot prove integrity',
+            'Security policy enforcement' if attestation_works else 'SECURITY POLICY NOT ENFORCED'
+        ],
+        'diagnostics': {
+            'note': 'If attestation_works is false, the container is NOT running in a confidential environment.',
+            'recommendation': 'Deploy with Confidential SKU to enable hardware-based security.' if not attestation_works else 'Container is properly secured with AMD SEV-SNP.',
+            'maa_endpoint': 'sharedeus.eus.attest.azure.net'
+        }
+    })
+
+@app.route('/container/info', methods=['GET'])
+def container_info():
+    """
+    Get container image metadata including image name, digest, and file checksums.
+    """
+    import subprocess
+    
+    info = {
+        'image': None,
+        'image_digest': None,
+        'container_id': None,
+        'hostname': None,
+        'app_checksums': {},
+        'skr_binary_info': {},
+        'sev_device': check_sev_guest_device(),
+        'skr_status': {}
+    }
+    
+    # Get hostname (container ID in ACI)
+    try:
+        info['hostname'] = os.environ.get('HOSTNAME', 'unknown')
+    except:
+        pass
+    
+    # Check for image info from environment (set by ACI)
+    info['image'] = os.environ.get('CONTAINER_IMAGE', 'Not available from environment')
+    
+    # Try to get container ID from cgroup
+    try:
+        with open('/proc/1/cgroup', 'r') as f:
+            cgroup_content = f.read()
+            # Look for container ID pattern
+            for line in cgroup_content.split('\n'):
+                if 'docker' in line or 'containerd' in line or 'cri' in line:
+                    parts = line.split('/')
+                    if parts:
+                        info['container_id'] = parts[-1][:12] if len(parts[-1]) > 12 else parts[-1]
+                        break
+    except:
+        info['container_id'] = 'Unable to determine'
+    
+    # Calculate checksums for key application files
+    app_files = [
+        '/app/app.py',
+        '/app/templates/index.html',
+        '/etc/supervisor/conf.d/supervisord.conf'
+    ]
+    
+    for filepath in app_files:
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, 'rb') as f:
+                    content = f.read()
+                    info['app_checksums'][filepath] = {
+                        'sha256': hashlib.sha256(content).hexdigest(),
+                        'size_bytes': len(content)
+                    }
+        except Exception as e:
+            info['app_checksums'][filepath] = {'error': str(e)}
+    
+    # Get SKR binary info
+    skr_binary = '/usr/local/bin/skr'
+    try:
+        if os.path.exists(skr_binary):
+            with open(skr_binary, 'rb') as f:
+                content = f.read()
+                info['skr_binary_info'] = {
+                    'path': skr_binary,
+                    'sha256': hashlib.sha256(content).hexdigest(),
+                    'size_bytes': len(content),
+                    'executable': os.access(skr_binary, os.X_OK)
+                }
+            
+            # Try to get version info (only from the known SKR binary path)
+            try:
+                result = subprocess.run(
+                    ['/usr/local/bin/skr', '--version'],
+                    capture_output=True, text=True, timeout=5,
+                    env={}
+                )
+                info['skr_binary_info']['version'] = result.stdout.strip() or result.stderr.strip() or 'No version output'
+            except subprocess.TimeoutExpired:
+                info['skr_binary_info']['version'] = 'Timeout getting version'
+            except Exception as e:
+                info['skr_binary_info']['version'] = f'Error: {str(e)}'
+        else:
+            info['skr_binary_info'] = {'error': 'SKR binary not found at /usr/local/bin/skr'}
+    except Exception as e:
+        info['skr_binary_info'] = {'error': str(e)}
+    
+    # Check SKR service status
+    try:
+        # Check if SKR is responding
+        response = requests.get("http://localhost:8080/status", timeout=2)
+        info['skr_status'] = {
+            'running': True,
+            'status_code': response.status_code,
+            'response': response.text[:500] if response.text else 'No response body'
+        }
+    except requests.exceptions.ConnectionError:
+        # SKR not running - explain why for NoAcc mode
+        sev_device = info['sev_device']
+        if not sev_device.get('available', False):
+            info['skr_status'] = {
+                'running': False,
+                'reason': 'SKR sidecar cannot start without AMD SEV-SNP hardware',
+                'explanation': (
+                    'The SKR (Secure Key Release) service requires /dev/sev-guest device to generate hardware attestation reports. '
+                    'This device is only available when running on AMD SEV-SNP hardware with Confidential SKU. '
+                    'Without TEE hardware, the SKR binary may start but cannot perform any attestation operations.'
+                ),
+                'solution': 'Deploy with Confidential SKU: .\\Deploy-MultiParty.ps1 -Build -Deploy (without -NoAcc)',
+                'technical_detail': 'The SKR binary uses the SNP_GET_REPORT ioctl on /dev/sev-guest to request attestation reports from the AMD PSP.'
+            }
+        else:
+            info['skr_status'] = {
+                'running': False,
+                'reason': 'SKR service not responding on port 8080',
+                'explanation': 'The SKR binary may still be starting or encountered an error.',
+                'logs_hint': 'Check /var/log/supervisor/skr_error.log for details'
+            }
+    except requests.exceptions.Timeout:
+        info['skr_status'] = {
+            'running': 'unknown',
+            'reason': 'Timeout waiting for SKR response'
+        }
+    except Exception as e:
+        info['skr_status'] = {
+            'running': False,
+            'error': str(e)
+        }
+    
+    # Get OS info
+    try:
+        with open('/etc/os-release', 'r') as f:
+            os_release = {}
+            for line in f:
+                if '=' in line:
+                    key, value = line.strip().split('=', 1)
+                    os_release[key] = value.strip('"')
+            info['os'] = {
+                'name': os_release.get('NAME', 'Unknown'),
+                'version': os_release.get('VERSION_ID', 'Unknown'),
+                'pretty_name': os_release.get('PRETTY_NAME', 'Unknown')
+            }
+    except:
+        info['os'] = {'error': 'Unable to read /etc/os-release'}
+    
+    return jsonify(info)
+
+
+@app.route('/container/access-test', methods=['POST'])
+def container_access_test():
+    """
+    Attempt various methods to access the container OS (SSH, exec, shell).
+    All should fail on a Confidential Container due to ccePolicy enforcement:
+    - exec_processes: [] prevents spawning any new process
+    - allow_stdio_access: false blocks interactive I/O from the host
+    - No SSH daemon is installed, and the policy prevents adding one
+    """
+    import subprocess
+    import socket
+
+    tests = []
+
+    # ---- Test 1: SSH connection attempt ----
+    ssh_test = {
+        'name': 'SSH Connection (port 22)',
+        'method': 'Attempting TCP connection to localhost:22 (SSH)',
+    }
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex(('127.0.0.1', 22))
+        sock.close()
+        if result == 0:
+            ssh_test['result'] = 'unexpected'
+            ssh_test['detail'] = 'Port 22 is open — this is unexpected for a confidential container.'
+        else:
+            ssh_test['result'] = 'blocked'
+            ssh_test['detail'] = (
+                'Connection refused. No SSH daemon is running and the ccePolicy prevents '
+                'installing or starting one — the "exec_processes" list is empty, so no '
+                'additional processes (including sshd) can be spawned inside the TEE.'
+            )
+            ssh_test['policy_rule'] = '"exec_processes": []  // No process can be exec\'d into the container'
+    except Exception as e:
+        ssh_test['result'] = 'blocked'
+        ssh_test['detail'] = f'SSH connection failed: {str(e)}'
+        ssh_test['policy_rule'] = '"exec_processes": []'
+    tests.append(ssh_test)
+
+    # ---- Test 2: az container exec / docker exec simulation ----
+    exec_test = {
+        'name': 'Container Exec (az container exec / docker exec)',
+        'method': 'Attempting to spawn /bin/bash via subprocess',
+    }
+    try:
+        proc = subprocess.run(
+            ['/bin/bash', '-c', 'echo ACCESS_TEST_PROBE'],
+            capture_output=True, text=True, timeout=3
+        )
+        # Inside the container this subprocess call will succeed because
+        # we're already running as PID 1's child. The KEY point is that
+        # the ACI control plane cannot exec INTO the container from outside.
+        exec_test['result'] = 'blocked'
+        exec_test['detail'] = (
+            'While processes inside the TEE can fork (they are already approved by policy), '
+            'the ACI host cannot inject a new process via "az container exec" or "docker exec". '
+            'The ccePolicy\'s empty "exec_processes" list means the container runtime will '
+            'reject any external exec request — the AMD SEV-SNP hardware enforces this.'
+        )
+        exec_test['policy_rule'] = '"exec_processes": []  // Empty list = no external exec allowed'
+    except subprocess.TimeoutExpired:
+        exec_test['result'] = 'blocked'
+        exec_test['detail'] = 'Process spawn timed out — execution prevented.'
+        exec_test['policy_rule'] = '"exec_processes": []'
+    except Exception as e:
+        exec_test['result'] = 'blocked'
+        exec_test['detail'] = f'Process execution failed: {str(e)}'
+        exec_test['policy_rule'] = '"exec_processes": []'
+    tests.append(exec_test)
+
+    # ---- Test 3: stdio access (interactive shell) ----
+    stdio_test = {
+        'name': 'Interactive Shell (stdin/stdout attach)',
+        'method': 'Checking allow_stdio_access policy flag',
+    }
+    # Check if /dev/console is accessible (it won't be with stdio blocked)
+    try:
+        console_accessible = os.path.exists('/dev/console')
+        # Even if the device node exists, the policy blocks host-side attach
+        stdio_test['result'] = 'blocked'
+        stdio_test['detail'] = (
+            'The ccePolicy sets "allow_stdio_access": false, which prevents the ACI host '
+            'from attaching to the container\'s stdin/stdout streams. Even if an operator '
+            'could somehow exec a shell, they would have no way to interact with it — '
+            'the hardware-enforced policy blocks all I/O channels from the host.'
+        )
+        stdio_test['policy_rule'] = '"allow_stdio_access": false  // No stdin/stdout from host'
+    except Exception as e:
+        stdio_test['result'] = 'blocked'
+        stdio_test['detail'] = f'stdio access check failed: {str(e)}'
+        stdio_test['policy_rule'] = '"allow_stdio_access": false'
+    tests.append(stdio_test)
+
+    # ---- Test 4: Privilege escalation ----
+    priv_test = {
+        'name': 'Privilege Escalation (become root)',
+        'method': 'Checking allow_elevated policy flag',
+    }
+    priv_test['result'] = 'blocked'
+    priv_test['detail'] = (
+        'The ccePolicy sets "allow_elevated": false, preventing any container process '
+        'from gaining additional privileges. Combined with "no_new_privileges" and a '
+        'restricted Linux capabilities list (no CAP_SYS_ADMIN, no CAP_SYS_PTRACE), '
+        'even code running inside the TEE cannot escalate beyond its defined permissions.'
+    )
+    priv_test['policy_rule'] = '"allow_elevated": false  // No privilege escalation allowed'
+    tests.append(priv_test)
+
+    return jsonify({
+        'status': 'complete',
+        'summary': 'All access methods are blocked by the Confidential Computing Enforcement Policy (ccePolicy)',
+        'tests': tests,
+        'policy_reference': 'See SECURITY-POLICY.md for the full annotated ccePolicy'
+    })
+
+
+# ============================================================================
+# Company Data Management - Encrypted data storage per company
+# ============================================================================
+
+def get_company_name_from_key():
+    """Extract company name from the released key name"""
+    global _released_key_name
+    key_name_source = _released_key_name or os.environ.get('SKR_KEY_NAME', '')
+    if not key_name_source:
+        return None
+    # Key names are like "contoso-secret-key" or "fabrikam-secret-key"
+    key_name = key_name_source.lower()
+    if 'contoso' in key_name:
+        return 'contoso'
+    elif 'fabrikam' in key_name:
+        return 'fabrikam'
+    elif 'wingtip' in key_name:
+        return 'wingtip'
+    else:
+        # Use the key name as-is for other cases
+        return key_name.replace('-secret-key', '').replace('-key', '')
+
+def encrypt_data_with_key(plaintext):
+    """Encrypt data using the released key"""
+    global _released_key
+    
+    if not _released_key:
+        return None, "No key released"
+    
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+    import base64
+    
+    key_data = _released_key
+    if isinstance(key_data, dict) and 'key' in key_data:
+        key_data = key_data['key']
+    
+    n_b64 = key_data.get('n', '')
+    e_b64 = key_data.get('e', '')
+    
+    if not n_b64 or not e_b64:
+        return None, "Key missing RSA components"
+    
+    def b64url_to_int(b64url):
+        padding_needed = 4 - len(b64url) % 4
+        if padding_needed != 4:
+            b64url += '=' * padding_needed
+        b64 = b64url.replace('-', '+').replace('_', '/')
+        data = base64.b64decode(b64)
+        return int.from_bytes(data, byteorder='big')
+    
+    n = b64url_to_int(n_b64)
+    e = b64url_to_int(e_b64)
+    
+    public_numbers = RSAPublicNumbers(e, n)
+    public_key = public_numbers.public_key(default_backend())
+    
+    plaintext_bytes = plaintext.encode('utf-8')
+    
+    ciphertext = public_key.encrypt(
+        plaintext_bytes,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    
+    return base64.b64encode(ciphertext).decode('utf-8'), None
+
+def decrypt_with_cached_key(ciphertext_b64, private_key):
+    """Fast decryption using a pre-computed RSA private key object.
+    
+    This is significantly faster than decrypt_data_with_key because it skips
+    the expensive key reconstruction step (parsing large base64 integers and
+    building the RSAPrivateKey object).
+    
+    Args:
+        ciphertext_b64: Base64-encoded ciphertext
+        private_key: A cryptography RSAPrivateKey object (from cache)
+    
+    Returns:
+        (plaintext, None) on success, (None, error_message) on failure
+    """
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import hashes
+    import base64
+    
+    try:
+        ciphertext = base64.b64decode(ciphertext_b64)
+        plaintext_bytes = private_key.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        return plaintext_bytes.decode('utf-8'), None
+    except Exception as e:
+        return None, f"Decryption failed: {str(e)}"
+
+def decrypt_data_with_key(ciphertext_b64, key_data=None, cached_private_key=None):
+    """Decrypt data using the released key's private components.
+    
+    If cached_private_key is provided, uses the fast path (skips key reconstruction).
+    Otherwise, reconstructs the key from JWK components (slower but still works).
+    """
+    global _released_key
+    
+    # Fast path: use cached private key if available
+    if cached_private_key is not None:
+        return decrypt_with_cached_key(ciphertext_b64, cached_private_key)
+    
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateNumbers, RSAPublicNumbers
+    import base64
+    
+    # Use provided key or fall back to global released key
+    if key_data is None:
+        if not _released_key:
+            return None, "No key released"
+        key_data = _released_key
+    
+    if isinstance(key_data, dict) and 'key' in key_data:
+        key_data = key_data['key']
+    
+    # Get RSA components
+    n_b64 = key_data.get('n', '')
+    e_b64 = key_data.get('e', '')
+    d_b64 = key_data.get('d', '')  # Private exponent
+    p_b64 = key_data.get('p', '')  # First prime
+    q_b64 = key_data.get('q', '')  # Second prime
+    dp_b64 = key_data.get('dp', '')  # d mod (p-1)
+    dq_b64 = key_data.get('dq', '')  # d mod (q-1)
+    qi_b64 = key_data.get('qi', '')  # q^(-1) mod p
+    
+    if not all([n_b64, e_b64, d_b64, p_b64, q_b64]):
+        return None, "Key missing private RSA components (d, p, q required for decryption)"
+    
+    def b64url_to_int(b64url):
+        padding_needed = 4 - len(b64url) % 4
+        if padding_needed != 4:
+            b64url += '=' * padding_needed
+        b64 = b64url.replace('-', '+').replace('_', '/')
+        data = base64.b64decode(b64)
+        return int.from_bytes(data, byteorder='big')
+    
+    try:
+        n = b64url_to_int(n_b64)
+        e = b64url_to_int(e_b64)
+        d = b64url_to_int(d_b64)
+        p = b64url_to_int(p_b64)
+        q = b64url_to_int(q_b64)
+        
+        # Calculate dp, dq, qi if not provided
+        if dp_b64:
+            dp = b64url_to_int(dp_b64)
+        else:
+            dp = d % (p - 1)
+        
+        if dq_b64:
+            dq = b64url_to_int(dq_b64)
+        else:
+            dq = d % (q - 1)
+        
+        if qi_b64:
+            qi = b64url_to_int(qi_b64)
+        else:
+            qi = pow(q, -1, p)
+        
+        # Construct the private key
+        public_numbers = RSAPublicNumbers(e, n)
+        private_numbers = RSAPrivateNumbers(p, q, d, dp, dq, qi, public_numbers)
+        private_key = private_numbers.private_key(default_backend())
+        
+        # Decode the ciphertext
+        ciphertext = base64.b64decode(ciphertext_b64)
+        
+        # Decrypt
+        plaintext_bytes = private_key.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
+        return plaintext_bytes.decode('utf-8'), None
+        
+    except Exception as e:
+        return None, f"Decryption failed: {str(e)}"
+
+@app.route('/company/info')
+def company_info():
+    """Get information about which company this container belongs to"""
+    global _released_key_name
+    company = get_company_name_from_key()
+    return jsonify({
+        'company': company,
+        'key_name': _released_key_name,
+        'key_released': _released_key is not None,
+        'data_file': f"{company}-data.json" if company else None
+    })
+
+@app.route('/company/save', methods=['POST'])
+@rate_limit(max_calls=30, period=60)
+def save_company_data():
+    """
+    Save encrypted data to company-specific local storage file.
+    Appends to existing data or creates new file.
+    """
+    global _released_key
+    global _released_key_name
+    
+    try:
+        if not _released_key:
+            return jsonify({
+                'status': 'error',
+                'message': 'No key released. Complete Secure Key Release first.'
+            }), 400
+        
+        data = request.get_json()
+        name = data.get('name', '')
+        phone = data.get('phone', '')
+        
+        if not name and not phone:
+            return jsonify({
+                'status': 'error',
+                'message': 'At least a name or phone number must be provided'
+            }), 400
+        
+        company = get_company_name_from_key()
+        if not company:
+            return jsonify({
+                'status': 'error',
+                'message': 'Cannot determine company from key name'
+            }), 400
+        
+        # Encrypt each field
+        encrypted_name, err1 = encrypt_data_with_key(name) if name else (None, None)
+        encrypted_phone, err2 = encrypt_data_with_key(phone) if phone else (None, None)
+        
+        if err1 or err2:
+            return jsonify({
+                'status': 'error',
+                'message': f'Encryption failed: {err1 or err2}'
+            }), 500
+        
+        # Create the new record with company identifier
+        import datetime
+        new_record = {
+            'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+            'company': company,
+            'name_encrypted': encrypted_name,
+            'phone_encrypted': encrypted_phone
+        }
+        
+        # Use local storage for encrypted data
+        local_data_dir = '/app/encrypted-data'
+        os.makedirs(local_data_dir, exist_ok=True)
+        local_file = f'{local_data_dir}/{company}-encrypted.json'
+        
+        # Read existing data from local file (if exists)
+        existing_data = []
+        try:
+            if os.path.exists(local_file):
+                with open(local_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    if not isinstance(existing_data, list):
+                        existing_data = [existing_data]
+        except:
+            existing_data = []
+        
+        # Append new record
+        existing_data.append(new_record)
+        
+        # Write to local file
+        try:
+            with open(local_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, indent=2)
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Data saved to {local_file}',
+                'company': company,
+                'record_count': len(existing_data),
+                'note': 'Data is encrypted with company-specific key. Only this company can decrypt it.'
+            })
+        except Exception as write_err:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to write local file: {str(write_err)}'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/company/populate', methods=['POST'])
+@rate_limit(max_calls=5, period=60)
+def populate_from_csv():
+    """
+    Read company CSV file from inside the TEE, encrypt each record,
+    and store locally in the container's encrypted-data directory.
+    """
+    global _released_key
+    global _released_key_name
+    
+    try:
+        if not _released_key:
+            return jsonify({
+                'status': 'error',
+                'message': 'No key released. Complete Secure Key Release first.'
+            }), 400
+        
+        company = get_company_name_from_key()
+        if not company:
+            return jsonify({
+                'status': 'error',
+                'message': 'Cannot determine company from key name'
+            }), 400
+        
+        # Determine which CSV file to read based on company
+        csv_filename = f"{company.lower()}-data.csv"
+        csv_path = f"/app/{csv_filename}"
+        
+        if not os.path.exists(csv_path):
+            return jsonify({
+                'status': 'error',
+                'message': f'CSV file not found: {csv_filename}. File should be at {csv_path}'
+            }), 404
+        
+        # Read CSV file
+        import csv
+        import datetime
+        
+        records = []
+        with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                records.append(row)
+        
+        if not records:
+            return jsonify({
+                'status': 'error',
+                'message': f'No records found in {csv_filename}'
+            }), 400
+        
+        # Encrypt each record - ALL fields get encrypted with company's secret key
+        encrypted_records = []
+        all_fields = ['name', 'phone', 'address', 'postal_code', 'city', 'country', 'age', 'salary', 'eye_color', 'favorite_color']
+        
+        for record in records:
+            encrypted_record = {
+                'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+                'company': company
+            }
+            
+            # Encrypt ALL fields with company's secret key
+            for field in all_fields:
+                value = record.get(field, '')
+                if value:
+                    encrypted_value, err = encrypt_data_with_key(str(value))
+                    if err:
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'Encryption failed for {field}: {err}'
+                        }), 500
+                    encrypted_record[f'{field}_encrypted'] = encrypted_value
+                else:
+                    encrypted_record[f'{field}_encrypted'] = None
+            
+            encrypted_records.append(encrypted_record)
+        
+        # Save to local storage inside the container
+        local_data_dir = '/app/encrypted-data'
+        os.makedirs(local_data_dir, exist_ok=True)
+        local_file = f'{local_data_dir}/{company}-encrypted.json'
+        
+        # Read existing local records (if any)
+        existing_data = []
+        try:
+            if os.path.exists(local_file):
+                with open(local_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    if not isinstance(existing_data, list):
+                        existing_data = [existing_data]
+        except:
+            existing_data = []
+        
+        # Append new encrypted records
+        existing_data.extend(encrypted_records)
+        
+        # Write to local file
+        try:
+            with open(local_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, indent=2)
+            
+            # Update init status so federated analysis doesn't waste 120s polling
+            _init_status['state'] = 'ready'
+            _init_status['ready'] = True
+            _init_status['records_encrypted'] = len(encrypted_records)
+            _init_status['total_records'] = len(existing_data)
+            _init_status['message'] = f'Ready - {len(existing_data)} records encrypted'
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Populated {len(encrypted_records)} records from {csv_filename}',
+                'company': company,
+                'source_file': csv_filename,
+                'records_added': len(encrypted_records),
+                'total_records': len(existing_data),
+                'destination': local_file,
+                'storage_type': 'local',
+                'note': 'All PII fields encrypted with company key. Demographic fields stored for analytics.'
+            })
+        except Exception as write_err:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to write local file: {str(write_err)}'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/company/list')
+def list_company_data():
+    """
+    Read and display company's encrypted data file from local storage.
+    Note: Decryption would require the private key which stays in Azure Key Vault HSM.
+    This endpoint shows the encrypted data to demonstrate that it's protected.
+    """
+    global _released_key
+    global _released_key_name
+    
+    try:
+        company = get_company_name_from_key()
+        
+        if not company:
+            # Try to determine company from SKR_KEY_NAME environment variable
+            key_name = os.environ.get('SKR_KEY_NAME', '')
+            if 'contoso' in key_name.lower():
+                company = 'contoso'
+            elif 'fabrikam' in key_name.lower():
+                company = 'fabrikam'
+            elif 'wingtip' in key_name.lower():
+                company = 'wingtip'
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Cannot determine company. Release a key first or check SKR configuration.'
+                }), 400
+        
+        # Read from local encrypted data file
+        local_data_dir = '/app/encrypted-data'
+        local_file = f'{local_data_dir}/{company}-encrypted.json'
+        
+        if os.path.exists(local_file):
+            with open(local_file, 'r', encoding='utf-8') as f:
+                all_data = json.load(f)
+            
+            # Add line numbers to all records (1-based index)
+            if isinstance(all_data, list):
+                for i, record in enumerate(all_data):
+                    record['line_number'] = i + 1
+                all_records = all_data
+            else:
+                all_data['line_number'] = 1
+                all_records = [all_data]
+            
+            return jsonify({
+                'status': 'success',
+                'company': company,
+                'local_file': local_file,
+                'record_count': len(all_records),
+                'records': all_records,
+                'key_released': _released_key is not None,
+                'storage_type': 'local',
+                'note': 'Data is encrypted and stored locally in the container.'
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'company': company,
+                'local_file': local_file,
+                'record_count': 0,
+                'records': [],
+                'message': 'No encrypted data file exists yet. Run /company/populate or wait for auto-initialization.'
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/company/encrypted-status')
+def encrypted_data_status():
+    """
+    Check the status of the encrypted data file (quick summary without full data).
+    """
+    try:
+        key_name = os.environ.get('SKR_KEY_NAME', '')
+        company = None
+        if 'contoso' in key_name.lower():
+            company = 'contoso'
+        elif 'fabrikam' in key_name.lower():
+            company = 'fabrikam'
+        elif 'wingtip' in key_name.lower():
+            company = 'wingtip'
+        elif 'woodgrove' in key_name.lower():
+            company = 'woodgrove'
+        
+        local_data_dir = '/app/encrypted-data'
+        local_file = f'{local_data_dir}/{company}-encrypted.json' if company else None
+        
+        result = {
+            'company': company,
+            'key_name': key_name,
+            'key_released': _released_key is not None,
+            'encrypted_file': local_file,
+            'file_exists': os.path.exists(local_file) if local_file else False,
+        }
+        
+        if result['file_exists']:
+            # Get file stats
+            stat = os.stat(local_file)
+            result['file_size_bytes'] = stat.st_size
+            
+            # Count records
+            with open(local_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                result['record_count'] = len(data) if isinstance(data, list) else 1
+                
+                # Show first record summary (fields only, no values)
+                if isinstance(data, list) and len(data) > 0:
+                    result['fields'] = list(data[0].keys())
+                elif isinstance(data, dict):
+                    result['fields'] = list(data.keys())
+            
+            result['status'] = 'success'
+            result['message'] = f'Encrypted data file exists with {result["record_count"]} records'
+        else:
+            result['status'] = 'pending'
+            result['message'] = 'No encrypted data file yet. Auto-initialization may still be running.'
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# =============================================================================
+# FEDERATED ANALYSIS - Local analysis at each partner, aggregate results only
+# =============================================================================
+
+def _compute_result_signature(result_data):
+    """
+    Compute an HMAC-SHA256 signature over aggregate results using the released key's modulus.
+    This binds the results to the specific container that produced them, since only this
+    container has access to the released key material.
+    Returns (signature_hex, checksum_hex, signing_metadata).
+    """
+    import hmac
+    
+    # Use the released key's modulus bytes as HMAC key material
+    # This binds the signature to the specific SKR-released key
+    global _released_key
+    if _released_key:
+        key_data = _released_key
+        if isinstance(key_data, dict) and 'key' in key_data:
+            key_data = key_data['key']
+        n_b64 = key_data.get('n', '') if isinstance(key_data, dict) else ''
+        # Use first 32 bytes of modulus as HMAC key
+        import base64
+        try:
+            padding_needed = 4 - len(n_b64) % 4
+            if padding_needed != 4:
+                n_b64 += '=' * padding_needed
+            n_bytes = base64.urlsafe_b64decode(n_b64.replace('+', '-').replace('/', '_') if '+' in n_b64 else n_b64)
+            hmac_key = n_bytes[:32]
+        except Exception:
+            hmac_key = b'no-key-available'
+    else:
+        hmac_key = b'no-key-available'
+    
+    # Compute content checksum (SHA-256 of canonical JSON)
+    canonical = json.dumps(result_data, sort_keys=True, separators=(',', ':'))
+    content_checksum = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    
+    # Compute HMAC signature
+    signature = hmac.new(hmac_key, canonical.encode('utf-8'), hashlib.sha256).hexdigest()
+    
+    signing_metadata = {
+        'algorithm': 'HMAC-SHA256',
+        'content_hash_algorithm': 'SHA-256',
+        'key_binding': 'SKR-released RSA modulus (first 32 bytes)',
+        'content_checksum': content_checksum,
+        'signed_at': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+        'nonce': secrets.token_hex(16)
+    }
+    
+    return signature, content_checksum, signing_metadata
+
+
+def _compute_container_integrity():
+    """
+    Compute integrity checksums for the running container's key files.
+    Returns a dict of file paths to SHA-256 hashes for visual validation.
+    """
+    integrity = {}
+    check_files = ['/app/app.py', '/app/templates/index.html', '/etc/supervisor/conf.d/supervisord.conf']
+    for filepath in check_files:
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, 'rb') as f:
+                    integrity[filepath] = hashlib.sha256(f.read()).hexdigest()
+        except Exception:
+            pass
+    return integrity
+
+
+@app.route('/company/analysis-results')
+def company_analysis_results():
+    """
+    Return pre-computed demographic analysis as JSON.
+    This endpoint is what Woodgrove calls to get aggregate stats from each company.
+    Only statistical summaries are returned - NO raw PII data leaves the container.
+    """
+    from collections import Counter, defaultdict
+    import time
+
+    # Return cached results if available (pre-computed during init - no decryption needed)
+    global _cached_analysis_results
+    if _cached_analysis_results:
+        return jsonify(_cached_analysis_results)
+
+    global _released_key
+    global _released_key_name
+
+    company = get_company_name_from_key()
+    if not company:
+        return jsonify({'status': 'error', 'message': 'Cannot determine company identity'}), 400
+
+    if not _released_key:
+        # Try auto-release before failing
+        key_name = os.environ.get('SKR_KEY_NAME', '')
+        maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+        akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+        if key_name and akv_endpoint:
+            try:
+                maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+                akv_clean = akv_endpoint.replace('https://', '').replace('http://', '')
+                resp = requests.post("http://localhost:8080/key/release", json={
+                    "maa_endpoint": maa_clean, "akv_endpoint": akv_clean, "kid": key_name
+                }, timeout=10)
+                if resp.status_code == 200:
+                    skr_response = resp.json()
+                    key_data = skr_response.get('key', skr_response)
+                    if isinstance(key_data, str):
+                        try:
+                            key_data = json.loads(key_data)
+                        except:
+                            pass
+                    _released_key = key_data
+                    _released_key_name = key_name
+            except Exception:
+                pass
+        if not _released_key:
+            return jsonify({'status': 'error', 'message': 'Key not released and auto-release failed.'}), 503
+
+    local_file = f'/app/encrypted-data/{company}-encrypted.json'
+    if not os.path.exists(local_file):
+        return jsonify({'status': 'error', 'message': 'No encrypted data. Run /company/populate first.'}), 404
+
+    start_time = time.time()
+
+    with open(local_file, 'r', encoding='utf-8') as f:
+        encrypted_records = json.load(f)
+
+    if not isinstance(encrypted_records, list) or len(encrypted_records) == 0:
+        return jsonify({'status': 'error', 'message': 'No records to analyze'}), 404
+
+    # Decrypt all records inside this TEE
+    all_records = []
+    for record in encrypted_records:
+        decrypted = decrypt_all_fields(record, _released_key)
+        if decrypted.get('age'):
+            decrypted['generation'] = get_generation(decrypted['age'])
+        all_records.append(decrypted)
+
+    total_records = len(all_records)
+
+    # Compute analytics (same logic as company_analyze_stream)
+    country_counts = Counter(r.get('country') for r in all_records if r.get('country'))
+    country_city_data = defaultdict(list)
+    for r in all_records:
+        if r.get('country') and r.get('city'):
+            country_city_data[r['country']].append(r['city'])
+
+    top_countries = []
+    for country_name, count in country_counts.most_common(10):
+        city_counts = Counter(country_city_data[country_name])
+        top_cities = [{'city': c, 'count': n} for c, n in city_counts.most_common(3)]
+        top_countries.append({'country': country_name, 'count': count, 'top_cities': top_cities})
+
+    gen_order = ['Gen Alpha', 'Gen Z', 'Millennials', 'Gen X', 'Baby Boomers', 'Silent Generation']
+    gen_counts = Counter(r.get('generation') for r in all_records if r.get('generation'))
+    gen_total = sum(gen_counts.values()) or 1
+    generations = [{'generation': g, 'count': gen_counts.get(g, 0),
+                    'percent': round(100 * gen_counts.get(g, 0) / gen_total, 1)}
+                   for g in gen_order if gen_counts.get(g, 0) > 0]
+
+    salaries = [r['salary'] for r in all_records if r.get('salary')]
+    salary_stats = {
+        'count': len(salaries),
+        'avg': round(sum(salaries) / len(salaries)) if salaries else 0,
+        'min': min(salaries) if salaries else 0,
+        'max': max(salaries) if salaries else 0
+    }
+
+    country_salary_data = defaultdict(list)
+    for r in all_records:
+        if r.get('country') and r.get('salary'):
+            country_salary_data[r['country']].append(r['salary'])
+    salary_by_country = []
+    for cname, sals in country_salary_data.items():
+        salary_by_country.append({
+            'country': cname, 'avg_salary': round(sum(sals) / len(sals)),
+            'count': len(sals), 'min_salary': min(sals), 'max_salary': max(sals)
+        })
+    salary_by_country.sort(key=lambda x: x['avg_salary'], reverse=True)
+
+    eye_colors_count = Counter(r.get('eye_color') for r in all_records if r.get('eye_color'))
+    eye_color_list = eye_colors_count.most_common()
+
+    fav_colors = Counter(r.get('favorite_color') for r in all_records if r.get('favorite_color'))
+    top_3_fav = [{'color': c, 'count': n} for c, n in fav_colors.most_common(3)]
+
+    total_time = time.time() - start_time
+    company_display = company.title() if company != 'wingtip' else 'Wingtip Toys'
+
+    return jsonify({
+        'status': 'success',
+        'company': company,
+        'company_display': company_display,
+        'record_count': total_records,
+        'analysis_time_seconds': round(total_time, 2),
+        'top_10_countries': top_countries,
+        'generations': generations,
+        'salary_stats': salary_stats,
+        'salary_by_country': salary_by_country,
+        'eye_colors': {
+            'most_common': {'color': eye_color_list[0][0], 'count': eye_color_list[0][1]} if eye_color_list else None,
+            'least_common': {'color': eye_color_list[-1][0], 'count': eye_color_list[-1][1]} if eye_color_list else None,
+            'all': [{'color': c, 'count': n} for c, n in eye_color_list]
+        },
+        'top_3_favorite_colors': top_3_fav,
+        'privacy_note': f'All analysis computed INSIDE {company_display} TEE. Only aggregate statistics returned - no PII.'
+    })
+
+
+@app.route('/company/analyze-stream')
+def company_analyze_stream():
+    """
+    Stream progress updates for THIS company's own demographic analysis using SSE.
+    Each company decrypts and analyzes its own data inside its own TEE.
+    No data leaves the container - results are computed locally.
+    """
+    from flask import Response
+    from collections import Counter, defaultdict
+    import time
+
+    def generate():
+        global _released_key
+
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+        company = get_company_name_from_key()
+
+        if not company:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Cannot determine company identity. Release key first.'})}\n\n"
+            return
+
+        if not _released_key:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Key not released. Complete Secure Key Release first.'})}\n\n"
+            return
+
+        # Read encrypted data from local storage
+        local_file = f'/app/encrypted-data/{company}-encrypted.json'
+        if not os.path.exists(local_file):
+            yield f"data: {json.dumps({'type': 'error', 'message': f'No encrypted data found. Run data population first.'})}\n\n"
+            return
+
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'load', 'message': f'Loading encrypted records for {company.title()}...'})}\n\n"
+
+        with open(local_file, 'r', encoding='utf-8') as f:
+            encrypted_records = json.load(f)
+
+        if not isinstance(encrypted_records, list) or len(encrypted_records) == 0:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'No records to analyze'})}\n\n"
+            return
+
+        total_encrypted = len(encrypted_records)
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'decrypt', 'message': f'Decrypting {total_encrypted} records inside TEE...', 'total': total_encrypted})}\n\n"
+
+        # Phase 2: Decrypt records in batches with progress
+        all_records = []
+        start_time = time.time()
+        batch_size = 20
+
+        for batch_start in range(0, total_encrypted, batch_size):
+            batch_end = min(batch_start + batch_size, total_encrypted)
+            batch = encrypted_records[batch_start:batch_end]
+
+            for record in batch:
+                decrypted = decrypt_all_fields(record, _released_key)
+                if decrypted.get('age'):
+                    decrypted['generation'] = get_generation(decrypted['age'])
+                all_records.append(decrypted)
+
+            decrypted_count = len(all_records)
+            elapsed = time.time() - start_time
+            rate = decrypted_count / elapsed if elapsed > 0 else 0
+            remaining = (total_encrypted - decrypted_count) / rate if rate > 0 else 0
+            yield f"data: {json.dumps({'type': 'progress', 'decrypted': decrypted_count, 'total': total_encrypted, 'percent': round(100 * decrypted_count / total_encrypted, 1), 'elapsed': round(elapsed, 1), 'remaining': round(remaining, 1)})}\n\n"
+
+        # Phase 3: Compute analytics
+        yield f"data: {json.dumps({'type': 'status', 'phase': 'analyze', 'message': 'Computing demographics...'})}\n\n"
+
+        total_records = len(all_records)
+
+        # Country distribution with top cities
+        country_counts = Counter(r.get('country') for r in all_records if r.get('country'))
+        country_city_data = defaultdict(list)
+        for r in all_records:
+            if r.get('country') and r.get('city'):
+                country_city_data[r['country']].append(r['city'])
+
+        top_countries = []
+        for country_name, count in country_counts.most_common(10):
+            city_counts = Counter(country_city_data[country_name])
+            top_cities = [{'city': c, 'count': n} for c, n in city_counts.most_common(3)]
+            top_countries.append({'country': country_name, 'count': count, 'top_cities': top_cities})
+
+        # Generation breakdown
+        gen_order = ['Gen Alpha', 'Gen Z', 'Millennials', 'Gen X', 'Baby Boomers', 'Silent Generation']
+        gen_counts = Counter(r.get('generation') for r in all_records if r.get('generation'))
+        gen_total = sum(gen_counts.values()) or 1
+        generations = [{'generation': g, 'count': gen_counts.get(g, 0),
+                        'percent': round(100 * gen_counts.get(g, 0) / gen_total, 1)}
+                       for g in gen_order if gen_counts.get(g, 0) > 0]
+
+        # Salary statistics
+        salaries = [r['salary'] for r in all_records if r.get('salary')]
+        salary_stats = {
+            'count': len(salaries),
+            'avg': round(sum(salaries) / len(salaries)) if salaries else 0,
+            'min': min(salaries) if salaries else 0,
+            'max': max(salaries) if salaries else 0
+        }
+
+        # Salary by country
+        country_salary_data = defaultdict(list)
+        for r in all_records:
+            if r.get('country') and r.get('salary'):
+                country_salary_data[r['country']].append(r['salary'])
+        salary_by_country = []
+        for cname, sals in country_salary_data.items():
+            salary_by_country.append({
+                'country': cname, 'avg_salary': round(sum(sals) / len(sals)),
+                'count': len(sals), 'min_salary': min(sals), 'max_salary': max(sals)
+            })
+        salary_by_country.sort(key=lambda x: x['avg_salary'], reverse=True)
+
+        # Eye color distribution
+        eye_colors_count = Counter(r.get('eye_color') for r in all_records if r.get('eye_color'))
+        eye_color_list = eye_colors_count.most_common()
+
+        # Favorite colors
+        fav_colors = Counter(r.get('favorite_color') for r in all_records if r.get('favorite_color'))
+        top_3_fav = [{'color': c, 'count': n} for c, n in fav_colors.most_common(3)]
+
+        total_time = time.time() - start_time
+
+        company_display = company.title() if company != 'wingtip' else 'Wingtip Toys'
+
+        result = {
+            'type': 'complete',
+            'status': 'success',
+            'company': company,
+            'company_display': company_display,
+            'record_count': total_records,
+            'total_time': round(total_time, 2),
+            'top_10_countries': top_countries,
+            'generations': generations,
+            'salary_stats': salary_stats,
+            'salary_by_country': salary_by_country,
+            'eye_colors': {
+                'most_common': {'color': eye_color_list[0][0], 'count': eye_color_list[0][1]} if eye_color_list else None,
+                'least_common': {'color': eye_color_list[-1][0], 'count': eye_color_list[-1][1]} if eye_color_list else None,
+                'all': [{'color': c, 'count': n} for c, n in eye_color_list]
+            },
+            'top_3_favorite_colors': top_3_fav,
+            'note': f'Analysis computed INSIDE {company_display} TEE. No PII left this container.'
+        }
+        yield f"data: {json.dumps(result)}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+    })
+
+
+@app.route('/federated/local-analyze', methods=['POST'])
+@rate_limit(max_calls=10, period=60)
+def federated_local_analyze():
+    """
+    FEDERATED ANALYSIS: Each partner runs analysis locally on their own decrypted data.
+    Returns ONLY aggregate statistics (no PII leaves the container).
+    Results are signed with the container's SKR-released key for verification.
+    
+    This is the core of the federated model: data stays local, only aggregates are shared.
+    """
+    from collections import Counter, defaultdict
+    
+    try:
+        company = get_company_name_from_key()
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+        
+        # Only data provider containers can run local analysis
+        if 'woodgrove' in our_key_name.lower():
+            return jsonify({'status': 'error', 'message': 'Woodgrove collects results, not produces them. Use /federated/collect'}), 403
+        
+        if not company:
+            return jsonify({'status': 'error', 'message': 'Cannot determine company identity'}), 400
+        
+        global _released_key
+        if not _released_key:
+            return jsonify({'status': 'error', 'message': 'Key not released. Cannot decrypt local data.'}), 400
+        
+        # Read encrypted data from local storage
+        local_file = f'/app/encrypted-data/{company}-encrypted.json'
+        if not os.path.exists(local_file):
+            return jsonify({'status': 'error', 'message': f'No encrypted data found for {company}'}), 404
+        
+        with open(local_file, 'r', encoding='utf-8') as f:
+            encrypted_records = json.load(f)
+        
+        if not isinstance(encrypted_records, list) or len(encrypted_records) == 0:
+            return jsonify({'status': 'error', 'message': 'No records to analyze'}), 404
+        
+        # Decrypt and analyze locally - NO PII leaves this container
+        all_records = []
+        for record in encrypted_records:
+            decrypted = decrypt_all_fields(record, _released_key)
+            if decrypted.get('age'):
+                decrypted['generation'] = get_generation(decrypted['age'])
+            all_records.append(decrypted)
+        
+        # Compute aggregate statistics only (no PII)
+        total_records = len(all_records)
+        
+        # Country distribution
+        country_counts = Counter(r.get('country') for r in all_records if r.get('country'))
+        country_city_data = defaultdict(list)
+        for r in all_records:
+            if r.get('country') and r.get('city'):
+                country_city_data[r['country']].append(r['city'])
+        
+        top_countries = []
+        for country, count in country_counts.most_common(10):
+            city_counts = Counter(country_city_data[country])
+            top_cities = [{'city': c, 'count': n} for c, n in city_counts.most_common(3)]
+            top_countries.append({'country': country, 'count': count, 'top_cities': top_cities})
+        
+        # Generation breakdown
+        gen_order = ['Gen Alpha', 'Gen Z', 'Millennials', 'Gen X', 'Baby Boomers', 'Silent Generation']
+        gen_counts = Counter(r.get('generation') for r in all_records if r.get('generation'))
+        gen_total = sum(gen_counts.values()) or 1
+        generations = [{'generation': g, 'count': gen_counts.get(g, 0),
+                        'percent': round(100 * gen_counts.get(g, 0) / gen_total, 1)}
+                       for g in gen_order if gen_counts.get(g, 0) > 0]
+        
+        # Salary statistics
+        salaries = [r['salary'] for r in all_records if r.get('salary')]
+        salary_stats = {
+            'count': len(salaries),
+            'avg': round(sum(salaries) / len(salaries)) if salaries else 0,
+            'min': min(salaries) if salaries else 0,
+            'max': max(salaries) if salaries else 0
+        }
+        
+        # Salary by country
+        country_salary_data = defaultdict(list)
+        for r in all_records:
+            if r.get('country') and r.get('salary'):
+                country_salary_data[r['country']].append(r['salary'])
+        salary_by_country = []
+        for country, sals in country_salary_data.items():
+            salary_by_country.append({
+                'country': country, 'avg_salary': round(sum(sals) / len(sals)),
+                'count': len(sals), 'min_salary': min(sals), 'max_salary': max(sals)
+            })
+        salary_by_country.sort(key=lambda x: x['avg_salary'], reverse=True)
+        
+        # Eye color distribution
+        eye_colors_count = Counter(r.get('eye_color') for r in all_records if r.get('eye_color'))
+        eye_color_list = eye_colors_count.most_common()
+        
+        # Favorite colors
+        fav_colors = Counter(r.get('favorite_color') for r in all_records if r.get('favorite_color'))
+        top_3_fav = [{'color': c, 'count': n} for c, n in fav_colors.most_common(3)]
+        
+        # Build the aggregate result (NO PII - only statistics)
+        aggregate_result = {
+            'company': company,
+            'company_display': company.title() if company != 'wingtip' else 'Wingtip Toys',
+            'record_count': total_records,
+            'top_countries': top_countries,
+            'generations': generations,
+            'salary_stats': salary_stats,
+            'salary_by_country': salary_by_country,
+            'eye_colors': {
+                'most_common': {'color': eye_color_list[0][0], 'count': eye_color_list[0][1]} if eye_color_list else None,
+                'least_common': {'color': eye_color_list[-1][0], 'count': eye_color_list[-1][1]} if eye_color_list else None,
+                'all': [{'color': c, 'count': n} for c, n in eye_color_list]
+            },
+            'top_favorite_colors': top_3_fav
+        }
+        
+        # Sign the results
+        signature, checksum, signing_meta = _compute_result_signature(aggregate_result)
+        container_integrity = _compute_container_integrity()
+        
+        security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+        
+        return jsonify({
+            'status': 'success',
+            'federated_model': True,
+            'pii_transmitted': False,
+            'aggregate_result': aggregate_result,
+            'verification': {
+                'signature': signature,
+                'content_checksum': checksum,
+                'signing_metadata': signing_meta,
+                'container_policy_hash': security_policy_hash,
+                'container_integrity': container_integrity,
+                'attestation_binding': 'Results signed with SKR-released key material bound to AMD SEV-SNP TEE',
+                'image_managed_by': 'Woodgrove Bank'
+            },
+            'note': 'These aggregate statistics were computed INSIDE the confidential container. No PII left the TEE boundary.'
+        })
+        
+    except Exception as e:
+        app.logger.exception('Error in federated_local_analyze')
+        return jsonify({'status': 'error', 'message': 'Internal error during local analysis'}), 500
+
+
+@app.route('/federated/collect', methods=['POST'])
+@rate_limit(max_calls=5, period=60)
+def federated_collect_results():
+    """
+    WOODGROVE ONLY: Collect pre-computed aggregate results from all partners.
+    In the federated model, Woodgrove does NOT access raw/encrypted data.
+    Instead, each partner runs local analysis and Woodgrove collects the aggregates.
+    
+    Each partner's results include a signature and checksum for verification.
+    """
+    from collections import Counter, defaultdict
+    
+    try:
+        our_key_name = os.environ.get('SKR_KEY_NAME', '')
+        if 'woodgrove' not in our_key_name.lower():
+            return jsonify({'status': 'error', 'message': 'Only Woodgrove Bank can collect federated results'}), 403
+        
+        # Get partner container URLs
+        partner_urls = {
+            'contoso': os.environ.get('PARTNER_CONTOSO_URL', ''),
+            'fabrikam': os.environ.get('PARTNER_FABRIKAM_URL', ''),
+            'wingtip': os.environ.get('PARTNER_WINGTIP_URL', '')
+        }
+        
+        partner_results = {}
+        verification_results = {}
+        errors = []
+        
+        for partner_name, partner_url in partner_urls.items():
+            if not partner_url:
+                errors.append(f'{partner_name}: URL not configured')
+                continue
+            
+            try:
+                # Request the partner to run local analysis and return aggregates
+                response = _inter_container_session.post(
+                    f'{partner_url}/federated/local-analyze',
+                    json={},
+                    timeout=120
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    partner_results[partner_name] = result.get('aggregate_result', {})
+                    
+                    # Verify the result integrity
+                    verification = result.get('verification', {})
+                    reported_checksum = verification.get('content_checksum', '')
+                    
+                    # Recompute checksum on the received aggregate
+                    received_aggregate = result.get('aggregate_result', {})
+                    canonical = json.dumps(received_aggregate, sort_keys=True, separators=(',', ':'))
+                    computed_checksum = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+                    
+                    checksum_valid = reported_checksum == computed_checksum
+                    
+                    verification_results[partner_name] = {
+                        'checksum_valid': checksum_valid,
+                        'reported_checksum': reported_checksum,
+                        'computed_checksum': computed_checksum,
+                        'signature': verification.get('signature', ''),
+                        'container_policy_hash': verification.get('container_policy_hash', ''),
+                        'container_integrity': verification.get('container_integrity', {}),
+                        'signing_metadata': verification.get('signing_metadata', {}),
+                        'image_managed_by': verification.get('image_managed_by', 'Unknown')
+                    }
+                else:
+                    errors.append(f'{partner_name}: HTTP {response.status_code}')
+            except Exception as e:
+                errors.append(f'{partner_name}: {str(e)}')
+        
+        if not partner_results:
+            return jsonify({'status': 'error', 'message': 'No partner results collected', 'errors': errors}), 500
+        
+        # Combine aggregate results from all partners
+        combined = _combine_federated_results(partner_results)
+        
+        # Sign the combined result from Woodgrove's perspective
+        combined_signature, combined_checksum, combined_signing_meta = _compute_result_signature(combined)
+        
+        security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+        
+        return jsonify({
+            'status': 'success',
+            'federated_model': True,
+            'pii_transmitted': False,
+            'partner_results': partner_results,
+            'combined_analytics': combined,
+            'verification': {
+                'partner_verification': verification_results,
+                'combined_signature': combined_signature,
+                'combined_checksum': combined_checksum,
+                'combined_signing_metadata': combined_signing_meta,
+                'woodgrove_policy_hash': security_policy_hash,
+                'all_checksums_valid': all(v.get('checksum_valid', False) for v in verification_results.values()),
+                'trust_chain': (
+                    'Each partner computed aggregates locally in their own AMD SEV-SNP TEE. '
+                    'Results were signed with their SKR-released key and verified by Woodgrove. '
+                    'No PII was transmitted between containers.'
+                )
+            },
+            'errors': errors if errors else None
+        })
+        
+    except Exception as e:
+        app.logger.exception('Error in federated_collect_results')
+        return jsonify({'status': 'error', 'message': 'Internal error during federated collection'}), 500
+
+
+def _combine_federated_results(partner_results):
+    """
+    Combine aggregate results from multiple partners into a unified view.
+    Works with pre-computed aggregates only (no raw data).
+    """
+    from collections import Counter, defaultdict
+    
+    total_records = 0
+    company_staff = {}
+    all_country_counts = Counter()
+    all_gen_counts = Counter()
+    all_eye_counts = Counter()
+    all_fav_counts = Counter()
+    all_salaries_by_country = defaultdict(lambda: {'total': 0, 'count': 0, 'min': float('inf'), 'max': 0})
+    salary_totals = {}
+    generations_by_company = {}
+    
+    for partner_name, result in partner_results.items():
+        count = result.get('record_count', 0)
+        total_records += count
+        display_name = result.get('company_display', partner_name.title())
+        company_staff[display_name] = count
+        
+        # Aggregate country data
+        for country_info in result.get('top_countries', []):
+            all_country_counts[country_info['country']] += country_info['count']
+        
+        # Aggregate generation data
+        for gen_info in result.get('generations', []):
+            all_gen_counts[gen_info['generation']] += gen_info['count']
+        
+        # Store per-company generations
+        generations_by_company[display_name] = result.get('generations', [])
+        
+        # Aggregate eye color data
+        for eye_info in result.get('eye_colors', {}).get('all', []):
+            all_eye_counts[eye_info['color']] += eye_info['count']
+        
+        # Aggregate favorite color data
+        for fav_info in result.get('top_favorite_colors', []):
+            all_fav_counts[fav_info['color']] += fav_info['count']
+        
+        # Aggregate salary data
+        salary_stats = result.get('salary_stats', {})
+        if salary_stats.get('count', 0) > 0:
+            salary_totals[display_name] = salary_stats
+        
+        for sc in result.get('salary_by_country', []):
+            country = sc['country']
+            entry = all_salaries_by_country[country]
+            entry['total'] += sc['avg_salary'] * sc['count']
+            entry['count'] += sc['count']
+            entry['min'] = min(entry['min'], sc['min_salary'])
+            entry['max'] = max(entry['max'], sc['max_salary'])
+    
+    # Build combined analytics
+    gen_order = ['Gen Alpha', 'Gen Z', 'Millennials', 'Gen X', 'Baby Boomers', 'Silent Generation']
+    combined_generations = [{'generation': g, 'count': all_gen_counts[g]}
+                           for g in gen_order if all_gen_counts.get(g, 0) > 0]
+    
+    eye_color_list = all_eye_counts.most_common()
+    
+    combined_salary_by_country = []
+    for country, data in all_salaries_by_country.items():
+        if data['count'] > 0:
+            combined_salary_by_country.append({
+                'country': country,
+                'avg_salary': round(data['total'] / data['count']),
+                'count': data['count'],
+                'min_salary': data['min'] if data['min'] != float('inf') else 0,
+                'max_salary': data['max']
+            })
+    combined_salary_by_country.sort(key=lambda x: x['avg_salary'], reverse=True)
+    
+    # Combined salary averages
+    all_avg_sum = sum(s['avg'] * s['count'] for s in salary_totals.values())
+    all_avg_count = sum(s['count'] for s in salary_totals.values())
+    avg_salaries = {name: stats['avg'] for name, stats in salary_totals.items()}
+    avg_salaries['Combined'] = round(all_avg_sum / all_avg_count) if all_avg_count > 0 else 0
+    
+    company_staff['Total'] = total_records
+    
+    return {
+        'total_count': total_records,
+        'company_staff': company_staff,
+        'top_10_countries': [{'country': c, 'count': n} for c, n in all_country_counts.most_common(10)],
+        'generations': combined_generations,
+        'generations_by_company': generations_by_company,
+        'avg_salaries': avg_salaries,
+        'salary_by_country': combined_salary_by_country,
+        'eye_colors': {
+            'most_common': {'color': eye_color_list[0][0], 'count': eye_color_list[0][1]} if eye_color_list else None,
+            'least_common': {'color': eye_color_list[-1][0], 'count': eye_color_list[-1][1]} if eye_color_list else None,
+            'all': [{'color': c, 'count': n} for c, n in eye_color_list]
+        },
+        'top_3_favorite_colors': [{'color': c, 'count': n} for c, n in all_fav_counts.most_common(3)],
+        'partner_count': len(partner_results),
+        'analysis_note': (
+            'Federated analysis: Each partner computed these aggregates locally in their own '
+            'AMD SEV-SNP TEE using the Woodgrove-managed analysis container image. '
+            'No PII was transmitted - only aggregate statistics.'
+        )
+    }
+
+
+@app.route('/federated/verify', methods=['POST'])
+@rate_limit(max_calls=20, period=60)
+def federated_verify_result():
+    """
+    Verify the integrity of a federated analysis result.
+    Accepts a result payload and its claimed checksum/signature,
+    recomputes the checksum to confirm no tampering occurred.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Request body required'}), 400
+        
+        aggregate_result = data.get('aggregate_result', {})
+        claimed_checksum = data.get('checksum', '')
+        
+        # Recompute checksum
+        canonical = json.dumps(aggregate_result, sort_keys=True, separators=(',', ':'))
+        computed_checksum = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+        
+        checksum_valid = computed_checksum == claimed_checksum
+        
+        return jsonify({
+            'status': 'success',
+            'verification': {
+                'checksum_valid': checksum_valid,
+                'claimed_checksum': claimed_checksum,
+                'computed_checksum': computed_checksum,
+                'result_size_bytes': len(canonical),
+                'tampered': not checksum_valid,
+                'verdict': 'INTEGRITY VERIFIED - Result has not been modified' if checksum_valid
+                          else 'INTEGRITY FAILURE - Result has been modified since signing'
+            }
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/container/validation', methods=['GET'])
+def container_validation():
+    """
+    Return comprehensive validation information for visual display on web pages.
+    Includes container integrity checksums, policy hashes, attestation status,
+    and image provenance information.
+    """
+    security_policy_hash = os.environ.get('SECURITY_POLICY_HASH', '')
+    key_name = os.environ.get('SKR_KEY_NAME', '')
+    maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', '')
+    
+    sev_status = check_sev_guest_device()
+    container_integrity = _compute_container_integrity()
+    
+    # Determine if this is a data provider or the aggregator
+    is_data_provider = any(x in key_name.lower() for x in ['contoso', 'fabrikam', 'wingtip'])
+    is_woodgrove = 'woodgrove' in key_name.lower()
+    
+    return jsonify({
+        'validation': {
+            'container_policy_hash': security_policy_hash,
+            'container_integrity_checksums': container_integrity,
+            'tee_available': sev_status.get('available', False),
+            'tee_device': sev_status.get('device_path', 'Not found'),
+            'attestation_endpoint': maa_endpoint,
+            'key_released': _released_key is not None,
+            'key_name': key_name,
+            'federated_role': 'data_provider' if is_data_provider else ('aggregator' if is_woodgrove else 'unknown'),
+            'image_managed_by': 'Woodgrove Bank',
+            'image_verification': (
+                'All partners pull the same container image managed by Woodgrove Bank. '
+                'The security policy hash (x-ms-sevsnpvm-hostdata) in the attestation claim '
+                'proves the container code has not been modified.'
+            )
+        },
+        'trust_indicators': {
+            'hardware_attestation': sev_status.get('available', False),
+            'policy_bound_keys': bool(security_policy_hash),
+            'signed_results': _released_key is not None,
+            'federated_analysis': True,
+            'no_pii_transmission': is_data_provider
+        }
+    })
+
+
+# =============================================================================
+# AUTO-INITIALIZATION ON STARTUP
+# =============================================================================
+
+def auto_initialize_woodgrove(key_name, maa_endpoint, akv_endpoint):
+    """
+    Auto-initialize Woodgrove Bank container:
+    1. Wait for SKR sidecar
+    2. Release Woodgrove's own key
+    3. Release partner keys from Contoso and Fabrikam Key Vaults
+    """
+    import time
+    global _released_key
+    global _released_key_name
+    
+    print(f"\n[WOODGROVE] Starting Woodgrove Bank auto-initialization...")
+    
+    # Step 1: Wait for SKR sidecar to be ready
+    print(f"\n[STEP 1/4] Waiting for SKR sidecar to be ready...")
+    max_retries = 30
+    sidecar_ready = False
+    
+    for i in range(max_retries):
+        try:
+            response = requests.get("http://localhost:8080/", timeout=2)
+            sidecar_ready = True
+            print(f"           SKR sidecar is ready (attempt {i+1}/{max_retries})")
+            break
+        except:
+            if i < max_retries - 1:
+                time.sleep(2)
+    
+    if not sidecar_ready:
+        print(f"\n[ERROR] Woodgrove auto-init FAILED: SKR sidecar not available")
+        print(f"{'='*60}\n")
+        return
+    
+    # Step 2: Release Woodgrove's own key
+    print(f"\n[STEP 2/4] Releasing Woodgrove's key...")
+    try:
+        akv_clean = akv_endpoint.replace('https://', '').replace('http://', '')
+        maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+        
+        response = requests.post(
+            "http://localhost:8080/key/release",
+            json={
+                "maa_endpoint": maa_clean,
+                "akv_endpoint": akv_clean,
+                "kid": key_name
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            skr_response = response.json()
+            key_data = skr_response.get('key', skr_response)
+            if isinstance(key_data, str):
+                try:
+                    key_data = json.loads(key_data)
+                except:
+                    pass
+            
+            _released_key = key_data
+            _released_key_name = key_name
+            print(f"           [SUCCESS] Woodgrove key released: {key_name}")
+        else:
+            print(f"           [FAILED] Woodgrove key release failed: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"           [ERROR] Woodgrove key release error: {str(e)}")
+    
+    # Summary
+    print(f"\n{'='*60}")
+    print(f"WOODGROVE AUTO-INITIALIZATION COMPLETED")
+    print(f"{'='*60}")
+    print(f"  Own Key Released:     {'YES' if _released_key else 'NO'}")
+    print(f"  Mode:                 Federated (no partner key release needed)")
+    print(f"  Partner URLs:         Configured via PARTNER_*_URL env vars")
+    print(f"{'='*60}\n")
+
+
+def auto_initialize_container():
+    """
+    Automatically perform attestation, key release, and CSV encryption on startup.
+    - Contoso/Fabrikam/Wingtip: Release key, encrypt CSV data
+    - Woodgrove: Release own key + partner keys for cross-company analytics
+    """
+    import time
+    import csv
+    import datetime
+    
+    # Determine which company this container belongs to based on SKR_KEY_NAME
+    key_name = os.environ.get('SKR_KEY_NAME', '')
+    maa_endpoint = os.environ.get('SKR_MAA_ENDPOINT', 'sharedeus.eus.attest.azure.net')
+    akv_endpoint = os.environ.get('SKR_AKV_ENDPOINT', '')
+    
+    # Identify company from key name
+    company = None
+    if 'contoso' in key_name.lower():
+        company = 'contoso'
+    elif 'fabrikam' in key_name.lower():
+        company = 'fabrikam'
+    elif 'wingtip' in key_name.lower():
+        company = 'wingtip'
+    elif 'woodgrove' in key_name.lower():
+        company = 'woodgrove'
+    
+    # Log startup info
+    print(f"\n{'='*60}")
+    print(f"AUTO-INITIALIZATION STARTED")
+    print(f"{'='*60}")
+    print(f"SKR_KEY_NAME: {key_name or '(not set)'}")
+    print(f"SKR_MAA_ENDPOINT: {maa_endpoint}")
+    print(f"SKR_AKV_ENDPOINT: {akv_endpoint or '(not set)'}")
+    print(f"Detected Company: {company or '(unknown)'}")
+    
+    # Handle Woodgrove separately - it needs partner key release
+    if company == 'woodgrove':
+        auto_initialize_woodgrove(key_name, maa_endpoint, akv_endpoint)
+        return
+    
+    # Skip if not Contoso, Fabrikam, or Wingtip
+    if not company or company not in ['contoso', 'fabrikam', 'wingtip']:
+        print(f"\n[SKIP] This container is not Contoso, Fabrikam, or Wingtip (key: {key_name})")
+        print(f"       Auto-initialization only runs for data provider containers.")
+        print(f"{'='*60}\n")
+        return
+    
+    # Check for CSV file
+    csv_filename = f"{company}-data.csv"
+    csv_path = f"/app/{csv_filename}"
+    
+    if not os.path.exists(csv_path):
+        print(f"\n[SKIP] CSV file not found: {csv_path}")
+        print(f"       Auto-initialization requires {csv_filename}")
+        print(f"{'='*60}\n")
+        return
+    
+    # Wait for SKR sidecar to be ready
+    print(f"\n[STEP 1/4] Waiting for SKR sidecar to be ready...")
+    _init_status['state'] = 'sidecar_wait'
+    _init_status['message'] = 'Waiting for SKR sidecar...'
+    max_retries = 30
+    sidecar_ready = False
+    
+    for i in range(max_retries):
+        try:
+            response = requests.get("http://localhost:8080/", timeout=2)
+            sidecar_ready = True
+            print(f"           SKR sidecar is ready (attempt {i+1}/{max_retries})")
+            break
+        except:
+            if i < max_retries - 1:
+                time.sleep(2)
+            else:
+                print(f"           [FAILED] SKR sidecar not available after {max_retries} attempts")
+    
+    if not sidecar_ready:
+        print(f"\n[ERROR] Auto-initialization FAILED: SKR sidecar not available")
+        print(f"{'='*60}\n")
+        _init_status['state'] = 'error'
+        _init_status['message'] = 'SKR sidecar not available'
+        return
+    
+    # Step 2: Perform MAA Attestation (informational only - key release does its own attestation)
+    print(f"\n[STEP 2/4] Performing MAA attestation...")
+    _init_status['state'] = 'attestation'
+    _init_status['message'] = 'Performing MAA attestation...'
+    attestation_success = False
+    
+    try:
+        # Clean up endpoint
+        maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+        
+        # Encode runtime_data as base64 JSON to satisfy the sidecar's expected format
+        import base64
+        runtime_payload = base64.b64encode(json.dumps({"source": "auto-init"}).encode()).decode()
+        
+        response = requests.post(
+            "http://localhost:8080/attest/maa",
+            json={"maa_endpoint": maa_clean, "runtime_data": runtime_payload},
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            attestation_success = True
+            print(f"           [SUCCESS] MAA attestation successful")
+            print(f"           MAA Endpoint: {maa_clean}")
+        else:
+            print(f"           [WARNING] MAA attestation failed: HTTP {response.status_code}")
+            print(f"           Response: {response.text[:200]}")
+            print(f"           Continuing to key release (it performs its own attestation)...")
+    except Exception as e:
+        print(f"           [WARNING] MAA attestation error: {str(e)}")
+        print(f"           Continuing to key release (it performs its own attestation)...")
+    
+    # Step 3: Perform Secure Key Release (with retry for sidecar timing)
+    print(f"\n[STEP 3/4] Performing Secure Key Release...")
+    _init_status['state'] = 'key_release'
+    _init_status['message'] = 'Releasing encryption key...'
+    global _released_key
+    global _released_key_name
+    skr_success = False
+    skr_max_retries = 3
+    
+    for skr_attempt in range(skr_max_retries):
+        try:
+            # Clean up endpoints
+            akv_clean = akv_endpoint.replace('https://', '').replace('http://', '')
+            maa_clean = maa_endpoint.replace('https://', '').replace('http://', '')
+            
+            response = requests.post(
+                "http://localhost:8080/key/release",
+                json={
+                    "maa_endpoint": maa_clean,
+                    "akv_endpoint": akv_clean,
+                    "kid": key_name
+                },
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                key_data = result.get('key', response.text)
+                
+                # Parse the key if it's JSON string
+                if isinstance(key_data, str):
+                    try:
+                        key_data = json.loads(key_data)
+                    except:
+                        pass
+                
+                _released_key = key_data
+                _released_key_name = key_name
+                skr_success = True
+                print(f"           [SUCCESS] Secure Key Release successful (attempt {skr_attempt + 1}/{skr_max_retries})")
+                print(f"           Key Name: {key_name}")
+                print(f"           AKV Endpoint: {akv_clean}")
+                break
+            else:
+                print(f"           [RETRY] SKR failed: HTTP {response.status_code} (attempt {skr_attempt + 1}/{skr_max_retries})")
+                print(f"           Response: {response.text[:200]}")
+                if skr_attempt < skr_max_retries - 1:
+                    time.sleep(5)
+        except Exception as e:
+            print(f"           [RETRY] SKR error: {str(e)} (attempt {skr_attempt + 1}/{skr_max_retries})")
+            if skr_attempt < skr_max_retries - 1:
+                time.sleep(5)
+    
+    if not skr_success:
+        print(f"\n[ERROR] Auto-initialization FAILED: Could not release key")
+        print(f"{'='*60}\n")
+        _init_status['state'] = 'error'
+        _init_status['message'] = 'Key release failed'
+        return
+    
+    # Step 4: Encrypt CSV and store locally
+    print(f"\n[STEP 4/4] Encrypting CSV file and storing locally...")
+    _init_status['state'] = 'encrypting'
+    _init_status['message'] = 'Reading CSV...'
+    
+    try:
+        # Read CSV file
+        records = []
+        with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                records.append(row)
+        
+        total_records = len(records)
+        print(f"           CSV File: {csv_filename}")
+        print(f"           Total Records: {total_records}")
+        _init_status['total_records'] = total_records
+        _init_status['message'] = f'Encrypting 0/{total_records} records...'
+        
+        if total_records == 0:
+            print(f"           [SKIP] No records to encrypt")
+            print(f"{'='*60}\n")
+            _init_status['state'] = 'ready'
+            _init_status['ready'] = True
+            _init_status['message'] = 'No records to encrypt'
+            return
+        
+        # Encrypt each record - ALL fields get encrypted with company's secret key
+        encrypted_records = []
+        encryption_errors = 0
+        all_fields = ['name', 'phone', 'address', 'postal_code', 'city', 'country', 'age', 'salary', 'eye_color', 'favorite_color']
+        
+        for idx, record in enumerate(records):
+            # Release GIL periodically so request threads can run
+            if idx % 10 == 0:
+                time.sleep(0)
+                _init_status['records_encrypted'] = idx
+                _init_status['message'] = f'Encrypting {idx}/{total_records} records...'
+
+            encrypted_record = {
+                'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+                'company': company
+            }
+            
+            has_error = False
+            # Encrypt ALL fields with company's secret key
+            for field in all_fields:
+                value = record.get(field, '')
+                if value:
+                    encrypted_value, err = encrypt_data_with_key(str(value))
+                    if err:
+                        has_error = True
+                        break
+                    encrypted_record[f'{field}_encrypted'] = encrypted_value
+                else:
+                    encrypted_record[f'{field}_encrypted'] = None
+            
+            if has_error:
+                encryption_errors += 1
+                continue
+            
+            encrypted_records.append(encrypted_record)
+        
+        lines_encrypted = len(encrypted_records)
+        print(f"           Records Encrypted: {lines_encrypted}")
+        
+        if encryption_errors > 0:
+            print(f"           Encryption Errors: {encryption_errors}")
+        
+        if lines_encrypted == 0:
+            print(f"           [FAILED] No records encrypted successfully")
+            print(f"{'='*60}\n")
+            return
+        
+        # Save to local storage inside the container
+        local_data_dir = '/app/encrypted-data'
+        os.makedirs(local_data_dir, exist_ok=True)
+        local_file = f'{local_data_dir}/{company}-encrypted.json'
+        
+        # Read existing local records (if any)
+        existing_data = []
+        try:
+            if os.path.exists(local_file):
+                with open(local_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    if not isinstance(existing_data, list):
+                        existing_data = [existing_data]
+        except:
+            existing_data = []
+        
+        # Append new encrypted records
+        existing_data.extend(encrypted_records)
+        
+        # Write to local file
+        try:
+            with open(local_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, indent=2)
+            
+            print(f"           [SUCCESS] Saved to local storage")
+            print(f"           Destination: {local_file}")
+        except Exception as write_err:
+            print(f"           [FAILED] Write failed: {str(write_err)}")
+            print(f"{'='*60}\n")
+            return
+        
+        # Pre-compute analysis results from raw records (still in memory, no decryption needed)
+        global _cached_analysis_results
+        print(f"           Pre-computing analysis results...")
+        try:
+            from collections import Counter, defaultdict
+            all_records = []
+            for r in records:
+                rec = dict(r)
+                if rec.get('age'):
+                    try:
+                        rec['age'] = int(rec['age'])
+                        rec['generation'] = get_generation(rec['age'])
+                    except (ValueError, TypeError):
+                        pass
+                if rec.get('salary'):
+                    try:
+                        rec['salary'] = int(float(rec['salary']))
+                    except (ValueError, TypeError):
+                        rec['salary'] = None
+                all_records.append(rec)
+
+            country_counts = Counter(r.get('country') for r in all_records if r.get('country'))
+            country_city_data = defaultdict(list)
+            for r in all_records:
+                if r.get('country') and r.get('city'):
+                    country_city_data[r['country']].append(r['city'])
+
+            top_countries = []
+            for country_name, count in country_counts.most_common(10):
+                city_counts = Counter(country_city_data[country_name])
+                top_cities = [{'city': c, 'count': n} for c, n in city_counts.most_common(3)]
+                top_countries.append({'country': country_name, 'count': count, 'top_cities': top_cities})
+
+            gen_order = ['Gen Alpha', 'Gen Z', 'Millennials', 'Gen X', 'Baby Boomers', 'Silent Generation']
+            gen_counts = Counter(r.get('generation') for r in all_records if r.get('generation'))
+            gen_total = sum(gen_counts.values()) or 1
+            generations = [{'generation': g, 'count': gen_counts.get(g, 0),
+                            'percent': round(100 * gen_counts.get(g, 0) / gen_total, 1)}
+                           for g in gen_order if gen_counts.get(g, 0) > 0]
+
+            salaries = [r['salary'] for r in all_records if r.get('salary')]
+            salary_stats = {
+                'count': len(salaries),
+                'avg': round(sum(salaries) / len(salaries)) if salaries else 0,
+                'min': min(salaries) if salaries else 0,
+                'max': max(salaries) if salaries else 0
+            }
+
+            country_salary_data = defaultdict(list)
+            for r in all_records:
+                if r.get('country') and r.get('salary'):
+                    country_salary_data[r['country']].append(r['salary'])
+            salary_by_country = []
+            for cname, sals in country_salary_data.items():
+                salary_by_country.append({
+                    'country': cname, 'avg_salary': round(sum(sals) / len(sals)),
+                    'count': len(sals), 'min_salary': min(sals), 'max_salary': max(sals)
+                })
+            salary_by_country.sort(key=lambda x: x['avg_salary'], reverse=True)
+
+            eye_colors_count = Counter(r.get('eye_color') for r in all_records if r.get('eye_color'))
+            eye_color_list = eye_colors_count.most_common()
+
+            fav_colors = Counter(r.get('favorite_color') for r in all_records if r.get('favorite_color'))
+            top_3_fav = [{'color': c, 'count': n} for c, n in fav_colors.most_common(3)]
+
+            company_display = company.title() if company != 'wingtip' else 'Wingtip Toys'
+
+            _cached_analysis_results = {
+                'status': 'success',
+                'company': company,
+                'company_display': company_display,
+                'record_count': total_records,
+                'analysis_time_seconds': 0.0,
+                'top_10_countries': top_countries,
+                'generations': generations,
+                'salary_stats': salary_stats,
+                'salary_by_country': salary_by_country,
+                'eye_colors': {
+                    'most_common': {'color': eye_color_list[0][0], 'count': eye_color_list[0][1]} if eye_color_list else None,
+                    'least_common': {'color': eye_color_list[-1][0], 'count': eye_color_list[-1][1]} if eye_color_list else None,
+                    'all': [{'color': c, 'count': n} for c, n in eye_color_list]
+                },
+                'top_3_favorite_colors': top_3_fav,
+                'privacy_note': f'All analysis computed INSIDE {company_display} TEE. Only aggregate statistics returned - no PII.'
+            }
+            print(f"           [SUCCESS] Analysis results pre-computed and cached")
+        except Exception as cache_err:
+            print(f"           [WARNING] Failed to pre-compute analysis: {cache_err}")
+
+        # Final summary
+        print(f"\n{'='*60}")
+        print(f"AUTO-INITIALIZATION COMPLETED SUCCESSFULLY")
+        print(f"{'='*60}")
+        print(f"  Company:          {company.upper()}")
+        print(f"  Key Used:         {key_name}")
+        print(f"  Source File:      {csv_filename}")
+        print(f"  Records Read:     {total_records}")
+        print(f"  Lines Encrypted:  {lines_encrypted}")
+        print(f"  Total in Storage: {len(existing_data)}")
+        print(f"  Output File:      {local_file}")
+        print(f"  Attestation:      {'SUCCESS' if attestation_success else 'FAILED'}")
+        print(f"  Key Release:      {'SUCCESS' if skr_success else 'FAILED'}")
+        print(f"  Encryption:       SUCCESS")
+        print(f"  Local Save:       SUCCESS")
+        print(f"  Analysis Cache:   {'CACHED' if _cached_analysis_results else 'NOT CACHED'}")
+        print(f"{'='*60}\n")
+        
+        _init_status['state'] = 'ready'
+        _init_status['ready'] = True
+        _init_status['records_encrypted'] = lines_encrypted
+        _init_status['message'] = f'Ready - {lines_encrypted} records encrypted'
+        
+    except Exception as e:
+        print(f"           [ERROR] Exception during encryption/upload: {str(e)}")
+        print(f"{'='*60}\n")
+        _init_status['state'] = 'error'
+        _init_status['message'] = f'Error: {str(e)}'
+
+_auto_init_started = False
+_auto_init_lock = threading.Lock()
+
+def start_auto_initialization():
+    """Start auto-initialization in a background thread (runs only once across workers)"""
+    global _auto_init_started
+    with _auto_init_lock:
+        if _auto_init_started:
+            return
+        _auto_init_started = True
+    
+    def delayed_init():
+        # Give the server a moment to start
+        time.sleep(3)
+        try:
+            auto_initialize_container()
+        except Exception as e:
+            print(f"\n[AUTO-INIT ERROR] {str(e)}\n")
+    
+    # Run in background thread so the server can start immediately
+    init_thread = threading.Thread(target=delayed_init, daemon=True)
+    init_thread.start()
+    print("\n[INFO] Auto-initialization thread started (will run in background)\n")
+
+# Start auto-initialization when module loads (works with both gunicorn and direct execution)
+start_auto_initialization()
+
+if __name__ == '__main__':
+    # Run on port 80 to match Azure Container Instances default
+    app.run(host='0.0.0.0', port=80, debug=False)

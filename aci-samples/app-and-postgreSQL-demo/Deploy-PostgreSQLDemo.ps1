@@ -687,12 +687,22 @@ function Invoke-Build {
         throw "Failed to create Key Vault"
     }
     
-    # Create managed identity
+    # Create managed identity using REST API with isolationScope: Regional
+    # WORKAROUND: Subscription policy "Require regional isolation scope on user-assigned managed identities"
+    # (policy def: e9c7fbf7-b3ad-4226-a696-9bffd9d360a4) denies az identity create because the CLI uses
+    # API version 2023-01-31 which doesn't support the isolationScope property. We use az rest with the
+    # preview API (2025-01-31-preview) to set isolationScope=Regional and satisfy the policy.
     Write-Host "Creating managed identity..." -ForegroundColor Green
-    az identity create --resource-group $ResourceGroup --name $IdentityName | Out-Null
+    $subscriptionId = (az account show --query id -o tsv)
+    $identityApiVersion = "2025-01-31-preview"
+    $identityBodyFile = Join-Path $PSScriptRoot "_identity-body.json"
+    @{ location = $Location; properties = @{ isolationScope = "Regional" } } | ConvertTo-Json | Out-File -FilePath $identityBodyFile -Encoding UTF8
+    az rest --method PUT --url "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${IdentityName}?api-version=$identityApiVersion" --body "@$identityBodyFile" -o json 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $identityBodyFile) { Remove-Item $identityBodyFile -Force }
         throw "Failed to create managed identity"
     }
+    if (Test-Path $identityBodyFile) { Remove-Item $identityBodyFile -Force }
     
     # Retrieve identity details
     Write-Host "Retrieving identity details..." -ForegroundColor Green
