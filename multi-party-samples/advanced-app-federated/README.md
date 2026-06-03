@@ -2,13 +2,16 @@
 # Federated Multi-Party Confidential Computing Demo
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** May 2026
+**Last Updated:** June 2026
 
-## 🤖 AI-Generated Content
+## 🤖 AI-Assisted Development Note
 
-> **Note:** This entire multi-party demonstration was **created using AI-assisted development** with GitHub Copilot powered by Claude. This showcases the capabilities of modern AI models for developing complex security-focused applications. While functional, AI-generated code should always be reviewed by qualified security professionals before use in production scenarios.
+> **Note:** This sample was created with significant assistance from AI coding tools, primarily [GitHub Copilot](https://github.com/features/copilot) inside [Visual Studio Code](https://code.visualstudio.com/). While functional, AI-assisted code should always be reviewed by qualified security professionals before use in production scenarios.
 
 A demonstration of **federated privacy-preserving analytics** using Azure Confidential Container Instances (ACI) with AMD SEV-SNP hardware protection. Each company processes its own sensitive data locally inside a Trusted Execution Environment (TEE) and shares only aggregate statistics — **no PII ever leaves any company's boundary**.
+
+> ✅ **ACI deployment path** (default, `-Build -Deploy`) is the validated, demo-ready path used in [DEMO-SCRIPT.md](DEMO-SCRIPT.md).  
+> 🚧 **AKS Virtual Node deployment path** (`-AKS`) is **under active development** — see the [AKS Virtual Node Deployment](#aks-virtual-node-deployment--aks) section below for current limitations.
 
 ## Demo Recording
 
@@ -184,6 +187,13 @@ Deploys four containers:
 
 ## AKS Virtual Node Deployment (`-AKS`)
 
+> 🚧 **Status: Under active development.** This path is **not** the path used in [DEMO-SCRIPT.md](DEMO-SCRIPT.md) and is not yet recommended for demos or evaluation. It is included as a preview of running the same workload on AKS while preserving the ACI confidential computing attestation stack. Expect rough edges; some steps may require manual intervention or re-runs. Issues and PRs welcome.
+>
+> **Known gaps / WIP:**
+> - 4-party (Wingtip Toys) wiring across pod IP discovery, nginx proxy ports, and confcom virtual-node policy generation is being validated end-to-end.
+> - Resource cleanup (`-Cleanup -AKS`) does not yet reliably remove every ACI container group created by VN2 — occasional manual cleanup may be required in `MC_<rg>_<cluster>_<region>`.
+> - Re-running `-Build -AKS` against an existing cluster may surface `aciconnectorlinux` identity drift; if the deploy step fails, recreate the cluster from scratch.
+
 > **This is a significantly more complex deployment path** compared to direct ACI. Use `-AKS` when you need Kubernetes orchestration while retaining the full ACI confidential computing attestation stack (AMD SEV-SNP TEE + SKR + MAA).
 
 ### Why AKS with Virtual Nodes?
@@ -230,7 +240,7 @@ The `-AKS` build phase (`-Build -AKS`) creates a 9-step infrastructure on top of
 │  │  ├─ MC VNet (172.16.0.0/16)       │                              │
 │  │  │  └─ ACI Subnet (delegated)     │  ← Pods run here             │
 │  │  ├─ NAT Gateway                    │  ← Outbound for ACI pods    │
-│  │  ├─ Managed Identities (×3)       │  ← Contoso/Fabrikam/Woodgrove│
+│  │  ├─ Managed Identities (×4)       │  ← Contoso/Fabrikam/Wingtip/Woodgrove│
 │  │  └─ aciconnectorlinux identity    │  ← VN2 uses this identity    │
 │  └────────────────────────────────────┘                              │
 │                                                                       │
@@ -241,7 +251,8 @@ The `-AKS` build phase (`-Build -AKS`) creates a 9-step infrastructure on top of
 │  └─ nginx-proxy (LoadBalancer)        ← External access              │
 │     ├─ :80   → Woodgrove (172.16.x.x)                               │
 │     ├─ :8081 → Contoso  (172.16.x.x)                                │
-│     └─ :8082 → Fabrikam (172.16.x.x)                                │
+│     ├─ :8082 → Fabrikam (172.16.x.x)                               │
+│     └─ :8083 → Wingtip  (172.16.x.x)                               │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -254,10 +265,10 @@ The `-AKS` build phase (`-Build -AKS`) creates a 9-step infrastructure on top of
 3. **MC_ Resource Group networking** — A separate VNet (`172.16.0.0/16`) is created in the MC_ resource group with a delegated ACI subnet and NAT gateway. This VNet is peered with the main VNet so ACI pods can communicate with AKS system pods.
 
 4. **5-Phase Deploy** — The deploy phase is more complex than direct ACI because pod IPs are needed for inter-container routing:
-   - **Phase 1:** Generate Contoso/Fabrikam pod YAMLs + confcom security policies
-   - **Phase 2:** Deploy Contoso/Fabrikam pods, wait for Running, capture pod IPs
+   - **Phase 1:** Generate Contoso/Fabrikam/Wingtip pod YAMLs + confcom security policies
+   - **Phase 2:** Deploy Contoso/Fabrikam/Wingtip pods, wait for Running, capture pod IPs
    - **Phase 3:** Generate Woodgrove YAML with partner pod IP URLs + confcom policy
-   - **Phase 4:** Create all 3 HSM keys with multi-party release policies
+   - **Phase 4:** Create all 4 HSM keys with multi-party release policies
    - **Phase 5:** Deploy Woodgrove pod + nginx reverse proxy with LoadBalancer
 
 5. **Nginx reverse proxy** — Virtual node pods are on a private subnet with no public FQDNs. An nginx deployment on a real AKS node with a LoadBalancer service exposes all four containers:
@@ -355,7 +366,7 @@ In AKS mode, get the nginx proxy external IP and open each container:
 ```powershell
 kubectl get svc nginx-proxy
 # NAME          TYPE           EXTERNAL-IP   PORT(S)
-# nginx-proxy   LoadBalancer   <IP>          80,8081,8082
+# nginx-proxy   LoadBalancer   <IP>          80,8081,8082,8083
 ```
 
 | Container | URL |
@@ -576,8 +587,10 @@ az keyvault set-policy --name <vault-name> --object-id <your-object-id> --key-pe
 
 ## Additional Documentation
 
-- [ATTESTATION.md](ATTESTATION.md) - Technical details about attestation
+- [DEMO-SCRIPT.md](DEMO-SCRIPT.md) - Focused 3-minute walkthrough of the federated analysis workflow
 - [README-MultiParty.md](README-MultiParty.md) - Comprehensive multi-party demo documentation
+- [SECURITY-POLICY.md](SECURITY-POLICY.md) - Annotated ccePolicy with decoded Rego (4-party context)
+- [ATTESTATION.md](ATTESTATION.md) - Attestation flow, JWT claims, SKR troubleshooting
 
 ## References
 
