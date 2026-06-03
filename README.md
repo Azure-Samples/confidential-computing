@@ -61,7 +61,7 @@ Confidential computing is the protection of data-in-use through isolating comput
 | **[Citizen Registry (Sovereign Example)](/sov-examples/README.md)** | End-to-end data-sovereignty demo: Confidential ACI → Private VNet → App Gateway → SQL Server on CVM. Features IPv6-only CVMs, ephemeral credentials, and API-based data seeding. |
 | **[Finance + OpenAI Multi-Party Demo](/multi-party-samples/advanced-app-finance-openAI/README.md)** | 3-company financial analytics with Azure OpenAI (GPT-4o-mini) chat integration. AI assistant answers questions about decrypted partner transaction data inside the TEE. |
 | **[ACI + PostgreSQL Demo](/aci-samples/app-and-postgreSQL-demo/README.md)** | Confidential ACI with DCa/ECa AMD PostgreSQL Flexible Server, 5,000 financial transactions, and 9 documented threat scenarios. |
-| **[CVM with Azure Backup](/sov-examples/cvm-backup/README.md)** | Windows Confidential VM with Recovery Services Vault backup, Customer Managed Keys, and 4-hourly backup policy. |
+| **[CVM with Azure Backup](/cvm-backup/README.md)** | Windows Confidential VM with Recovery Services Vault backup, Customer Managed Keys, and 4-hourly backup policy. |
 | **Deploy script hardening** | All multi-party deploy scripts now use `az rest` with preview API (2025-01-31-preview) for managed identity creation, working around Azure subscription policies requiring regional isolation scope. |
 | **Pre-commit secret scanning** | Repository-wide pre-commit hook and GitHub Actions workflow to block credentials, SAS tokens, and sensitive parameter files from being committed. |
 
