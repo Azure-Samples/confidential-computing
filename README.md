@@ -52,6 +52,8 @@ Confidential computing is the protection of data-in-use through isolating comput
 | Addition | Description |
 |---|---|
 | **[Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README.md)** ⭐ | New 4-party (Contoso, Fabrikam, Wingtip Toys, Woodgrove Bank) **federated** analytics demo. Each partner decrypts its own data inside its own AMD SEV-SNP TEE and returns only aggregates — no raw PII ever crosses the trust boundary. Includes a 3-minute [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md). |
+| **[CVM samples now support Intel TDX](/vm-samples/README.md)** | [`BuildRandomCVM.ps1`](/vm-samples/BuildRandomCVM.ps1) auto-detects AMD SEV-SNP (`DCa*`/`ECa*`) vs Intel TDX (`DCe*`/`ECe*`, e.g. `Standard_DC2es_v6`) from the chosen VM SKU and runs the matching attestation config. See the [Intel TDX examples](/vm-samples/README.md#intel-tdx-examples) in the VM samples README. |
+| **Updated in-VM attestation tooling** | The CVM build script now runs the latest pre-built `attest` binary from [Azure/cvm-attestation-tools](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the VM (Linux + Windows), then **decodes the returned MAA JWT** (header, payload and key claims like `x-ms-attestation-type` and `x-ms-compliance-status`) using `jq` on Linux and built-in `ConvertFrom-Json` on Windows. The legacy [`WindowsAttest.ps1`](/vm-samples/WindowsAttest.ps1) is kept for reference but is **no longer recommended**. |
 | **Repo redirect** | [`https://aka.ms/accsamples`](https://aka.ms/accsamples) now points to this repo. The legacy [`confidential-container-samples`](https://github.com/Azure-Samples/confidential-container-samples) repo remains read-only / archived for reference. |
 
 ### Previously (May 2026)
@@ -147,11 +149,12 @@ Simpler 2-container demonstration (Contoso, Fabrikam Fashion) without partner an
 
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:
-- **BuildRandomCVM.ps1** - Deploy CVMs with Customer Managed Keys, Confidential Disk Encryption, and attestation
-  - Windows Server 2022 Datacenter
-  - Windows 11 Enterprise 24H2
-  - Ubuntu 24.04 LTS
-  - RHEL 9.5
+- **BuildRandomCVM.ps1** 🆕 *Updated June 2026* — Deploy CVMs with **Confidential OS disk encryption bound to a Customer Managed Key (CMK)** and automated in-VM attestation. The OS disk and VM Guest State (vTPM + Secure Boot) are encrypted with an HSM-backed RSA-3072 key in your Key Vault Premium; the key is only released after Microsoft Azure Attestation (MAA) verifies the VM is a genuine SEV-SNP / TDX CVM, so even the Azure host fabric cannot read the disk. See [What is Confidential OS disk encryption with CMK?](/vm-samples/README.md#what-is-confidential-os-disk-encryption-with-cmk) and [`https://aka.ms/accdocs`](https://aka.ms/accdocs).
+  - **AMD SEV-SNP** (`DCa*` / `ECa*`, e.g. `Standard_DC2as_v5`) **and Intel TDX** (`DCe*` / `ECe*`, e.g. `Standard_DC2es_v6`) — auto-detected from the chosen VM SKU, with the matching attestation config selected automatically
+  - Windows Server 2022 Datacenter, Windows Server 2019, Windows 11 Enterprise 24H2, Ubuntu 24.04 LTS, RHEL 9.5 — all confidential-VM images
+  - **New attestation flow** — runs the latest pre-built `attest` binary from [`Azure/cvm-attestation-tools`](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the freshly deployed VM (Linux + Windows) and decodes the returned MAA JWT (header, payload, key claims like `x-ms-attestation-type`, `x-ms-compliance-status`, `secure-boot`, `tpm-enabled`) using `jq` on Linux / built-in `ConvertFrom-Json` on Windows
+  - **Pre-flight checks** before any resources are created: rejects Intel SGX SKUs (different isolation model), validates the chosen SKU is offered in the target region, and confirms there is enough vCPU quota in the VM family
+  - **Bastion-optional** (`-DisableBastion`) and **smoketest mode** (`-smoketest`) for CI / cost-controlled validation
 - **BuildRandomSQLCVM.ps1** - SQL Server 2022 on Confidential VM
 
 ### [AKS Samples](/aks-samples/README.md)

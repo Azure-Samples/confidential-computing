@@ -125,6 +125,101 @@ if (!$?) {
 $tmp = Get-AzContext
 $ownername = $tmp.Account.Id
 
+#---------Pre-flight: SKU availability and quota check---------------------------------------------------------------
+# Verify the chosen VM SKU is a Confidential VM SKU (AMD SEV-SNP or Intel TDX, NOT Intel SGX which is
+# a different isolation model and not supported by this script), is offered in the chosen region and not
+# restricted for this subscription, and that there's enough vCPU quota left in the SKU's family before
+# we start creating resources.
+write-host "----------------------------------------------------------------------------------------------------------------"
+write-host "Pre-flight check: confirming '$vmSize' is available in '$region' with sufficient quota..." -ForegroundColor Cyan
+
+# Reject Intel SGX SKUs early - this script targets Confidential VMs (full-VM isolation),
+# not SGX enclaves (per-process isolation). SGX SKUs use the DC*s_v3 / DC*s_v2 naming.
+if ($vmSize -match '^Standard_DC\d+s_v[23]$') {
+    write-host "ERROR: '$vmSize' is an Intel SGX SKU (application-enclave isolation), which is NOT supported by this script." -ForegroundColor Red
+    write-host "This script provisions Confidential VMs (whole-VM hardware isolation) using either:" -ForegroundColor Yellow
+    write-host "  - AMD SEV-SNP : DCa*/ECa*   (e.g. Standard_DC2as_v5, Standard_DC4as_v5)" -ForegroundColor Yellow
+    write-host "  - Intel TDX   : DCe*/ECe*   (e.g. Standard_DC2es_v6, Standard_EC4es_v6)" -ForegroundColor Yellow
+    write-host "For Intel SGX (DCsv3/DCsv2) workloads, see https://learn.microsoft.com/azure/confidential-computing/virtual-machine-solutions-sgx instead." -ForegroundColor Yellow
+    exit 1
+}
+
+# Warn (but don't fail) if the SKU doesn't look like a known CVM SKU naming pattern.
+if ($vmSize -notmatch '^Standard_(DC|EC)\d+[a-z]+_v\d+$' -or $vmSize -notmatch '_(DC|EC)\d+(a|e)') {
+    write-host "Warning: '$vmSize' does not match a known Confidential VM SKU pattern (DCa*/ECa* for SEV-SNP, DCe*/ECe* for TDX). Continuing, but deployment may fail if this is not a CVM SKU." -ForegroundColor Yellow
+}
+
+$skuInfo = $null
+try {
+    $skuInfo = Get-AzComputeResourceSku -Location $region -ErrorAction Stop |
+        Where-Object { $_.ResourceType -eq 'virtualMachines' -and $_.Name -eq $vmSize } |
+        Select-Object -First 1
+} catch {
+    write-host "Warning: could not query Get-AzComputeResourceSku for '$region': $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
+function Show-QuotaHelp($sku, $region) {
+    write-host ""
+    write-host "To find regions where this SKU IS available to your subscription, try:" -ForegroundColor Yellow
+    write-host "  Get-AzComputeResourceSku | Where-Object { `$_.ResourceType -eq 'virtualMachines' -and `$_.Name -eq '$sku' -and (-not `$_.Restrictions -or `$_.Restrictions.Count -eq 0) } | Select-Object Locations, Name" -ForegroundColor Gray
+    write-host ""
+    write-host "To list the Confidential VM SKUs offered in '$region' (SEV-SNP DCa*/ECa* and Intel TDX DCe*/ECe*):" -ForegroundColor Yellow
+    write-host "  Get-AzComputeResourceSku -Location '$region' | Where-Object { `$_.ResourceType -eq 'virtualMachines' -and `$_.Name -match '_(DC|EC)\d+(a|e)' } | Select-Object Name, @{n='Restricted';e={`$_.Restrictions.Count -gt 0}}" -ForegroundColor Gray
+    write-host ""
+    write-host "To see your vCPU usage and limits in '$region':" -ForegroundColor Yellow
+    write-host "  Get-AzVMUsage -Location '$region' | Where-Object { `$_.Name.Value -match 'DCa|DCe|ECa|ECe|cores' } | Format-Table -AutoSize" -ForegroundColor Gray
+    write-host ""
+    write-host "To request a quota increase, see: https://learn.microsoft.com/azure/quotas/quickstart-increase-quota-portal" -ForegroundColor Yellow
+}
+
+if ($null -eq $skuInfo) {
+    write-host "ERROR: VM SKU '$vmSize' is not offered in region '$region'." -ForegroundColor Red
+    Show-QuotaHelp $vmSize $region
+    exit 1
+}
+
+# Check subscription-level restrictions (e.g. NotAvailableForSubscription)
+$subRestriction = $skuInfo.Restrictions | Where-Object {
+    $_.ReasonCode -eq 'NotAvailableForSubscription' -or
+    ($_.RestrictionInfo -and $_.RestrictionInfo.Locations -contains $region) -or
+    ($_.Values -contains $region)
+}
+if ($subRestriction) {
+    $reason = ($skuInfo.Restrictions | ForEach-Object { $_.ReasonCode }) -join ', '
+    write-host "ERROR: VM SKU '$vmSize' is restricted for this subscription in '$region' (reason: $reason)." -ForegroundColor Red
+    Show-QuotaHelp $vmSize $region
+    exit 1
+}
+
+# Determine vCPU count and family for the SKU
+$skuVCpus = ($skuInfo.Capabilities | Where-Object { $_.Name -eq 'vCPUs' } | Select-Object -First 1).Value -as [int]
+$skuFamily = $skuInfo.Family   # e.g. 'standardDCASv5Family'
+if (-not $skuVCpus) { $skuVCpus = 2 }   # fall back to a sensible minimum
+
+# Check vCPU quota for that family in this region
+try {
+    $usage = Get-AzVMUsage -Location $region -ErrorAction Stop |
+        Where-Object { $_.Name.Value -eq $skuFamily } |
+        Select-Object -First 1
+    if ($usage) {
+        $available = [int]$usage.Limit - [int]$usage.CurrentValue
+        write-host ("Quota for {0} in {1}: {2}/{3} used, {4} vCPUs available, this SKU needs {5}." -f `
+            $skuFamily, $region, $usage.CurrentValue, $usage.Limit, $available, $skuVCpus) -ForegroundColor Cyan
+        if ($available -lt $skuVCpus) {
+            write-host "ERROR: Insufficient vCPU quota in family '$skuFamily' in '$region' to deploy '$vmSize' ($skuVCpus vCPUs needed, $available available)." -ForegroundColor Red
+            Show-QuotaHelp $vmSize $region
+            exit 1
+        }
+    } else {
+        write-host "Note: could not find VM usage entry for family '$skuFamily' in '$region' - proceeding without quota check." -ForegroundColor Yellow
+    }
+} catch {
+    write-host "Warning: Get-AzVMUsage failed for '$region': $($_.Exception.Message). Proceeding without quota check." -ForegroundColor Yellow
+}
+
+write-host "Pre-flight check passed: '$vmSize' is available and within quota in '$region'." -ForegroundColor Green
+write-host "----------------------------------------------------------------------------------------------------------------"
+
 # Create Resource Group
 $resourceGroupTags = @{
     owner = $ownername
@@ -261,39 +356,168 @@ if (-not $DisableBastion) {
     write-host "VM is only accessible via private network connectivity (VPN, ExpressRoute, or peered networks)"
 }
 
-# COMMENTED OUT FOR NOW, will be re-factored to use latest attestation code from https://github.com/Azure/cvm-attestation-tools 
-#---------Do attestation check, kick off a script inside the VM to do the attestation check---------
-# Run attestation based on OS type
-<#
-write-host "Running an attestation check inside the $osType VM, please wait for output..."
+#---------Do attestation check inside the VM using Azure/cvm-attestation-tools-----------------------------------
+# Downloads the latest pre-built attest CLI release from https://github.com/Azure/cvm-attestation-tools/releases
+# and runs it inside the freshly deployed CVM, returning the output to the caller.
 
-if ($osType -like 'Windows*' -and $osType -ne 'Windows11') {
-    # Windows family (Server and other Windows SKUs except Windows11) - use PowerShell script
-    $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunPowerShellScript' -ScriptPath .\WindowsAttest.ps1
-} elseif ($osType -eq "Windows11") {
-    # Windows 11 VM - use PowerShell script
-    $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunPowerShellScript' -ScriptPath .\WindowsAttest.ps1
+# Pick the right config based on the VM SKU's isolation type:
+#   AMD SEV-SNP: DCa*/DCad*/ECa*/ECad*  (e.g. Standard_DC2as_v5)  -> config_snp.json
+#   Intel TDX  : DCe*/DCed*/ECe*/ECed*  (e.g. Standard_DC2es_v5)  -> config_tdx.json
+if ($vmSize -match '_(DC|EC)\d+e[a-z]*_') {
+    $attestConfig = "config_tdx.json"
+    $isolationType = "Intel TDX"
 } else {
-    # Linux VMs (Ubuntu/RHEL) - use shell script
+    $attestConfig = "config_snp.json"
+    $isolationType = "AMD SEV-SNP"
+}
+
+write-host "----------------------------------------------------------------------------------------------------------------"
+write-host "Running attestation inside the $osType VM using cvm-attestation-tools (isolation: $isolationType, config: $attestConfig)..." -ForegroundColor Cyan
+write-host "This downloads the latest release of attest from https://github.com/Azure/cvm-attestation-tools/releases inside the VM."
+
+if ($VMisLinux) {
+    # Linux: download attest-lin.zip from the latest release, extract, run attest
+    # Note: the zip extracts files at its root (no "attest-lin/" subfolder)
     $attestScript = @"
 #!/bin/bash
-echo "Linux $osType CVM attestation check"
-echo "Checking if running in a Confidential VM..."
-if [ -d "/sys/kernel/security/tpm0" ]; then
-    echo "TPM device detected"
-else
-    echo "No TPM device found"
+set -e
+export DEBIAN_FRONTEND=noninteractive
+if ! command -v unzip >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    (apt-get update -y && apt-get install -y unzip jq) >/dev/null 2>&1 || \
+        (dnf install -y unzip jq || yum install -y unzip jq) >/dev/null 2>&1
 fi
-echo "For full attestation on Linux, additional tools and configuration may be required"
-echo "This is a basic check - implement proper attestation logic for production use"
+WORKDIR=`$(mktemp -d)
+cd "`$WORKDIR"
+echo "Downloading latest attest-lin.zip from cvm-attestation-tools..."
+curl -fsSL -o attest-lin.zip https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-lin.zip
+unzip -q attest-lin.zip
+chmod +x attest read_report 2>/dev/null || true
+echo "--------- attest --c $attestConfig ---------"
+./attest --c $attestConfig 2>&1 | tee attest.out || echo "attest exited with code `$?"
+
+# Extract JWT (a single token of the form xxx.yyy.zzz with base64url chars)
+# from the attest output and pretty-print header + payload claims using jq.
+JWT=`$(grep -Eo '[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+' attest.out | awk '{ print length, `$0 }' | sort -nr | head -1 | cut -d' ' -f2-)
+if [ -n "`$JWT" ] && command -v jq >/dev/null 2>&1; then
+    echo ""
+    echo "--------- Decoded JWT (via jq) ---------"
+    b64d() { local s=`$1; local m=`$(( `${#s} % 4 )); if [ `$m -eq 2 ]; then s="`${s}=="; elif [ `$m -eq 3 ]; then s="`${s}="; fi; echo "`$s" | tr '_-' '/+' | base64 -d 2>/dev/null; }
+    H=`$(echo "`$JWT" | cut -d. -f1)
+    P=`$(echo "`$JWT" | cut -d. -f2)
+    echo "--- header ---"
+    b64d "`$H" | jq .
+    echo "--- payload ---"
+    b64d "`$P" | jq .
+    echo "--- key MAA claims ---"
+    b64d "`$P" | jq '{iss, "x-ms-attestation-type", "x-ms-compliance-status", "x-ms-isolation-tee": ."x-ms-isolation-tee"."x-ms-attestation-type", "x-ms-runtime-vm-configuration-secure-boot": ."x-ms-runtime"."vm-configuration"."secure-boot", "x-ms-runtime-vm-configuration-tpm-enabled": ."x-ms-runtime"."vm-configuration"."tpm-enabled"}'
+else
+    echo "(no JWT found in attest output to decode, or jq unavailable)"
+fi
+
+cd /
+rm -rf "`$WORKDIR"
 "@
-    $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunShellScript' -ScriptString $attestScript
+    $runCommandId = 'RunShellScript'
+} else {
+    # Windows: download attest-win.zip from the latest release, extract, run attest.exe
+    # Note: the zip extracts files at its root (no "attest-win/" subfolder)
+    $attestScript = @"
+`$ErrorActionPreference = 'Stop'
+`$ProgressPreference = 'SilentlyContinue'
+`$work = Join-Path `$env:TEMP "cvm-attest-`$(Get-Random)"
+New-Item -ItemType Directory -Path `$work -Force | Out-Null
+Set-Location `$work
+Write-Host "Downloading latest attest-win.zip from cvm-attestation-tools..."
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -Uri 'https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-win.zip' -OutFile 'attest-win.zip' -UseBasicParsing
+Expand-Archive -Path 'attest-win.zip' -DestinationPath '.' -Force
+Write-Host "--------- attest.exe --c $attestConfig ---------"
+
+# attest.exe writes INFO logs to stderr; under `$ErrorActionPreference='Stop' that surfaces
+# as a NativeCommandError even though the tool is working. Relax EAP for this single call,
+# merge stderr into stdout, and rely on `$LASTEXITCODE for success/failure.
+# Use a wide -Width on Out-String so the JWT (which can be ~1.5KB on a single line)
+# is not wrapped at the default ~80-char console width - otherwise the regex below only
+# matches a wrapped fragment and base64url decoding fails with "Invalid length".
+`$prevEap = `$ErrorActionPreference
+`$ErrorActionPreference = 'Continue'
+if (`$PSVersionTable.PSVersion.Major -ge 7) { `$PSNativeCommandUseErrorActionPreference = `$false }
+`$attestOut = (& .\attest.exe --c $attestConfig 2>&1 | Out-String -Width 16384)
+`$attestExit = `$LASTEXITCODE
+`$ErrorActionPreference = `$prevEap
+Write-Host `$attestOut
+if (`$attestExit -ne 0) { Write-Host "attest.exe exited with code `$attestExit" -ForegroundColor Yellow }
+
+# Extract JWT (xxx.yyy.zzz, base64url) from the attest output and pretty-print
+# header + payload claims using built-in PowerShell JSON support (no jq needed).
+# Defensive: collapse the captured output to a single line so any stray CR/LF inside
+# the token is removed, then anchor the regex to 'eyJ' (base64url of '{"') which is
+# the canonical JWT header start. Without that anchor, the greedy 3-segment match
+# can cross attest.exe's interleaved Python INFO log lines (which share '-' / '_'
+# with base64url) and pick up a corrupted token, producing garbage on decode.
+`$attestOutFlat = (`$attestOut -replace '\s+', '')
+`$jwtMatch = [regex]::Matches(`$attestOutFlat, 'eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{100,}\.[A-Za-z0-9_-]{50,}') | Sort-Object { `$_.Length } -Descending | Select-Object -First 1
+if (`$jwtMatch) {
+    function ConvertFrom-Base64Url(`$s) {
+        `$s = (`$s -replace '\s', '').Replace('-', '+').Replace('_', '/')
+        switch (`$s.Length % 4) { 2 { `$s += '==' } 3 { `$s += '=' } }
+        [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(`$s))
+    }
+    `$parts = `$jwtMatch.Value.Split('.')
+    Write-Host ""
+    Write-Host '--------- Decoded JWT ---------'
+    Write-Host '--- header ---'
+    ConvertFrom-Base64Url `$parts[0] | ConvertFrom-Json | ConvertTo-Json -Depth 10
+    Write-Host '--- payload ---'
+    `$payload = ConvertFrom-Base64Url `$parts[1] | ConvertFrom-Json
+    `$payload | ConvertTo-Json -Depth 10
+    Write-Host '--- key MAA claims ---'
+    [pscustomobject]@{
+        iss                            = `$payload.iss
+        'x-ms-attestation-type'        = `$payload.'x-ms-attestation-type'
+        'x-ms-compliance-status'       = `$payload.'x-ms-compliance-status'
+        'x-ms-isolation-tee'           = `$payload.'x-ms-isolation-tee'.'x-ms-attestation-type'
+        'secure-boot'                  = `$payload.'x-ms-runtime'.'vm-configuration'.'secure-boot'
+        'tpm-enabled'                  = `$payload.'x-ms-runtime'.'vm-configuration'.'tpm-enabled'
+    } | Format-List
+} else {
+    Write-Host '(no JWT found in attest output to decode)'
 }
-write-host "--------------Output from the script that ran inside the VM--------------"
-write-host $output.Value.message # repeat the output from the script that ran inside the VM
+
+Set-Location `$env:TEMP
+Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
+"@
+    $runCommandId = 'RunPowerShellScript'
+}
+
+# Retry loop: Invoke-AzVMRunCommand can return 409 Conflict for several minutes
+# after VM creation while the run-command extension is still finalising. This is
+# especially common on TDX SKUs. Back off and retry on Conflict / "in progress".
+$output = $null
+$maxAttempts = 10
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+        write-host "Attestation run-command attempt $attempt of $maxAttempts..." -ForegroundColor Cyan
+        $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId $runCommandId -ScriptString $attestScript -ErrorAction Stop
+        break
+    } catch {
+        $msg = $_.Exception.Message
+        if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*')) {
+            write-host "Run-command extension busy (409); waiting 60s before retry..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 60
+        } else {
+            throw
+        }
+    }
+}
+
 write-host "----------------------------------------------------------------------------------------------------------------"
-write-host "Build and validation complete, check the output above for the attestation status."
-#>
+write-host "--------------Output from cvm-attestation-tools running inside the VM--------------"
+foreach ($entry in $output.Value) {
+    if ($entry.Message) { write-host $entry.Message }
+}
+write-host "----------------------------------------------------------------------------------------------------------------"
+write-host "Build and attestation complete." -ForegroundColor Green
 
 
 # Smoketest cleanup - automatically remove all resources if smoketest flag is used
