@@ -14,8 +14,8 @@
     "tlsPrivateKeyPem": { "type": "securestring", "defaultValue": "" },
     "cpuCores": { "type": "int", "defaultValue": 2 },
     "memoryInGB": { "type": "int", "defaultValue": 6 },
-    "processingWorkers": { "type": "int", "defaultValue": 3 },
-    "detectEveryNFrames": { "type": "int", "defaultValue": 2 },
+    "processingWorkers": { "type": "string", "defaultValue": "3" },
+    "detectEveryNFrames": { "type": "string", "defaultValue": "2" },
     "instanceName": { "type": "string", "defaultValue": "automotive-machine-vision" },
     "peerEndpoints": { "type": "string", "defaultValue": "" }
   },
@@ -50,8 +50,8 @@
                 { "name": "TLS_CERT_PEM", "secureValue": "[parameters('tlsCertificatePem')]" },
                 { "name": "TLS_KEY_PEM", "secureValue": "[parameters('tlsPrivateKeyPem')]" },
                 { "name": "MAA_ENDPOINT", "value": "sharedeus.eus.attest.azure.net" },
-                { "name": "PROCESSING_WORKERS", "value": "[string(parameters('processingWorkers'))]" },
-                { "name": "DETECT_EVERY_N_FRAMES", "value": "[string(parameters('detectEveryNFrames'))]" },
+                { "name": "PROCESSING_WORKERS", "value": "[parameters('processingWorkers')]" },
+                { "name": "DETECT_EVERY_N_FRAMES", "value": "[parameters('detectEveryNFrames')]" },
                 { "name": "INSTANCE_NAME", "value": "[parameters('instanceName')]" },
                 { "name": "PEER_ENDPOINTS", "value": "[parameters('peerEndpoints')]" }
               ]

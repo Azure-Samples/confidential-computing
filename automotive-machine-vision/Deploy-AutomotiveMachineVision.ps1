@@ -138,8 +138,8 @@ if ($Deploy) {
         tlsPrivateKeyPem = @{ value = $tlsKeyPem }
         cpuCores = @{ value = $CpuCores }
         memoryInGB = @{ value = $MemoryInGB }
-        processingWorkers = @{ value = $effectiveWorkers }
-        detectEveryNFrames = @{ value = $DetectEveryNFrames }
+        processingWorkers = @{ value = [string]$effectiveWorkers }
+        detectEveryNFrames = @{ value = [string]$DetectEveryNFrames }
     }
 
     $armParameterFile = @{
