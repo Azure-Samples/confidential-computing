@@ -1,9 +1,34 @@
 # Confidential Computing Enforcement Policy (ccePolicy)
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** February 2026
+**Last Updated:** June 2026
 
 > **Note:** See [ATTESTATION.md](ATTESTATION.md) for the full attestation flow and [README.md](README.md) for the main project documentation.
+
+## Sample Context
+
+This document describes the ccePolicy as it applies to the **`advanced-app-finance-openAI`** sample — a **3-party** scenario that adds **Azure OpenAI** for inside-the-TEE financial analysis:
+
+| Role | Party | Key Vault Env Var | Container URL Env Var |
+|---|---|---|---|
+| Orchestrator | **Woodgrove Bank** | `SKR_AKV_ENDPOINT` | (self) |
+| Provider | **Contoso** | `PARTNER_CONTOSO_AKV_ENDPOINT` | `PARTNER_CONTOSO_URL` |
+| Provider | **Fabrikam** | `PARTNER_FABRIKAM_AKV_ENDPOINT` | `PARTNER_FABRIKAM_URL` |
+
+Three additional environment variables are pinned by the policy to wire the chat / analysis feature to a specific Azure OpenAI deployment:
+
+| Variable | Strategy | Purpose |
+|---|---|---|
+| `AZURE_OPENAI_ENDPOINT` | `string` | Pins the exact Azure OpenAI resource the TEE may call. |
+| `AZURE_OPENAI_DEPLOYMENT` | `string` | Pins the model deployment name (e.g. `gpt-4o-mini`). |
+| `AZURE_OPENAI_API_KEY` | `re2` | Secret — value injected at deployment time, only its presence is enforced. |
+
+If an attacker tampers with `AZURE_OPENAI_ENDPOINT` to redirect inference to a malicious model, the policy hash changes and no SKR keys are released. Decrypted partner data therefore never reaches an unverified LLM.
+
+Sibling samples:
+
+- [`advanced-app/SECURITY-POLICY.md`](../advanced-app/SECURITY-POLICY.md) — same 3 parties without OpenAI.
+- [`advanced-app-federated/SECURITY-POLICY.md`](../advanced-app-federated/SECURITY-POLICY.md) — 4-party variant with Wingtip Toys.
 
 ## Overview
 
@@ -156,6 +181,11 @@ containers := [
       {"pattern": "PARTNER_CONTOSO_URL=https://contoso-***1933.eastus.azurecontainer.io",   "strategy": "string"},
       {"pattern": "PARTNER_FABRIKAM_URL=https://fabrikam-***1933.eastus.azurecontainer.io", "strategy": "string"},
       {"pattern": "SECURITY_POLICY_HASH=",                                                 "strategy": "string"},
+
+      // === Azure OpenAI (this sample only) ===
+      {"pattern": "AZURE_OPENAI_ENDPOINT=https://***-openai.openai.azure.com/",             "strategy": "string"},
+      {"pattern": "AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini",                                   "strategy": "string"},
+      {"pattern": "AZURE_OPENAI_API_KEY=.*",                                               "strategy": "re2"},
 
       // === Secrets (regex — value injected at runtime) ===
       {"pattern": "AZURE_STORAGE_CONNECTION_STRING=.*",   "strategy": "re2"},

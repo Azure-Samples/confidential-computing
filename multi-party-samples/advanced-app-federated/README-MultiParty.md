@@ -1,299 +1,121 @@
-# Multi-Party Confidential Computing Demo
+# Federated Multi-Party Confidential Computing Demo
 
-**Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** May 2026
+**Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security
+**Last Updated:** June 2026
 
-This demonstration shows how Azure Confidential Containers enable secure multi-party computation where each party's data remains protected, even from other parties and infrastructure operators.
+This demo shows four organizations collaborating on shared analytics **without ever
+exposing raw data to each other or to the cloud infrastructure**. Each company's
+records stay encrypted at rest, are decrypted only inside an AMD SEV-SNP TEE, and
+only **aggregate statistics** ever leave the trust boundary.
 
-## Architecture Overview
+> Companion docs: [`DEMO-SCRIPT.md`](DEMO-SCRIPT.md) (3-minute live walkthrough),
+> [`SECURITY-POLICY.md`](SECURITY-POLICY.md) (CCE policy notes),
+> [`ATTESTATION.md`](ATTESTATION.md) (attestation claim reference).
+
+## Architecture
 
 ![Multi-Party Architecture](MultiPartyArchitecture.svg)
 
-## Encrypted Data Flow
+![Encrypted Data Flow](DataFlowDiagram.svg)
 
-![Data Flow Diagram](DataFlowDiagram.svg)
+Four confidential containers run the **same image** with different identities,
+data files, and Key Vaults:
 
-**Key Insight:** Data remains encrypted at rest and in transit. Decryption **only** occurs inside the AMD SEV-SNP Trusted Execution Environment (TEE), where memory is hardware-encrypted at the CPU level.
+| Container        | Role                | Own Data | Partner Data       | Key Vault      |
+|------------------|---------------------|----------|--------------------|----------------|
+| **Contoso**      | Data provider       | 250 PII records | — (own only)        | `kv<id>a`      |
+| **Fabrikam**     | Data provider       | 250 PII records | — (own only)        | `kv<id>b`      |
+| **Wingtip Toys** | Data provider       | 250 PII records | — (own only)        | `kv<id>d`      |
+| **Woodgrove Bank** | Federated orchestrator | — | Aggregate results only | `kv<id>c`      |
 
-## Overview
+Each Key Vault holds an HSM-backed RSA key with a **release policy bound to
+`x-ms-attestation-type: sevsnpvm`** — only an attested SEV-SNP TEE can obtain it.
 
-The demo deploys **four confidential containers** running identical code, demonstrating how hardware-based security and partner trust relationships enable secure multi-party data sharing:
+## Federated Privacy Model
 
-| Container | SKU | Hardware | Can Attest? | Can Get Keys? | Can Decrypt Data? |
-|-----------|-----|----------|-------------|---------------|-------------------|
-| **Contoso** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
-| **Fabrikam** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
-| **Wingtip Toys** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own key only | ✅ Own data only |
-| **Woodgrove Bank** | Confidential | AMD SEV-SNP TEE | ✅ Yes | ✅ Own + Partner | ✅ All partner data |
+Unlike a centralized data-pooling architecture, **raw records never leave a partner's
+TEE**. Woodgrove Bank's analysis works like this:
 
-## Key Concepts
+1. Woodgrove attests, releases its own key, then asks each partner for an analysis.
+2. Each partner attests independently, releases its own key, decrypts its own
+   data **inside its own TEE**, and computes aggregates locally.
+3. Each partner returns only counts, averages, and percentages — no names,
+   IDs, salaries, or PHI.
+4. Woodgrove combines the aggregates and renders the dashboard.
 
-### Why This Matters
-
-In traditional cloud computing, infrastructure operators (cloud providers, IT admins) can potentially access data in memory. Confidential computing solves this by:
-
-1. **Hardware Isolation**: AMD SEV-SNP encrypts memory at the CPU level
-2. **Remote Attestation**: Cryptographic proof that code is running in a genuine TEE
-3. **Secure Key Release (SKR)**: Keys are only released to attested environments
-4. **Company Isolation**: Each company's key is bound to their container identity
-
-### Woodgrove Bank: Trusted Partner Analytics
-
-Woodgrove Bank demonstrates a **trusted third-party analytics** scenario:
-- Operates as a financial analytics partner for Contoso, Fabrikam, and Wingtip
-- All three companies explicitly grant Woodgrove access to their Key Vaults
-- Woodgrove must still pass TEE attestation to release partner keys
-- Enables aggregate demographic analysis while maintaining cryptographic guarantees
-
-**Key features:**
-- Woodgrove runs in a **Confidential** container (can attest)
-- Woodgrove has **explicit permission** from partners (Key Vault access policies)
-- All access is **audited** in Azure for compliance
-
-### Cross-Company Isolation
-
-Even between trusted parties (Contoso, Fabrikam, and Wingtip Toys):
-- Each company has a **separate Key Vault key** with its own release policy
-- Contoso's key is bound to Contoso's container identity
-- Fabrikam cannot access Contoso's key, and vice versa
-
-**Woodgrove Bank exception:**
-- Woodgrove can access all partner keys because partners **explicitly granted** access
-- This is not a security bypass - it's intentional delegation for analytics
-- Enables cross-company federated analysis inside TEE-protected memory
-
-## Traffic Flow
-
-### Successful Attestation & Key Release (Contoso/Fabrikam/Woodgrove)
-
-```
-User Browser → Flask App (:80) → SKR Sidecar (:8080)
-                                        ↓
-                              Microsoft Azure Attestation
-                                        ↓
-                              JWT Token (signed attestation)
-                                        ↓
-                              Azure Key Vault (Premium HSM)
-                                        ↓
-                              Private Key → TEE Memory
-                                        ↓
-                              Encrypt/Decrypt Operations
-```
-
-### Woodgrove Partner Key Release
-
-```
-Woodgrove Container → SKR Sidecar (:8080)
-                              ↓
-                    Microsoft Azure Attestation
-                              ↓
-                    JWT Token (Woodgrove TEE)
-                              ↓
-          ┌─────────────────────────────────────────────────────┐
-          ↓                                         ↓                   ↓
-  Contoso Key Vault                        Fabrikam Key Vault  Wingtip Key Vault
-  (Woodgrove has access)                   (Woodgrove has access) (Woodgrove has access)
-          ↓                                         ↓                   ↓
-  contoso-secret-key                       fabrikam-secret-key wingtip-secret-key
-          ↓                                         ↓                   ↓
-          └─────────────────────────────────────────────────────┘
-                              ↓
-                    Partner Data Analysis
-```
-
-### Data Protection Flow
-
-The following diagram shows how encrypted data flows from storage to the TEE where it is decrypted:
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        DATA SOURCES                                      │
-│  (Raw data encrypted before entering system)                            │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│   ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐  │
-│   │   contoso.csv   │         │  fabrikam.csv   │         │   wingtip.csv   │  │
-│   │  (250 records)  │         │  (250 records)  │         │  (250 records)  │  │
-│   └────────┬────────┘         └────────┬────────┘         └────────┬────────┘  │
-│            │                           │                           │           │
-│            ▼                           ▼                           ▼           │
-│   ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐  │
-│   │ Encrypt with    │         │ Encrypt with    │         │ Encrypt with    │  │
-│   │ Contoso Key     │         │ Fabrikam Key    │         │ Wingtip Key     │  │
-│   │ (RSA-OAEP-256)  │         │ (RSA-OAEP-256)  │         │ (RSA-OAEP-256)  │  │
-│   └────────┬────────┘         └────────┬────────┘         └────────┬────────┘  │
-│            │                           │                           │           │
-│            └─────────────┬─────────────┘                           │           │
-│                          │                                         │           │
-│                          ▼                                         │           │
-│              ┌───────────────────────┐◄────────────────────────────┘           │
-│              │  Encrypted records    │                                        │
-│              │  stored in memory     │◄─────────────────────────────────────────┘
-│              └───────────┬───────────┘                                  │
-│                          │                                              │
-└──────────────────────────┼──────────────────────────────────────────────┘
-                           │
-┌──────────────────────────┼──────────────────────────────────────────────┐
-│                          │     TRUSTED ZONE (AMD SEV-SNP TEE)           │
-│  (Data decrypted ONLY here - hardware-encrypted memory)                 │
-├──────────────────────────┼──────────────────────────────────────────────┤
-│                          ▼                                               │
-│              ┌───────────────────────┐                                  │
-│              │  1️⃣ Fetch encrypted   │                                  │
-│              │     data              │                                  │
-│              └───────────┬───────────┘                                  │
-│                          │                                               │
-│                          ▼                                               │
-│              ┌───────────────────────┐      ┌─────────────────────┐     │
-│              │  2️⃣ Request           │─────▶│  Azure Attestation  │     │
-│              │     attestation       │      │  (MAA)              │     │
-│              └───────────────────────┘      │  Verify TEE         │     │
-│                          │                  │  Issue JWT          │     │
-│                          │◀─────────────────└─────────────────────┘     │
-│                          ▼                                               │
-│              ┌───────────────────────┐      ┌─────────────────────┐     │
-│              │  3️⃣ Request key       │─────▶│  Azure Key Vault    │     │
-│              │     with JWT token    │      │  (HSM)              │     │
-│              └───────────────────────┘      │  Verify JWT         │     │
-│                          │                  │  Release Key        │     │
-│                          │◀─────────────────└─────────────────────┘     │
-│                          ▼                                               │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │  4️⃣ DECRYPTION HAPPENS HERE (in TEE-protected memory)            │  │
-│  │     🔓 Key exists only in encrypted memory                        │  │
-│  │     🔓 Plaintext exists only in encrypted memory                  │  │
-│  │     🔓 Even hypervisor cannot read TEE memory                     │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                          │                                               │
-│            ┌─────────────┼─────────────┼─────────────┐                │
-│            │             │             │             │                │
-│            ▼             ▼             ▼             ▼                │
-│        Contoso       Fabrikam      Wingtip       Woodgrove            │
-│       Decrypts      Decrypts      Decrypts      Decrypts              │
-│       own 250       own 250       own 250       ALL partner           │
-│       records       records       records       records               │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+What's shared across the boundary: record counts, salary min/avg/max, generation
+buckets, blood-type distribution, medical-condition counts, country/city counts.
+What's never shared: the 18 PII fields listed in [DEMO-SCRIPT.md](DEMO-SCRIPT.md#sensitive-fields-in-each-companys-dataset-18-fields).
 
 ## Quick Start
 
 ### Prerequisites
 
-- Azure CLI (v2.60+) with `confcom` extension (`az extension add --name confcom --upgrade`)
-- Docker Desktop (for security policy generation)
-- Azure subscription with Confidential Container support
-- PowerShell 7.0+ recommended
+- Azure CLI 2.60+ with `confcom` extension (`az extension add --name confcom --upgrade`)
+- Docker Desktop running (used for security-policy generation)
+- Subscription with Confidential ACI quota (East US recommended)
+- PowerShell 7.0+
 
 ### Deploy
 
 ```powershell
-# Build the container image (first time only)
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build
-
-# Deploy all 4 containers
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy
-
-# Or build and deploy in one command
+# Build image + create ACR/Key Vaults/identities, then deploy all four containers
 .\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build -Deploy
+
+# Or run the phases separately
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build
+.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Deploy
 ```
 
-> **Note:** Replace `<yourcode>` with a short unique identifier (3-8 chars) like your initials or team code.
+`<yourcode>` is a 3-8 char `[a-z0-9]` tag (e.g. initials, team code) used to
+prefix all resources.
+
+### Optional flags
+
+| Flag | Effect |
+|------|--------|
+| `-AKS` | Deploy via AKS confidential virtual nodes instead of direct ACI |
+| `-RegistryName <name>` | Reuse / pin a specific ACR name |
+| `-Location <region>` | Override default `eastus` |
+| `-SkipBrowser` | Don't auto-open endpoints after deploy |
+| `-Description <text>` | Tag the resource group |
 
 ### Clean Up
 
 ```powershell
-# Delete all Azure resources (containers, Key Vault keys)
-.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Cleanup
+.\Deploy-MultiParty.ps1 -Cleanup
 ```
 
-## What You'll See
+Reads `acr-config.json` and deletes the resource group (containers, Key Vaults,
+identities, ACR).
 
-After deployment, a browser opens with a 4-pane side-by-side view:
+## What You See
 
-```
-+------------------+------------------+------------------+------------------+
-|     CONTOSO      |    FABRIKAM      |  WINGTIP TOYS    |  WOODGROVE BANK  |
-| (Confidential)   | (Confidential)   | (Confidential)   | (Confidential)   |
-|       🏢         |       👗         |       🧸         |       🏦         |
-| ✅ Attestation   | ✅ Attestation   | ✅ Attestation   | ✅ Attestation   |
-| ✅ Key Release   | ✅ Key Release   | ✅ Key Release   | ✅ Key Release   |
-| ✅ Own data      | ✅ Own data      | ✅ Own data      | ✅ Federated     |
-+------------------+------------------+------------------+------------------+
-```
+After `-Deploy`, four FQDNs are printed and (unless `-SkipBrowser`) opened side-by-side:
 
-### Woodgrove Bank Features
+- **Woodgrove Bank** — green bank theme, federated orchestrator UI with the
+  full architecture diagram and partner-analysis controls.
+- **Contoso / Fabrikam / Wingtip** — provider UI with attestation, SKR, live
+  encryption, cross-company key-access denial, and per-company demographics.
 
-- **Green bank branding** with 🏦 logo
-- **Partner Demographic Analysis** section
-- **Progress indicators** for Contoso, Fabrikam, and Wingtip key release
-- **Federated Analysis** - collects pre-computed results from each partner's TEE
-- **Real-time analysis log**
-- **Demographics**: Top 10 countries with top 3 cities, generational breakdown, salary world map
-
-## Demo Script
-
-### Basic Attestation Demo
-
-1. **Show Contoso**: Click "Get Raw Report" - attestation succeeds
-2. **Show Fabrikam**: Same result - attestation succeeds (pink fashion theme)
-3. **Show Wingtip Toys**: Same result - attestation succeeds (orange toy theme)
-4. **Show Woodgrove Bank**: Attestation succeeds with green bank theme
-
-### Secure Key Release Demo
-
-5. **Release Key on Contoso**: Expand "Secure Key Release" section, click release
-6. **Cross-Company Test**: Contoso tries to access Fabrikam's key - denied
-
-### Partner Analysis Demo (Woodgrove Bank)
-
-7. **Open Woodgrove Bank pane**: Notice green bank branding with 🏦 logo
-8. **Expand "Partner Demographic Analysis"** section
-9. **Click "Start Partner Demographic Analysis"**
-10. **Watch progress**: Contoso ✅ → Fabrikam ✅ → Wingtip ✅
-11. **Review results**: Demographics by country, generation breakdown by company, salary world map
-12. **Review log**: Shows all partner keys released successfully
-
-### Federated Analysis Demo (Woodgrove Bank)
-
-13. **Expand "Federated Analysis"** section
-14. **Click "Start Federated Analysis"**
-15. **Watch collection**: Woodgrove polls each partner for pre-computed analysis results
-16. **Review combined results**: Aggregated analysis across all four companies
+Run through [DEMO-SCRIPT.md](DEMO-SCRIPT.md) for the recommended 3-minute path.
 
 ## Security Model
 
-### Per-Company Key Vault Keys
+### Per-company keys with attestation-bound release policies
 
 ```
-Azure Key Vault: kv<registry>a (Contoso)
-├── Key: contoso-secret-key
-├── Type: RSA-HSM (4096-bit)
-├── Exportable: true (for SKR)
-└── Release Policy: sevsnpvm + Contoso container identity
-
-Azure Key Vault: kv<registry>b (Fabrikam)
-├── Key: fabrikam-secret-key
-├── Type: RSA-HSM (4096-bit)
-├── Exportable: true (for SKR)
-└── Release Policy: sevsnpvm + Fabrikam container identity
-
-Azure Key Vault: kv<registry>c (Woodgrove Bank)
-├── Key: woodgrove-secret-key
-├── Type: RSA-HSM (4096-bit)
-├── Exportable: true (for SKR)
-├── Release Policy: sevsnpvm + Woodgrove container identity
-└── Cross-Company: Access to kv<registry>a, kv<registry>b, and kv<registry>d
+kv<id>a  contoso-secret-key   RSA-HSM 4096   policy: sevsnpvm + Contoso identity
+kv<id>b  fabrikam-secret-key  RSA-HSM 4096   policy: sevsnpvm + Fabrikam identity
+kv<id>d  wingtip-secret-key   RSA-HSM 4096   policy: sevsnpvm + Wingtip identity
+kv<id>c  woodgrove-secret-key RSA-HSM 4096   policy: sevsnpvm + Woodgrove identity
 ```
 
-```
-Azure Key Vault: kv<registry>d (Wingtip Toys)
-├── Key: wingtip-secret-key
-├── Type: RSA-HSM (4096-bit)
-├── Exportable: true (for SKR)
-└── Release Policy: sevsnpvm + Wingtip container identity
-```
+Cross-company key access is **denied by Key Vault RBAC** — Contoso's identity
+has no permission on Fabrikam's vault and vice versa. Try it from the
+"🚫 Attempt to Use Key from Other Company" panel.
 
-### Release Policy Example
+### Release policy (all keys)
 
 ```json
 {
@@ -308,80 +130,97 @@ Azure Key Vault: kv<registry>d (Wingtip Toys)
 }
 ```
 
-This means:
-- Only containers with `x-ms-attestation-type: sevsnpvm` can release the key
-- Non-confidential containers cannot obtain this claim - it's verified by AMD hardware
-- Each company's key has its own policy tied to their container identity
-- Woodgrove has access to partner keys via explicit Key Vault permissions
+Combined with the **CCE policy hash** burned into the SEV-SNP attestation
+report (`x-ms-sevsnpvm-hostdata`), this means: change one byte of the image
+or its environment variables and Key Vault stops releasing the key.
 
-## Files
+### Operator lockout
 
-| File | Description |
-|------|-------------|
-| `Deploy-MultiParty.ps1` | Main deployment script with -Prefix, -Build, -Deploy, -Cleanup |
-| `app.py` | Flask application with all API endpoints |
-| `Dockerfile` | Multi-stage build with SKR sidecar |
-| `templates/index.html` | Interactive web UI with all demo features |
-| `templates/index-woodgrove.html` | Woodgrove Bank custom UI with partner analytics |
-| `contoso-data.csv` | Sample data for Contoso (250 records) |
-| `fabrikam-data.csv` | Sample data for Fabrikam (250 records) |
-| `wingtip-data.csv` | Sample data for Wingtip Toys (250 records) |
-| `deployment-template-original.json` | ARM template for Confidential SKU |
-| `deployment-template-woodgrove-base.json` | ARM template for Woodgrove with partner env vars |
-| `MultiPartyArchitecture.svg` | High-level architecture diagram |
-| `MultiPartyTopology.svg` | Multi-party topology diagram |
-| `DataFlowDiagram.svg` | Encrypted data flow showing TEE decryption model |
+The CCE policy generated by `az confcom acipolicygen` blocks `az container exec`,
+shell spawn, and any container modification. Demonstrated live by the
+"🖥️ Try to Access Container OS" panel.
 
-## API Endpoints
+## API Reference
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Main web UI |
-| `/attest/maa` | POST | Request MAA attestation token |
-| `/attest/raw` | POST | Get raw attestation report |
-| `/skr/release` | POST | Release company's SKR key |
-| `/skr/release-other` | POST | Attempt cross-company key access (Contoso/Fabrikam) |
-| `/skr/release-partner` | POST | Release partner key (Woodgrove only) |
-| `/skr/config` | GET | Get SKR configuration |
-| `/encrypt` | POST | Encrypt data with released key |
-| `/decrypt` | POST | Decrypt data with released key |
-| `/company/info` | GET | Get company identity |
-| `/demographics/analyze` | POST | Partner demographic analysis (SSE streaming) |
-| `/container/info` | GET | Get container metadata |
-| `/health` | GET | Health check endpoint |
+| `/` | GET | Web UI (Woodgrove vs. provider variant chosen by company role) |
+| `/health` | GET | Liveness probe |
+| `/info` | GET | Container/role metadata |
+| `/company/info` | GET | Branding + role + key vault endpoint |
+| `/company/init-status` | GET | Whether SKR + data init has completed |
+| `/attest/maa` | POST | MAA-issued JWT (used by SKR) |
+| `/attest/raw` | POST | Raw SEV-SNP attestation report |
+| `/sidecar/status` | GET | SKR sidecar health |
+| `/skr/config` | GET | Effective SKR config (vault + key + MAA) |
+| `/skr/release` | POST | Release this container's own key |
+| `/skr/release-other` | POST | Try to release a peer company's key (expected to fail) |
+| `/skr/key-status` | GET | Whether the key is currently held in TEE memory |
+| `/encrypt` | POST | RSA-OAEP-SHA256 encrypt with released key |
+| `/decrypt` | POST | RSA-OAEP-SHA256 decrypt with released key |
+| `/security/policy` | GET | CCE policy hash + summary |
+| `/debug/attestation-claims` | GET | Pretty-printed MAA claims |
+| `/container/info` | GET | Hostname, OS, SEV-SNP device, file checksums |
+| `/container/access-test` | POST | Demonstrate that exec/SSH/shell are blocked |
+| `/partner/federated-analysis` | GET | **Woodgrove only.** SSE stream that runs the federated analysis across partners |
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `Deploy-MultiParty.ps1` | End-to-end build / deploy / cleanup |
+| `app.py` | Flask app shared by all four containers |
+| `Dockerfile` | App + SKR sidecar (multi-stage) |
+| `nginx.conf`, `supervisord.conf` | Reverse proxy + process supervision |
+| `templates/index.html` | Provider UI (Contoso / Fabrikam / Wingtip) |
+| `templates/index-woodgrove.html` | Woodgrove orchestrator UI |
+| `contoso-data.csv`, `fabrikam-data.csv`, `wingtip-data.csv` | 250 PII records each (encrypted at rest in image) |
+| `generate_data.py` | Regenerate the synthetic CSVs |
+| `deployment-template-original.json` | Generic ACI confidential template (providers) |
+| `deployment-template-woodgrove-base.json`, `deployment-template-wingtip.json` | Role-specific templates |
+| `deployment-params-*.json` | Per-company parameter files |
+| `MultiPartyArchitecture.svg`, `MultiPartyTopology.svg`, `DataFlowDiagram.svg` | Diagrams |
+| `Federated Mutli Party Demo 1-Slide.svg` | Single-slide overview |
+| `DEMO-SCRIPT.md` | 3-minute demo walkthrough |
+| `SECURITY-POLICY.md` | CCE policy notes |
+| `ATTESTATION.md` | MAA claim reference |
 
 ## Troubleshooting
 
-### Docker Not Running
-```
-Error: Docker is not running. Required for security policy generation.
-```
-Start Docker Desktop before running with `-Deploy`.
+**Build fails with "registry context cancelled" / ACR run failed.** Re-run
+`.\Deploy-MultiParty.ps1 -Prefix <yourcode> -Build`. ACR Tasks occasionally
+abort on cold start; the script is idempotent.
 
-### Containers Not Starting
-Check container logs:
+**Docker is not running.** Start Docker Desktop — `az confcom acipolicygen`
+needs it to inspect the image.
+
+**Container stuck `Pending` / `Waiting`.** Check the CCE policy mount denies:
 ```powershell
-az container logs -g <resource-group> -n <container-name>
+az container logs -g <rg> -n <container> --container-name aci-attestation-demo
 ```
+Most often caused by an image digest mismatch — re-run `-Build -Deploy` so the
+policy hash matches the image you actually pushed.
 
-### Key Release Fails on Confidential Container
-Verify the managed identity has Key Vault permissions:
+**SKR returns 403 / `release_key denied`.** The release policy hash on the key
+doesn't match the running container's CCE policy. Easiest fix: re-run
+`-Deploy`; the script updates the key's release policy in place (no key
+recreation needed, so it works in subscriptions without `purge` permission).
+
+**Cross-company key access *succeeds* (it shouldn't).** Verify each container
+has its own user-assigned identity and that only its own identity is on the
+vault's access policy:
 ```powershell
-az keyvault show --name <vault-name> --query "properties.accessPolicies"
+az keyvault show --name <vault> --query "properties.accessPolicies"
 ```
 
-### Partner Key Release Fails (Woodgrove)
-Ensure Woodgrove container was deployed with partner environment variables:
-- `PARTNER_CONTOSO_AKV_ENDPOINT`
-- `PARTNER_FABRIKAM_AKV_ENDPOINT`
+**Woodgrove federated analysis hangs on a partner.** Hit that partner's
+`/health` and `/skr/key-status` directly. A partner that never released its key
+will never produce aggregates; check its SKR panel and logs.
 
-### Cross-Company Key Access Not Denied
-Ensure each container has a unique managed identity and the Key Vault keys have proper release policies bound to specific identities.
+## Related Reading
 
-## Related Documentation
-
-- [Azure Confidential Computing Overview](https://azure.microsoft.com/solutions/confidential-compute/)
-- [AMD SEV-SNP Technical Details](https://www.amd.com/en/developer/sev.html)
-- [Azure Container Instances Confidential Containers](https://docs.microsoft.com/azure/container-instances/container-instances-confidential-overview)
-- [Azure Key Vault Secure Key Release](https://docs.microsoft.com/azure/key-vault/keys/about-keys-details)
-- [Microsoft Azure Attestation](https://docs.microsoft.com/azure/attestation/)
+- [Azure Confidential Computing](https://azure.microsoft.com/solutions/confidential-compute/)
+- [Confidential Containers on ACI](https://learn.microsoft.com/azure/container-instances/container-instances-confidential-overview)
+- [Azure Key Vault Secure Key Release](https://learn.microsoft.com/azure/key-vault/keys/policy-grammar)
+- [Microsoft Azure Attestation](https://learn.microsoft.com/azure/attestation/)
+- [AMD SEV-SNP](https://www.amd.com/en/developer/sev.html)

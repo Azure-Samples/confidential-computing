@@ -1,9 +1,29 @@
 # Confidential Computing Enforcement Policy (ccePolicy)
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** February 2026
+**Last Updated:** June 2026
 
-> **Note:** See [ATTESTATION.md](ATTESTATION.md) for the full attestation flow and [README.md](README.md) for the main project documentation.
+> **Note:** See [ATTESTATION.md](ATTESTATION.md) for the full attestation flow, [README-MultiParty.md](README-MultiParty.md) for the sample documentation, and [DEMO-SCRIPT.md](DEMO-SCRIPT.md) for the walkthrough.
+
+## Sample Context
+
+This document describes the ccePolicy as it applies to the **`advanced-app-federated`** sample — a **4-party** federated scenario where each provider mints its own key with a release policy that allows **either its own container or the Woodgrove orchestrator** to release it:
+
+| Role | Party | Key Vault Env Var | Container URL Env Var | Key Release Policy |
+|---|---|---|---|---|
+| Orchestrator | **Woodgrove Bank** | `SKR_AKV_ENDPOINT` | (self) | Woodgrove only |
+| Provider | **Contoso** | `PARTNER_CONTOSO_AKV_ENDPOINT` | `PARTNER_CONTOSO_URL` | Contoso **or** Woodgrove |
+| Provider | **Fabrikam** | `PARTNER_FABRIKAM_AKV_ENDPOINT` | `PARTNER_FABRIKAM_URL` | Fabrikam **or** Woodgrove |
+| Provider | **Wingtip Toys** | `PARTNER_WINGTIP_AKV_ENDPOINT` | `PARTNER_WINGTIP_URL` | Wingtip **or** Woodgrove |
+
+All four parties run the **same container image** (`aci-attestation-demo:latest`); their identity is established by the per-deployment environment variables and managed identity — all of which are cryptographically pinned by the ccePolicy.
+
+The per-key `anyOf` release policy uses the **policy hash of each provider** plus the **policy hash of Woodgrove**, so cross-company key access is blocked while federated analysis run by Woodgrove succeeds. The Woodgrove key is single-party (Woodgrove only) so providers cannot read Woodgrove's data.
+
+Sibling samples:
+
+- [`advanced-app/SECURITY-POLICY.md`](../advanced-app/SECURITY-POLICY.md) — 3-party baseline (no Wingtip).
+- [`advanced-app-finance-openAI/SECURITY-POLICY.md`](../advanced-app-finance-openAI/SECURITY-POLICY.md) — 3-party + Azure OpenAI.
 
 ## Overview
 
@@ -153,8 +173,10 @@ containers := [
       {"pattern": "RESOURCE_GROUP_NAME=sgall***ugez-rg",                                   "strategy": "string"},
       {"pattern": "PARTNER_CONTOSO_AKV_ENDPOINT=kv***ugeza.vault.azure.net",               "strategy": "string"},
       {"pattern": "PARTNER_FABRIKAM_AKV_ENDPOINT=kv***ugezb.vault.azure.net",              "strategy": "string"},
+      {"pattern": "PARTNER_WINGTIP_AKV_ENDPOINT=kv***ugezd.vault.azure.net",               "strategy": "string"},
       {"pattern": "PARTNER_CONTOSO_URL=https://contoso-***1933.eastus.azurecontainer.io",   "strategy": "string"},
       {"pattern": "PARTNER_FABRIKAM_URL=https://fabrikam-***1933.eastus.azurecontainer.io", "strategy": "string"},
+      {"pattern": "PARTNER_WINGTIP_URL=https://wingtip-***1933.eastus.azurecontainer.io",   "strategy": "string"},
       {"pattern": "SECURITY_POLICY_HASH=",                                                 "strategy": "string"},
 
       // === Secrets (regex — value injected at runtime) ===
@@ -182,7 +204,7 @@ containers := [
 
 **Why this matters for security:**
 - `SKR_AKV_ENDPOINT` is pinned to an exact Key Vault — changing it to steal keys from a different vault would change the policy hash
-- `PARTNER_CONTOSO_URL` and `PARTNER_FABRIKAM_URL` are pinned — a malicious redirect to a fake container would change the hash
+- `PARTNER_CONTOSO_URL`, `PARTNER_FABRIKAM_URL`, and `PARTNER_WINGTIP_URL` are pinned — a malicious redirect to a fake container would change the hash
 - `AZURE_STORAGE_CONNECTION_STRING` uses regex (`re2`) because it's a secret injected at deployment time
 - ACI platform variables use regex because their values are dynamic per-host
 
@@ -316,9 +338,9 @@ This policy is the **trust anchor** for the entire multi-party system:
 | Entrypoint command | Command changes → policy hash changes → key not released |
 | Environment variables | Env rules change → policy hash changes → key not released |
 | `SKR_AKV_ENDPOINT` (redirect to different vault) | Env rule changes → policy hash changes → key not released |
-| `PARTNER_CONTOSO_URL` (redirect to fake container) | Env rule changes → policy hash changes → key not released |
+| `PARTNER_CONTOSO_URL` / `PARTNER_FABRIKAM_URL` / `PARTNER_WINGTIP_URL` (redirect to fake container) | Env rule changes → policy hash changes → key not released |
 | Linux capabilities (add `CAP_SYS_ADMIN`) | Capabilities change → policy hash changes → key not released |
 | Mount points (add host filesystem) | Mounts change → policy hash changes → key not released |
 | `allow_stdio_access` (enable shell) | Security flag changes → policy hash changes → key not released |
 
-This is why Contoso and Fabrikam can trust Woodgrove's container — even though Woodgrove controls the deployment, the policy is cryptographically measured by AMD hardware and verified by Azure Attestation before any keys are released.
+This is why **Contoso, Fabrikam, and Wingtip Toys** can trust Woodgrove's container — even though Woodgrove controls the orchestration, the policy is cryptographically measured by AMD hardware and verified by Azure Attestation before any keys are released. The same mechanism stops any one provider's container from impersonating another and pulling its key.
