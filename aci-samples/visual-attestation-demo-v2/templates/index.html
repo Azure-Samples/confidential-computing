@@ -76,8 +76,12 @@
 <body>
   <header>
     <button id="themeBtn" class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle dark mode">Dark mode</button>
-    <h1>ACI Confidential Containers - Runtime Attestation</h1>
+    <h1>ACI {% if is_confidential %}Confidential{% else %}Standard{% endif %} Containers - Runtime Attestation</h1>
+    {% if is_confidential %}
     <p>This container is running in an ACI Confidential Container group on AMD SEV-SNP hardware. Click <strong>Attest</strong> to fetch a fresh hardware-rooted attestation token from Microsoft Azure Attestation (MAA) and inspect the claims.</p>
+    {% else %}
+    <p>This container is running in a <strong>Standard</strong> ACI container group - <em>not</em> on AMD SEV-SNP hardware and with no SKR sidecar. Click <strong>Attest</strong> to see the expected hardware-rooted attestation failure.</p>
+    {% endif %}
   </header>
   <main>
     <div class="card">

@@ -265,7 +265,8 @@ app = Flask(__name__)
 
 @app.route("/", methods=["GET"])
 def index():
-    return render_template("index.html")
+    is_confidential = os.environ.get("ACI_SKU", "").lower() == "confidential"
+    return render_template("index.html", is_confidential=is_confidential)
 
 
 @app.route("/healthz", methods=["GET"])
