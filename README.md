@@ -51,6 +51,7 @@ Confidential computing is the protection of data-in-use through isolating comput
 
 | Addition | Description |
 |---|---|
+| **[Visual Attestation Demo v2 (ACI)](/aci-samples/visual-attestation-demo-v2/README.md)** 🆕 | Simplified ACI port of the AKS visual attestation sample. Flask app calls Microsoft Azure Attestation **directly** via the upstream `get-snp-report` tool — **no SKR sidecar**, single container. Side-by-side Confidential vs Standard SKU deployment demonstrates falsifiability: the same image fails deterministically on Standard (no `/dev/sev-guest`), proving the success case really came from AMD silicon. |
 | **[Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README.md)** ⭐ | New 4-party (Contoso, Fabrikam, Wingtip Toys, Woodgrove Bank) **federated** analytics demo. Each partner decrypts its own data inside its own AMD SEV-SNP TEE and returns only aggregates — no raw PII ever crosses the trust boundary. Includes a 3-minute [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md). |
 | **[CVM samples now support Intel TDX](/vm-samples/README.md)** | [`BuildRandomCVM.ps1`](/vm-samples/BuildRandomCVM.ps1) auto-detects AMD SEV-SNP (`DCa*`/`ECa*`) vs Intel TDX (`DCe*`/`ECe*`, e.g. `Standard_DC2es_v6`) from the chosen VM SKU and runs the matching attestation config. See the [Intel TDX examples](/vm-samples/README.md#intel-tdx-examples) in the VM samples README. |
 | **Updated in-VM attestation tooling** | The CVM build script now runs the latest pre-built `attest` binary from [Azure/cvm-attestation-tools](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the VM (Linux + Windows), then **decodes the returned MAA JWT** (header, payload and key claims like `x-ms-attestation-type` and `x-ms-compliance-status`) using `jq` on Linux and built-in `ConvertFrom-Json` on Windows. The legacy [`WindowsAttest.ps1`](/vm-samples/WindowsAttest.ps1) is kept for reference but is **no longer recommended**. |
@@ -92,7 +93,8 @@ This repository is organized by Azure service type and deployment method:
 ### [ACI Samples](/aci-samples/README.md)
 Azure Container Instances with AMD SEV-SNP confidential computing:
 - **BuildRandomACI.ps1** - Create confidential ACI with hello-world container
-- **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA)
+- **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA) using the SKR sidecar
+- **[Visual Attestation Demo v2](/aci-samples/visual-attestation-demo-v2/README.md)** 🆕 - Simplified single-container port that calls MAA **directly** (no SKR sidecar) via the upstream `get-snp-report` tool; `-Compare` mode deploys Confidential + Standard SKUs side-by-side to demonstrate falsifiability
 - **[App + PostgreSQL Finance Demo](/aci-samples/app-and-postgreSQL-demo/README.md)** 🆕 - Confidential ACI with DCa/ECa AMD PostgreSQL, 5,000 financial transactions, Application Gateway, and 9 documented threat scenarios
   - Side-by-side comparison mode (Confidential vs Standard SKU)
   - Real-time encryption with SKR-released keys
