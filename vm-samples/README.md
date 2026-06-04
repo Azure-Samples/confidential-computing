@@ -75,6 +75,16 @@ Get-AzComputeResourceSku -Location '<region>' | Where-Object { $_.ResourceType -
 Get-AzVMUsage -Location '<region>' | Where-Object { $_.Name.Value -match 'DCa|DCe|ECa|ECe|cores' } | Format-Table -AutoSize
 ```
 
+#### Bypassing the pre-flight check: `-SkipSkuPreflight`
+
+`Get-AzComputeResourceSku` and `Get-AzVMUsage` have been observed to return false negatives in some subscription/region combinations — for example, `Standard_DC2as_v6` in `koreacentral` is reported as `NotAvailableForSubscription` (Restriction Type=Zone, all zones) with `standardDCasv6Family` quota shown as `0/10`, yet a raw `New-AzVM` deployment in that region succeeds and the VM runs normally. When you have evidence (or a deployment from another tool) that the SKU works, pass `-SkipSkuPreflight` to skip the entire SKU + quota block and let ARM validate at deploy time:
+
+```powershell
+./BuildRandomCVM.ps1 -subsID "<sub>" -basename "kc" -osType "Windows" -region "koreacentral" -vmsize "Standard_DC2as_v6" -DisableBastion -SkipSkuPreflight
+```
+
+The script prints a yellow notice when the pre-flight is skipped so it's clear in logs that ARM (not the script) is the source of truth for SKU availability on that run.
+
 Use at your own risk, no warranties implied.
 
 ## Usage
