@@ -10,7 +10,7 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion]
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion] [-SkipSkuPreflight]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
 # osType specifies which OS to deploy: Windows (Server 2022), Windows11 (Windows 11 Enterprise), Ubuntu (24.04), or RHEL (9.5)
@@ -38,7 +38,8 @@ param (
     [Parameter(Mandatory=$false)]$region = "northeurope",
     [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v5",
     [Parameter(Mandatory=$false)]$policyFilePath = "",
-    [Parameter(Mandatory=$false)][switch]$DisableBastion
+    [Parameter(Mandatory=$false)][switch]$DisableBastion,
+    [Parameter(Mandatory=$false)][switch]$SkipSkuPreflight
 )
 
 if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
@@ -130,6 +131,14 @@ $ownername = $tmp.Account.Id
 # a different isolation model and not supported by this script), is offered in the chosen region and not
 # restricted for this subscription, and that there's enough vCPU quota left in the SKU's family before
 # we start creating resources.
+# Note: Get-AzComputeResourceSku and Get-AzVMUsage have been observed to misreport NotAvailableForSubscription / 0 quota
+# even when ARM accepts the deployment (e.g. Standard_DC*as_v6 in koreacentral). Use -SkipSkuPreflight to bypass.
+if ($SkipSkuPreflight) {
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "Pre-flight check SKIPPED (-SkipSkuPreflight). ARM will validate '$vmSize' in '$region' at deploy time." -ForegroundColor Yellow
+    write-host "----------------------------------------------------------------------------------------------------------------"
+}
+else {
 write-host "----------------------------------------------------------------------------------------------------------------"
 write-host "Pre-flight check: confirming '$vmSize' is available in '$region' with sufficient quota..." -ForegroundColor Cyan
 
@@ -219,6 +228,7 @@ try {
 
 write-host "Pre-flight check passed: '$vmSize' is available and within quota in '$region'." -ForegroundColor Green
 write-host "----------------------------------------------------------------------------------------------------------------"
+}
 
 # Create Resource Group
 $resourceGroupTags = @{
