@@ -140,6 +140,8 @@ function fmtVal(v){
   return esc(String(v));
 }
 
+let attestationCompleted = false;
+
 async function runAttest(){
   const btn = document.getElementById('btn-attest');
   const status = document.getElementById('status-attest');
@@ -154,7 +156,9 @@ async function runAttest(){
       out.innerHTML = '<div class="card"><div class="error"><strong>Attestation failed.</strong><br>'+esc(data.error||'')+'<details><summary>Trace</summary><pre>'+esc(data.trace||'')+'</pre></details></div></div>';
       return;
     }
+    attestationCompleted = true;
     renderAttest(data);
+    await loadSealed();
   } catch (e) {
     out.innerHTML = '<div class="card"><div class="error">'+esc(e.message)+'</div></div>';
   } finally {
@@ -231,10 +235,27 @@ async function loadSealed(){
     const files = (data.files||[]).map(f =>
       '<tr><td class="k">'+esc(f.name||'')+'</td><td class="v">'+esc((f.size||0)+' bytes')+'</td><td class="v">'+esc(f.sha256||f.error||'')+'</td></tr>'
     ).join('');
+
+    let secretSection = '';
+    if (attestationCompleted && data.welcome_secret) {
+      const ws = data.welcome_secret;
+      const enc = ws.encrypted_form ? '<pre>'+esc(JSON.stringify(ws.encrypted_form, null, 2))+'</pre>' : '<em>n/a</em>';
+      const dec = ws.ok ? esc(ws.plaintext||'') : ('<span class="error">'+esc(ws.error||'Unable to decrypt')+'</span>');
+      secretSection =
+        '<h4>Secret payload decrypted after attestation</h4>'+
+        '<table><tbody>'+
+          '<tr><td class="k">Encrypted form (welcome.txt)</td><td class="v">'+enc+'</td></tr>'+
+          '<tr><td class="k">Key used to decrypt</td><td class="v">'+esc(ws.decryption_key_hex||'')+'</td></tr>'+
+          '<tr><td class="k">Key release policy SHA-256</td><td class="v">'+esc(ws.release_policy_sha256||data.release_policy_sha256||'')+'</td></tr>'+
+          '<tr><td class="k">Decrypted plaintext</td><td class="v">'+dec+'</td></tr>'+
+        '</tbody></table>';
+    }
+
     out.innerHTML =
       '<table style="margin-top:12px"><tbody>'+rows+'</tbody></table>'+
       '<h4>Decrypted files (metadata only)</h4>'+
-      '<table><thead><tr><th>Name</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>'+files+'</tbody></table>';
+      '<table><thead><tr><th>Name</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>'+files+'</tbody></table>'+
+      secretSection;
   } catch (e) {
     out.innerHTML = '<div class="error">'+esc(e.message)+'</div>';
   } finally {

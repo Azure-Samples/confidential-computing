@@ -162,17 +162,26 @@ function Invoke-Deploy {
     $paramsObj | ConvertTo-Json -Depth 10 | Set-Content $tmpParams -Encoding UTF8
     try {
         Write-Step "Submitting ARM deployment ($cgName)"
-        $deployJson = az deployment group create `
+        az deployment group create `
             --resource-group $cfg.resourceGroup `
             --name $cgName `
             --template-file (Join-Path $ScriptDir 'deployment-template.json') `
-            --parameters "@$tmpParams" -o json
+            --parameters "@$tmpParams" `
+            --only-show-errors `
+            -o none
         if ($LASTEXITCODE -ne 0) { throw "az deployment group create failed" }
     } finally {
         Remove-Item $tmpParams -Force -ErrorAction SilentlyContinue
     }
 
-    $outputs = ($deployJson | ConvertFrom-Json).properties.outputs
+    $outputsJson = az deployment group show `
+        --resource-group $cfg.resourceGroup `
+        --name $cgName `
+        --query properties.outputs `
+        -o json
+    if ($LASTEXITCODE -ne 0 -or -not $outputsJson) { throw "Failed to read deployment outputs" }
+
+    $outputs = $outputsJson | ConvertFrom-Json
     $publicIp = $outputs.publicIp.value
     $fqdn     = $outputs.fqdn.value
     $url      = $outputs.url.value

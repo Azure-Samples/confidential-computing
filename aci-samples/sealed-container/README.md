@@ -134,7 +134,99 @@ az container exec -g $cfg.resourceGroup -n $cg --exec-command /bin/sh
 
 # Verify the bundle without deploying:
 ./Deploy-SealedContainer.ps1 -Verify
+
+# Build with a custom secret encrypted inside the sealed bundle:
+./Build-SealedArtifacts.ps1 -Build -WelcomeSecret "My-Secret-String-Here"
+./Deploy-SealedContainer.ps1 -Deploy
 ```
+
+## The -WelcomeSecret Parameter: Encrypt Sensitive Data Inside the TEE
+
+The `-WelcomeSecret` parameter is an optional string that the build script encrypts into the sealed bundle. It demonstrates how **sensitive configuration, API credentials, or feature flags** can be sealed alongside the container image and only decrypted inside the TEE after attestation succeeds.
+
+### How It Works
+
+1. **Build Time:** You pass a plaintext secret to `-WelcomeSecret` (or the script prompts for one interactively if omitted).
+
+2. **Encryption:** `Build-SealedArtifacts.ps1` wraps it in an AES-256-GCM envelope using the same Data Encryption Key (DEK) that seals the entire bundle:
+   ```
+   Algorithm:    AES-256-GCM
+   Key:          bundle_dek (256-bit random, unsealed only inside TEE)
+   Plaintext:    your secret string
+   AAD:          "sealed-app/welcome/v1" (integrity check)
+   Output:       welcome.txt (stored as JSON envelope in sealed-data.enc)
+   ```
+
+3. **Container Runtime:** The sealed bundle travels encrypted until `entrypoint.py` performs:
+   - MAA attestation (proves we're on real AMD SEV-SNP hardware)
+   - SKR key release (AKV unwraps the DEK, bound to our CCE policy)
+   - Bundle unseal (decrypts sealed-data.enc into tmpfs at `/run/sealed`)
+
+4. **Application Decryption:** The Flask app decodes `welcome.txt` using the DEK that's now in the manifest and renders the decrypted secret in the UI **only after attestation succeeds**. The plaintext never touches disk.
+
+### How It's Protected
+
+The entire chain is cryptographically binding:
+
+| Layer | Protection |
+| --- | --- |
+| **Image digest** | CCE policy pins the exact container image SHA-256; any push of a modified image produces a different digest. |
+| **sealed-data.enc** | Baked into the image; any modification changes the bundle's SHA-256. |
+| **Sealed bundle contents** | AES-256-GCM with AEAD; tampering with the envelope or ciphertext causes decryption to fail. |
+| **DEK (Data Encryption Key)** | Encrypted at rest in the bundle using an RSA-4096 HSM key in Azure Key Vault. |
+| **AKV release policy** | Tied to the SHA-256 of the CCE policy via `x-ms-sevsnpvm-hostdata`. **Edit any env var, change the CCE policy, modify the image → AKV refuses to release the DEK → the secret never decrypts.** |
+| **Attestation requirement** | The app only renders the decrypted secret after a fresh SEV-SNP report passes MAA validation. |
+
+### Real-World Application Examples
+
+**1. API Credentials / Service Tokens**
+```powershell
+./Build-SealedArtifacts.ps1 -Build -WelcomeSecret "Bearer sk_prod_abc123def456xyz"
+```
+Deploy a microservice with its OAuth token sealed inside. Only genuine TEE hardware and the correct CCE policy unlock it.
+
+**2. Feature Flags / Deployment Mode**
+```powershell
+./Build-SealedArtifacts.ps1 -Build -WelcomeSecret "canary-rollout-enabled,debug-logs-on"
+```
+Ship different binaries with different behavior flags, all sealed and auditable.
+
+**3. Database Connection Secrets**
+```powershell
+./Build-SealedArtifacts.ps1 -Build -WelcomeSecret "Endpoint=sb://...;SharedAccessKey=..."
+```
+Bake a Service Bus or database secret into the container; it's inaccessible outside the TEE.
+
+**4. Compliance Artifact**
+```powershell
+./Build-SealedArtifacts.ps1 -Build -WelcomeSecret "compliance-tag-2026-06-19-audit-id-xyz"
+```
+Seal a compliance marker or audit identifier. The CCE policy + SKR release policy form a **tamper-evident audit trail**: any deviation causes key release to fail, leaving no plaintext behind.
+
+### CLI Examples
+
+**Interactive (prompts for secret):**
+```powershell
+./Build-SealedArtifacts.ps1 -Build -TrustedSourceCidr '10.0.0.0/8'
+# → "Enter secret string to encrypt into welcome.txt: "
+```
+
+**Non-interactive (scripted):**
+```powershell
+./Build-SealedArtifacts.ps1 -Build -WelcomeSecret "production-key-2026" -TrustedSourceCidr '10.0.0.0/8'
+./Deploy-SealedContainer.ps1 -Deploy
+```
+
+**Verify without deploying:**
+```powershell
+./Deploy-SealedContainer.ps1 -Verify
+```
+
+Once deployed, navigate to the container's URL, click **Run attestation**, and in the "Secret payload decrypted after attestation" section you'll see:
+- Encrypted form (the envelope stored in welcome.txt)
+- Decryption key used (the bundle DEK in hex)
+- Key release policy SHA-256 (the AKV binding)
+- Decrypted plaintext (your secret)
 
 ## Prerequisites
 

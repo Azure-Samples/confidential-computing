@@ -63,6 +63,7 @@ GET_SNP_REPORT  = os.environ.get("GET_SNP_REPORT",  "/usr/local/bin/get-snp-repo
 MAA_ENDPOINT    = os.environ["MAA_ENDPOINT"]              # required, pinned in CCE policy
 AKV_ENDPOINT    = os.environ["AKV_ENDPOINT"]              # required, pinned in CCE policy
 KEY_NAME        = os.environ["SKR_KEY_NAME"]              # required, pinned in CCE policy
+RELEASE_POLICY_SHA256 = os.environ.get("RELEASE_POLICY_SHA256", "")
 SEALED_BUNDLE   = Path(os.environ.get("SEALED_BUNDLE", "/app/sealed-data.enc"))
 SEALED_DIR      = Path(os.environ.get("SEALED_DIR",    "/run/sealed"))
 APP_CMD         = ["python", "/app/app.py"]
@@ -200,7 +201,7 @@ def get_akv_token() -> str:
 # SKR + unseal
 # ---------------------------------------------------------------------------
 def release_key(maa_token: str, akv_token: str):
-    """Calls AKV /keys/<name>/release. Returns (rsa_private_key, key_version)."""
+    """Calls AKV /keys/<name>/release. Returns (rsa_private_key, key_version, release_policy_sha256)."""
     akv_host = AKV_ENDPOINT.replace("https://", "").rstrip("/")
     info = requests.get(
         f"https://{akv_host}/keys/{KEY_NAME}?api-version=7.4",
@@ -209,6 +210,14 @@ def release_key(maa_token: str, akv_token: str):
     ).json()
     kid = info.get("key", {}).get("kid", "")
     key_version = kid.rstrip("/").split("/")[-1]
+    release_policy_sha256 = RELEASE_POLICY_SHA256
+    if not release_policy_sha256:
+        rp_data = (info.get("release_policy") or {}).get("data")
+        if rp_data:
+            try:
+                release_policy_sha256 = hashlib.sha256(_b64url_decode(rp_data)).hexdigest()
+            except Exception as exc:
+                log(f"  warning: failed to derive release_policy_sha256 from key metadata: {exc}")
 
     resp = requests.post(
         f"https://{akv_host}/keys/{KEY_NAME}/{key_version}/release?api-version=7.4",
@@ -226,7 +235,7 @@ def release_key(maa_token: str, akv_token: str):
         rsa_priv = unwrap_ckm_rsa_aes(jwk["key_hsm"])
     else:
         rsa_priv = jwk_to_private_key(jwk)
-    return rsa_priv, key_version
+    return rsa_priv, key_version, release_policy_sha256
 
 
 def unwrap_ckm_rsa_aes(key_hsm_b64: str):
@@ -320,10 +329,11 @@ def unseal_bundle(rsa_priv) -> dict:
         "ciphertext_sha256": ciphertext_sha256,
         "plaintext_sha256": hashlib.sha256(plaintext).hexdigest(),
         "wrap_algorithm": "RSA-OAEP-SHA256 + AES-256-GCM",
+        "bundle_dek_hex": dek.hex(),
     }
 
 
-def write_unsealed(unsealed: dict, key_version: str) -> None:
+def write_unsealed(unsealed: dict, key_version: str, release_policy_sha256: str) -> None:
     SEALED_DIR.mkdir(parents=True, exist_ok=True)
     bundle = unsealed["bundle"]
     files = bundle.get("files", {})
@@ -344,6 +354,8 @@ def write_unsealed(unsealed: dict, key_version: str) -> None:
         "ciphertext_sha256":       unsealed["ciphertext_sha256"],
         "plaintext_sha256":        unsealed["plaintext_sha256"],
         "wrap_algorithm":          unsealed["wrap_algorithm"],
+        "bundle_dek_hex":          unsealed["bundle_dek_hex"],
+        "release_policy_sha256":   release_policy_sha256,
     }
     (SEALED_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
@@ -362,12 +374,12 @@ def main() -> int:
         akv_token = get_akv_token()
 
         log("Step 3/4 — calling AKV /release")
-        rsa_priv, key_version = release_key(maa_token, akv_token)
+        rsa_priv, key_version, release_policy_sha256 = release_key(maa_token, akv_token)
         log(f"  released key version: {key_version}")
 
         log("Step 4/4 — unsealing data bundle into tmpfs")
         unsealed = unseal_bundle(rsa_priv)
-        write_unsealed(unsealed, key_version)
+        write_unsealed(unsealed, key_version, release_policy_sha256)
         log(f"  unsealed {len(unsealed['bundle'].get('files', {}))} file(s) into {SEALED_DIR}")
     except Exception as exc:
         log(f"FATAL: {exc}")

@@ -63,6 +63,7 @@
                 { "name": "MAA_ENDPOINT",            "value": "[parameters('maaEndpoint')]" },
                 { "name": "AKV_ENDPOINT",            "value": "[parameters('akvEndpoint')]" },
                 { "name": "SKR_KEY_NAME",            "value": "[parameters('skrKeyName')]" },
+                { "name": "RELEASE_POLICY_SHA256",   "value": "[parameters('releasePolicySha256')]" },
                 { "name": "FIREWALL_POLICY",         "value": "/app/firewall-policy.json" },
                 { "name": "FIREWALL_POLICY_SHA256",  "value": "[parameters('firewallPolicySha256')]" },
                 { "name": "TRUSTED_SOURCE_CIDR",     "value": "[parameters('trustedSourceCidr')]" }

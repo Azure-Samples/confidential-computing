@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from flask import Flask, abort, jsonify, render_template, request
 
 
@@ -318,6 +319,8 @@ def sealed_status() -> dict:
                 })
     except Exception as exc:
         decrypted_files = [{"error": str(exc)}]
+
+    welcome_secret = decode_welcome_secret(info)
     return {
         "unsealed": True,
         "sealed_at": info.get("sealed_at"),
@@ -329,8 +332,51 @@ def sealed_status() -> dict:
         "plaintext_sha256": info.get("plaintext_sha256"),
         "wrap_algorithm": info.get("wrap_algorithm"),
         "release_policy_sha256": info.get("release_policy_sha256"),
+        "bundle_dek_hex": info.get("bundle_dek_hex"),
+        "welcome_secret": welcome_secret,
         "files": decrypted_files,
     }
+
+
+def decode_welcome_secret(manifest: dict) -> dict:
+    welcome_file = SEALED_DIR / "welcome.txt"
+    if not welcome_file.is_file():
+        return {"ok": False, "error": "welcome.txt not found in sealed output."}
+
+    raw = welcome_file.read_text(encoding="utf-8", errors="replace")
+    try:
+        envelope = json.loads(raw)
+    except Exception:
+        return {
+            "ok": False,
+            "error": "welcome.txt is not JSON envelope data.",
+            "encrypted_form": raw,
+        }
+
+    try:
+        dek_hex = manifest.get("bundle_dek_hex") or ""
+        if not dek_hex:
+            raise RuntimeError("bundle_dek_hex missing from manifest")
+        dek = bytes.fromhex(dek_hex)
+        nonce = base64.b64decode(envelope["nonce_b64"])
+        ciphertext = base64.b64decode(envelope["ciphertext_b64"])
+        aad = (envelope.get("aad") or "sealed-app/welcome/v1").encode("utf-8")
+        plaintext = AESGCM(dek).decrypt(nonce, ciphertext, aad).decode("utf-8", "replace")
+        return {
+            "ok": True,
+            "encrypted_form": envelope,
+            "decryption_key_hex": dek_hex,
+            "release_policy_sha256": manifest.get("release_policy_sha256"),
+            "plaintext": plaintext,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"Failed to decrypt welcome.txt: {exc}",
+            "encrypted_form": envelope,
+            "decryption_key_hex": manifest.get("bundle_dek_hex"),
+            "release_policy_sha256": manifest.get("release_policy_sha256"),
+        }
 
 
 # ---------------------------------------------------------------------------

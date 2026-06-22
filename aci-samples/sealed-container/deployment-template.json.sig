@@ -1,8 +1,8 @@
 {
+  "signed_at": "2026-06-19T15:58:08Z",
   "algorithm": "sha256",
-  "file": "deployment-template.json",
+  "digest": "17a20366afd74a14e2ad033633e861ca670a9d346404b8d2f7c4c68d39659290",
   "note": "cosign is not installed — install it and re-run -Refresh for a real signature.",
-  "signed_at": "2026-06-12T18:32:47Z",
-  "digest": "d9dab11237bd83dbbf26b788ce8ace8dcab4c6537c90a2929353095f65ff3692",
-  "_placeholder": true
+  "_placeholder": true,
+  "file": "deployment-template.json"
 }

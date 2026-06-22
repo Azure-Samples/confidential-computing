@@ -36,7 +36,8 @@
      11. Assemble artifacts/MANIFEST.json + MANIFEST.json.sig pointing at
          every file with its digest, and refresh artifacts/checksums.sha256.
 
-    No interactive prompts — fully scriptable.
+    Fully scriptable. If -WelcomeSecret is not provided, the script prompts
+    once for a secret string that is encrypted into welcome.txt.
 
 .PARAMETER Build
     Build the image and produce all artifacts. Default action.
@@ -64,7 +65,8 @@ param(
     [string]$Prefix = 'sgall',
     [string]$Location = 'eastus',
     [string]$SubscriptionId,
-    [string]$TrustedSourceCidr
+    [string]$TrustedSourceCidr,
+    [string]$WelcomeSecret
 )
 
 $ErrorActionPreference = 'Stop'
@@ -134,10 +136,36 @@ function New-SealedBundle {
         Returns:
           @{ DekHex, WrapPrivPem (string), WrapPubPem (string), CiphertextSha256 }
     #>
+    param([Parameter(Mandatory)] [string]$SecretPlaintext)
+
     Add-Type -AssemblyName System.Security
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     $dek = New-Object byte[] 32 ; $rng.GetBytes($dek)
     $nonce = New-Object byte[] 12 ; $rng.GetBytes($nonce)
+
+    # welcome.txt is itself an encrypted payload envelope so the UI can
+    # demonstrate decrypt-after-attestation behavior explicitly.
+    $welcomeNonce = New-Object byte[] 12 ; $rng.GetBytes($welcomeNonce)
+    $welcomePt = [Text.Encoding]::UTF8.GetBytes($SecretPlaintext)
+    $welcomeCt = New-Object byte[] $welcomePt.Length
+    $welcomeTag = New-Object byte[] 16
+    $welcomeAad = [Text.Encoding]::ASCII.GetBytes("sealed-app/welcome/v1")
+    $welcomeAes = [System.Security.Cryptography.AesGcm]::new($dek)
+    $welcomeAes.Encrypt($welcomeNonce, $welcomePt, $welcomeCt, $welcomeTag, $welcomeAad)
+    $welcomeAes.Dispose()
+
+    $welcomeCtTag = New-Object byte[] ($welcomeCt.Length + 16)
+    [Array]::Copy($welcomeCt, 0, $welcomeCtTag, 0, $welcomeCt.Length)
+    [Array]::Copy($welcomeTag, 0, $welcomeCtTag, $welcomeCt.Length, 16)
+
+    $welcomeEnvelope = [ordered]@{
+        schema         = "sealed-app/welcome-envelope-v1"
+        algorithm      = "AES-256-GCM"
+        aad            = "sealed-app/welcome/v1"
+        key_source     = "bundle_dek"
+        nonce_b64      = [Convert]::ToBase64String($welcomeNonce)
+        ciphertext_b64 = [Convert]::ToBase64String($welcomeCtTag)
+    } | ConvertTo-Json -Compress
 
     # Plaintext sealed bundle — application secrets, sample data, splash text.
     $plain = [ordered]@{
@@ -145,10 +173,11 @@ function New-SealedBundle {
         meta = @{
             description = "Demo sealed data bundle for sealed-app on ACI Confidential Containers."
             owner       = "Azure Confidential Computing samples"
+            welcome_encryption = "AES-256-GCM envelope in welcome.txt using bundle DEK"
         }
         files = @{
             'welcome.txt'   = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
-                "Hello from inside the TEE. This file was never on disk in plaintext on the host."))
+                $welcomeEnvelope))
             'api-token.txt' = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
                 "demo-api-token-" + ([guid]::NewGuid().ToString('N'))))
             'config.json'   = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
@@ -200,6 +229,15 @@ function New-SealedBundle {
         WrapPubPem       = $pubPem
         CiphertextSha256 = $ctSha
     }
+}
+
+function Get-WelcomeSecret {
+    if ($WelcomeSecret) { return $WelcomeSecret }
+    $secret = Read-Host -Prompt "Enter secret string to encrypt into welcome.txt"
+    if ([string]::IsNullOrWhiteSpace($secret)) {
+        throw "Welcome secret cannot be empty."
+    }
+    return $secret
 }
 
 # ----------------------------------------------------------------------------
@@ -511,7 +549,8 @@ function Invoke-Build {
         --key-permissions get release wrapKey unwrapKey --output none
 
     Write-Step "Creating sealed data bundle and RSA-4096 wrap key"
-    $sealed = New-SealedBundle
+    $secret = Get-WelcomeSecret
+    $sealed = New-SealedBundle -SecretPlaintext $secret
     $akvEndpoint = "$($cfg.keyVault).vault.azure.net"
 
     Save-Config $cfg
