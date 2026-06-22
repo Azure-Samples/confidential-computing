@@ -63,6 +63,12 @@
     .ts { color:var(--subtle); font-size:.78rem; }
     code { font-family:var(--mono); font-size:.85rem; background:var(--th); padding:1px 4px; border-radius:3px; }
     code.token { display:block; padding:10px; max-height:200px; overflow:auto; font-size:.75rem; }
+    .section-sealed { background:#f0f9ff; border-left:4px solid #0284c7; padding:16px; margin-top:16px; border-radius:6px; }
+    .section-files { background:#fef3c7; border-left:4px solid #d97706; padding:16px; margin-top:16px; border-radius:6px; }
+    .section-secret { background:#f0fdf4; border-left:4px solid #16a34a; padding:16px; margin-top:16px; border-radius:6px; }
+    html[data-theme="dark"] .section-sealed { background:#0c2540; border-left-color:#38bdf8; }
+    html[data-theme="dark"] .section-files { background:#2d2410; border-left-color:#fbbf24; }
+    html[data-theme="dark"] .section-secret { background:#0f2818; border-left-color:#4ade80; }
     ul.locks { margin:0; padding-left:1.2rem; }
     ul.locks li { margin:.2rem 0; }
     .spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.7s linear infinite; vertical-align:-2px; margin-right:6px; }
@@ -102,7 +108,7 @@
         <p class="meta">Result will show below.</p>
       </div>
 
-      <div class="card">
+      <div class="card section-sealed">
         <h2>Sealed data status</h2>
         <p>Metadata only — the unsealed bytes never leave the tmpfs.</p>
         <p>
@@ -242,7 +248,7 @@ async function loadSealed(){
       const enc = ws.encrypted_form ? '<pre>'+esc(JSON.stringify(ws.encrypted_form, null, 2))+'</pre>' : '<em>n/a</em>';
       const dec = ws.ok ? esc(ws.plaintext||'') : ('<span class="error">'+esc(ws.error||'Unable to decrypt')+'</span>');
       secretSection =
-        '<h4>Secret payload decrypted after attestation</h4>'+
+        '<h4 style="margin-top:0">Secret payload decrypted after attestation</h4>'+
         '<table><tbody>'+
           '<tr><td class="k">Encrypted form (welcome.txt)</td><td class="v">'+enc+'</td></tr>'+
           '<tr><td class="k">Key used to decrypt</td><td class="v">'+esc(ws.decryption_key_hex||'')+'</td></tr>'+
@@ -252,10 +258,10 @@ async function loadSealed(){
     }
 
     out.innerHTML =
-      '<table style="margin-top:12px"><tbody>'+rows+'</tbody></table>'+
-      '<h4>Decrypted files (metadata only)</h4>'+
-      '<table><thead><tr><th>Name</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>'+files+'</tbody></table>'+
-      secretSection;
+      '<div class="section-sealed"><table style="margin-top:0"><tbody>'+rows+'</tbody></table></div>'+
+      '<div class="section-files"><h4 style="margin-top:0">Decrypted files (metadata only)</h4>'+
+      '<table><thead><tr><th>Name</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>'+files+'</tbody></table></div>'+
+      (secretSection ? '<div class="section-secret">'+secretSection+'</div>' : '');
   } catch (e) {
     out.innerHTML = '<div class="error">'+esc(e.message)+'</div>';
   } finally {

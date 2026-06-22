@@ -67,6 +67,18 @@ sealed-container/
 └── .gitignore
 ```
 
+## Web UI: Visual Attestation and Sealed Data Display
+
+The single-page web application ([templates/index.html](templates/index.html)) presents attestation results and sealed data status with a clean, accessible interface. Key sections are highlighted with distinct background colors for clarity:
+
+- **Sealed data status** (blue background): Core metadata from the sealed bundle — ciphertext hash, unsealing timestamp, AKV key version, wrap algorithm, and release policy SHA-256. This metadata proves the bundle was properly unsealed inside the TEE and is only visible after attestation succeeds.
+
+- **Decrypted files (metadata only)** (amber background): List of files recovered from the unsealed bundle — name, size, and SHA-256. File contents themselves never leave the `/run/sealed` tmpfs; only their metadata is shown.
+
+- **Secret payload decrypted after attestation** (green background): Appears only after a successful attestation and only if a secret was encrypted via the `-WelcomeSecret` parameter. Shows the encrypted envelope (from welcome.txt), the DEK (Data Encryption Key) in hex, the key release policy SHA-256, and the plaintext. This section demonstrates end-to-end encryption: plaintext → AES-256-GCM encryption with DEK → release DEK only via SKR after MAA validates SEV-SNP → decrypt and display.
+
+All three sections are responsive and support light/dark theme switching.
+
 ## End-to-end flow
 
 ```mermaid
