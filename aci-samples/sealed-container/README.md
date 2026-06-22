@@ -172,7 +172,7 @@ This manifest serves as the **source of truth for build artifacts** and is used 
 # One-time: build, scan, SBOM, sign, push image, create RG/ACR/KV/identity,
 # generate CCE policy with az confcom acipolicygen.
 cd aci-samples/sealed-container
-./Build-SealedArtifacts.ps1 -Build              # uses prefix sgall by default
+./Build-SealedArtifacts.ps1 -Build              # uses prefix sealaci by default
 
 # Deploy (re-verifies checksums first; refuses to deploy on drift).
 ./Deploy-SealedContainer.ps1 -Deploy

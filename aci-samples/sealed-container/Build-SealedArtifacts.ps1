@@ -47,7 +47,7 @@
     already-built image. Skips the docker build.
 
 .PARAMETER Prefix
-    Resource naming prefix (default: sgall). Random 5-char suffix appended.
+    Resource naming prefix (default: sealaci). Random 5-char suffix appended.
 
 .PARAMETER Location
     Azure region (default: eastus). Must support Confidential ACI + Premium AKV.
@@ -62,7 +62,7 @@
 param(
     [Parameter(ParameterSetName='Build')]   [switch]$Build,
     [Parameter(ParameterSetName='Refresh')] [switch]$Refresh,
-    [string]$Prefix = 'sgall',
+    [string]$Prefix = 'sealaci',
     [string]$Location = 'eastus',
     [string]$SubscriptionId,
     [string]$TrustedSourceCidr,
