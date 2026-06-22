@@ -107,6 +107,65 @@ The CCE policy in turn pins:
   and `FIREWALL_POLICY_SHA256` — so the app's L7 firewall can't be bypassed
   by re-deploying the same image with different env values.
 
+## Artifact Integrity: What's Checked and How
+
+### ✅ What IS Verified
+
+**SHA-256 Checksums (Mandatory Gate Before Every Deploy):**
+
+Every deployment runs `./Deploy-SealedContainer.ps1 -Deploy`, which internally calls `Invoke-Verify` before deploying. This:
+- Compares every file in `artifacts/` against recorded SHA-256 hashes in `checksums.sha256`
+- **Refuses deployment if any checksums don't match** — this is the verification gate that prevents drift
+
+```powershell
+# Verification is automatic during deploy, but can also be run standalone:
+./Deploy-SealedContainer.ps1 -Verify
+```
+
+The verification covers all sealed artifacts:
+- `sealed-data.enc` (the encrypted bundle)
+- `cce-policy.rego` (Confidential Computing Enforcement policy)
+- `skr-release-policy.json` (AKV release policy)
+- `firewall-policy.json` (L7 firewall rules, signed and enforced by the app)
+- `SBOM` files (SPDX + CycloneDX software bill of materials)
+- `trivy-report.json` (vulnerability scan results)
+- `deployment-template.json` (ARM template)
+- `MANIFEST.json` (the manifest listing all artifacts with their hashes)
+
+### ❌ What is NOT Automatically Validated
+
+**Cosign Signatures (Created for Audit, Not Enforced):**
+
+Every artifact gets a `.sig` detached signature created by `cosign sign-blob`, and `MANIFEST.json.sig` contains the top-level manifest signature. **These .sig files are NOT automatically validated in the deploy or runtime flow.** They serve as:
+- An **audit trail** — operators can manually verify with `cosign verify-blob` if desired
+- **Evidence of build integrity** — the signatures document what was built and when
+- **Optional downstream validation** — external tools or processes can validate them
+
+The design decision is intentional: **the real security comes from cryptographic bindings**, not signature validation.
+
+### 🔐 Real Cryptographic Protection (Defense in Depth)
+
+The deeper security is enforced through **cryptographic bindings**, not signature files:
+
+| Protection Layer | How It Works |
+|---|---|
+| **Image Digest Pinning** | CCE policy pins the exact image SHA-256 + all layer dm-verity hashes. Any re-push or modification changes the digest → CCE policy hash changes → SKR key release fails. |
+| **SKR Release Policy** | AKV release policy bound to `x-ms-sevsnpvm-hostdata` = SHA-256(cce-policy). Edit ANY env var, policy file, or firewall rule → hash changes → AKV refuses to release the DEK (Data Encryption Key). |
+| **Checksum Verification Gate** | `Deploy-SealedContainer.ps1 -Verify` ensures nothing drifted between build and deploy. Tampering on disk gets caught before deployment. |
+| **No Runtime Signature Checks** | `entrypoint.py` and `app.py` don't validate cosign signatures. Instead, they rely on the AKV release binding — if signatures or policies were tampered, the DEK never releases, so plaintext secrets never decrypt. |
+| **Sealed Bundle Protection** | `sealed-data.enc` is encrypted with AES-256-GCM using the DEK. Any tampering with the ciphertext or envelope causes decryption to fail. |
+
+### MANIFEST.json: The Artifact Inventory
+
+Every build produces `artifacts/MANIFEST.json` (itself signed), which documents:
+- Image reference + exact digest + layer hashes
+- CCE policy SHA-256 and release policy SHA-256
+- Firewall policy SHA-256 and trusted source CIDR
+- Sealed data ciphertext SHA-256 and wrap algorithm
+- All signed files with their individual checksums and `.sig` paths
+
+This manifest serves as the **source of truth for build artifacts** and is used by operators to audit what was built and when.
+
 ## Quick start
 
 ```powershell
