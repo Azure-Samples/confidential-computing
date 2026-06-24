@@ -8,7 +8,7 @@
     "containerGroupName":   { "type": "string" },
     "location":             { "type": "string", "defaultValue": "[resourceGroup().location]" },
     "dnsNameLabel":         { "type": "string" },
-    "appImage":             { "type": "string", "metadata": { "description": "Fully qualified image with digest, e.g. acrxxxx.azurecr.io/sealed-app@sha256:..." } },
+    "appImage":             { "type": "string", "metadata": { "description": "Fully qualified image with digest, for example <registry>/sealed-app@sha256:<digest>." } },
     "registryServer":       { "type": "string" },
     "registryUsername":     { "type": "string" },
     "registryPassword":     { "type": "securestring" },
