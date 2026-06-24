@@ -98,6 +98,63 @@ function Test-Tool {
     return $false
 }
 
+function Test-OptionalTools {
+    <#
+        Check for cosign, syft, and trivy. If any are missing, display a
+        prominent warning with installation links and ask the user whether
+        to proceed with placeholders or abort.
+    #>
+    $missing = @()
+    
+    foreach ($tool in @('cosign', 'syft', 'trivy')) {
+        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+            $missing += $tool
+        }
+    }
+
+    if ($missing.Count -eq 0) { return $true }
+
+    Write-Host ""
+    Write-Host ("!" * 72) -ForegroundColor Red
+    Write-Host "⚠️  OPTIONAL TOOLS NOT INSTALLED" -ForegroundColor Red
+    Write-Host ("!" * 72) -ForegroundColor Red
+    Write-Host ""
+    Write-Host "The following tools are missing: $($missing -join ', ')" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Without these tools, artifacts will be generated as placeholders:" -ForegroundColor Yellow
+    Write-Host "  • syft:   SBOM files (SPDX + CycloneDX) → minimal placeholder JSON" -ForegroundColor Yellow
+    Write-Host "  • trivy:  Vulnerability scan report → empty placeholder report" -ForegroundColor Yellow
+    Write-Host "  • cosign: Signature files (.sig)      → SHA-256 metadata only" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "📦 Installation instructions:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Windows (via Chocolatey):" -ForegroundColor Cyan
+    Write-Host "    choco install cosign syft trivy" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Windows (via scoop):" -ForegroundColor Cyan
+    Write-Host "    scoop install cosign syft trivy" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  macOS (via Homebrew):" -ForegroundColor Cyan
+    Write-Host "    brew install cosign syft trivy" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Linux (via direct download):" -ForegroundColor Cyan
+    Write-Host "    cosign: https://github.com/sigstore/cosign/releases" -ForegroundColor Green
+    Write-Host "    syft:   https://github.com/anchore/syft/releases" -ForegroundColor Green
+    Write-Host "    trivy:  https://github.com/aquasecurity/trivy/releases" -ForegroundColor Green
+    Write-Host ""
+    Write-Host ("!" * 72) -ForegroundColor Red
+    Write-Host ""
+    $response = Read-Host "Continue with placeholders? [Y]es / [N]o (default: No)"
+    if ($response -ine 'y' -and $response -ine 'yes') {
+        Write-Host "Aborting. Install the tools and re-run:" -ForegroundColor Red
+        Write-Host "  ./Build-SealedArtifacts.ps1 -Build" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Proceeding with placeholder artifacts..." -ForegroundColor Yellow
+    Write-Host ""
+    return $true
+}
+
 function Get-Sha256 {
     param([Parameter(Mandatory)] [string]$Path)
     (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLower()
@@ -492,6 +549,7 @@ function Render-Firewall {
 # ----------------------------------------------------------------------------
 function Invoke-Build {
     Write-Header "sealed-app — build, attest and sign"
+    Test-OptionalTools | Out-Null
     Test-AzCli | Out-Null
 
     $cfg = Get-Config
