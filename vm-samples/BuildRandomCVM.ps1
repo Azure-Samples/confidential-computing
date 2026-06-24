@@ -10,7 +10,7 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion] [-SkipSkuPreflight]
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion] [-NoInternetAccess] [-SkipSkuPreflight]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
 # osType specifies which OS to deploy: Windows (Server 2022), Windows11 (Windows 11 Enterprise), Ubuntu (24.04), or RHEL (9.5)
@@ -19,6 +19,7 @@
 # region is an optional parameter that specifies the Azure region (defaults to northeurope)
 # policyFilePath is an optional parameter that specifies the path to a custom policy file for key vault key creation
 # DisableBastion is an optional switch that skips the creation of Azure Bastion (VM will only be accessible via private network)
+# NoInternetAccess is an optional switch that blocks outbound internet access from the CVM subnet by not attaching NAT Gateway egress
 #
 # You'll need to have the latest Azure PowerShell module installed as older versions don't have the parameters for AKV & ACC (update-module -force)
 #
@@ -39,6 +40,7 @@ param (
     [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v5",
     [Parameter(Mandatory=$false)]$policyFilePath = "",
     [Parameter(Mandatory=$false)][switch]$DisableBastion,
+    [Parameter(Mandatory=$false)][switch]$NoInternetAccess,
     [Parameter(Mandatory=$false)][switch]$SkipSkuPreflight
 )
 
@@ -76,6 +78,8 @@ $vmname = $basename # name of the VM, copied from $basename, or customise it her
 $vnetname = $vmname + "vnet" # name of the VNET
 $bastionname = $vnetname + "-bastion" # name of the bastion host
 $vnetipname = $vnetname + "-pip"     #Name of the VNET IP
+$natGatewayName = $vnetname + "-nat" # name of the NAT gateway used for outbound internet
+$natPublicIpName = $vnetname + "-nat-pip" # name of the NAT gateway public IP
 $nicPrefix = $basename + "-nic"    #Name of the NIC
 $bastionsubnetName = "AzureBastionSubnet" # don't change this
 $vmsubnetname = $basename + "vmsubnet" # don't change this
@@ -103,6 +107,11 @@ if ($smoketest) {
 }
 if ($DisableBastion) {
     write-host "BASTION DISABLED: VM will only be accessible via private network connectivity" -ForegroundColor Yellow
+}
+if ($NoInternetAccess) {
+    write-host "INTERNET DISABLED: CVM subnet will not have outbound internet access" -ForegroundColor Yellow
+} else {
+    write-host "INTERNET ENABLED: CVM subnet will use NAT Gateway for outbound internet access" -ForegroundColor Cyan
 }
 write-host "IMPORTANT"
 write-host "VM admin username is " $vmusername
@@ -253,6 +262,11 @@ if ($DisableBastion) {
     $resourceGroupTags.Add("BastionDisabled", "true")
 }
 
+# Add NoInternetAccess tag if outbound internet is disabled
+if ($NoInternetAccess) {
+    $resourceGroupTags.Add("NoInternetAccess", "true")
+}
+
 New-AzResourceGroup -Name $resgrp -Location $region -Tag $resourceGroupTags -force
 
 #create a credential object
@@ -326,9 +340,23 @@ switch ($osType) {
     }
 }
         
-$subnet = New-AzVirtualNetworkSubnetConfig -Name ($vmsubnetName) -AddressPrefix "10.0.0.0/24";
+$subnet = New-AzVirtualNetworkSubnetConfig -Name ($vmsubnetName) -AddressPrefix "10.0.0.0/24" -DefaultOutboundAccess $false;
 $vnet = New-AzVirtualNetwork -Force -Name ($vnetname) -ResourceGroupName $resgrp -Location $region -AddressPrefix "10.0.0.0/16" -Subnet $subnet;
 $vnet = Get-AzVirtualNetwork -Name ($vnetname) -ResourceGroupName $resgrp;
+
+# Configure outbound internet path for the VM subnet via NAT Gateway unless explicitly disabled.
+if ($NoInternetAccess) {
+    write-host "No NAT Gateway attached to VM subnet due to -NoInternetAccess. Outbound internet will be blocked." -ForegroundColor Yellow
+}
+else {
+    write-host "Configuring NAT Gateway egress so the private CVM can access internet without a public IP..." -ForegroundColor Cyan
+    $natPublicIp = New-AzPublicIpAddress -ResourceGroupName $resgrp -Name $natPublicIpName -Location $region -AllocationMethod Static -Sku Standard
+    $natGateway = New-AzNatGateway -ResourceGroupName $resgrp -Name $natGatewayName -Location $region -IdleTimeoutInMinutes 10 -Sku Standard -PublicIpAddress $natPublicIp
+    Set-AzVirtualNetworkSubnetConfig -Name ($vmsubnetName) -VirtualNetwork $vnet -AddressPrefix "10.0.0.0/24" -DefaultOutboundAccess $false -InputObject $natGateway | Set-AzVirtualNetwork | Out-Null
+    $vnet = Get-AzVirtualNetwork -Name ($vnetname) -ResourceGroupName $resgrp
+    write-host "NAT Gateway '$natGatewayName' attached to subnet '$vmsubnetname'." -ForegroundColor Green
+}
+
 $subnetId = $vnet.Subnets[0].Id;
 #uncomment the below if you want to add a public IP address to the VM
 #$pubip = New-AzPublicIpAddress -Force -Name ($pubIpPrefix + $resgrp) -ResourceGroupName $resgrp -Location $region -AllocationMethod Static -DomainNameLabel $domainNameLabel2;
@@ -370,22 +398,28 @@ if (-not $DisableBastion) {
 # Downloads the latest pre-built attest CLI release from https://github.com/Azure/cvm-attestation-tools/releases
 # and runs it inside the freshly deployed CVM, returning the output to the caller.
 
-# Pick the right config based on the VM SKU's isolation type:
-#   AMD SEV-SNP: DCa*/DCad*/ECa*/ECad*  (e.g. Standard_DC2as_v5)  -> config_snp.json
-#   Intel TDX  : DCe*/DCed*/ECe*/ECed*  (e.g. Standard_DC2es_v5)  -> config_tdx.json
-if ($vmSize -match '_(DC|EC)\d+e[a-z]*_') {
-    $attestConfig = "config_tdx.json"
-    $isolationType = "Intel TDX"
-} else {
-    $attestConfig = "config_snp.json"
-    $isolationType = "AMD SEV-SNP"
+if ($NoInternetAccess) {
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "Skipping in-VM attestation because -NoInternetAccess blocks outbound internet access required to download cvm-attestation-tools." -ForegroundColor Yellow
+    write-host "Build complete (attestation skipped due to -NoInternetAccess)." -ForegroundColor Green
 }
+else {
+    # Pick the right config based on the VM SKU's isolation type:
+    #   AMD SEV-SNP: DCa*/DCad*/ECa*/ECad*  (e.g. Standard_DC2as_v5)  -> config_snp.json
+    #   Intel TDX  : DCe*/DCed*/ECe*/ECed*  (e.g. Standard_DC2es_v5)  -> config_tdx.json
+    if ($vmSize -match '_(DC|EC)\d+e[a-z]*_') {
+        $attestConfig = "config_tdx.json"
+        $isolationType = "Intel TDX"
+    } else {
+        $attestConfig = "config_snp.json"
+        $isolationType = "AMD SEV-SNP"
+    }
 
-write-host "----------------------------------------------------------------------------------------------------------------"
-write-host "Running attestation inside the $osType VM using cvm-attestation-tools (isolation: $isolationType, config: $attestConfig)..." -ForegroundColor Cyan
-write-host "This downloads the latest release of attest from https://github.com/Azure/cvm-attestation-tools/releases inside the VM."
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "Running attestation inside the $osType VM using cvm-attestation-tools (isolation: $isolationType, config: $attestConfig)..." -ForegroundColor Cyan
+    write-host "This downloads the latest release of attest from https://github.com/Azure/cvm-attestation-tools/releases inside the VM."
 
-if ($VMisLinux) {
+    if ($VMisLinux) {
     # Linux: download attest-lin.zip from the latest release, extract, run attest
     # Note: the zip extracts files at its root (no "attest-lin/" subfolder)
     $attestScript = @"
@@ -427,8 +461,8 @@ fi
 cd /
 rm -rf "`$WORKDIR"
 "@
-    $runCommandId = 'RunShellScript'
-} else {
+        $runCommandId = 'RunShellScript'
+    } else {
     # Windows: download attest-win.zip from the latest release, extract, run attest.exe
     # Note: the zip extracts files at its root (no "attest-win/" subfolder)
     $attestScript = @"
@@ -497,37 +531,38 @@ if (`$jwtMatch) {
 Set-Location `$env:TEMP
 Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
 "@
-    $runCommandId = 'RunPowerShellScript'
-}
+        $runCommandId = 'RunPowerShellScript'
+    }
 
-# Retry loop: Invoke-AzVMRunCommand can return 409 Conflict for several minutes
-# after VM creation while the run-command extension is still finalising. This is
-# especially common on TDX SKUs. Back off and retry on Conflict / "in progress".
-$output = $null
-$maxAttempts = 10
-for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-    try {
-        write-host "Attestation run-command attempt $attempt of $maxAttempts..." -ForegroundColor Cyan
-        $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId $runCommandId -ScriptString $attestScript -ErrorAction Stop
-        break
-    } catch {
-        $msg = $_.Exception.Message
-        if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*')) {
-            write-host "Run-command extension busy (409); waiting 60s before retry..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 60
-        } else {
-            throw
+    # Retry loop: Invoke-AzVMRunCommand can return 409 Conflict for several minutes
+    # after VM creation while the run-command extension is still finalising. This is
+    # especially common on TDX SKUs. Back off and retry on Conflict / "in progress".
+    $output = $null
+    $maxAttempts = 10
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            write-host "Attestation run-command attempt $attempt of $maxAttempts..." -ForegroundColor Cyan
+            $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId $runCommandId -ScriptString $attestScript -ErrorAction Stop
+            break
+        } catch {
+            $msg = $_.Exception.Message
+            if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*')) {
+                write-host "Run-command extension busy (409); waiting 60s before retry..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 60
+            } else {
+                throw
+            }
         }
     }
-}
 
-write-host "----------------------------------------------------------------------------------------------------------------"
-write-host "--------------Output from cvm-attestation-tools running inside the VM--------------"
-foreach ($entry in $output.Value) {
-    if ($entry.Message) { write-host $entry.Message }
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "--------------Output from cvm-attestation-tools running inside the VM--------------"
+    foreach ($entry in $output.Value) {
+        if ($entry.Message) { write-host $entry.Message }
+    }
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "Build and attestation complete." -ForegroundColor Green
 }
-write-host "----------------------------------------------------------------------------------------------------------------"
-write-host "Build and attestation complete." -ForegroundColor Green
 
 
 # Smoketest cleanup - automatically remove all resources if smoketest flag is used

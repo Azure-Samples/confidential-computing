@@ -50,7 +50,7 @@ Deploy Confidential Virtual Machines (CVMs) with AMD SEV-SNP or Intel TDX hardwa
 
 ## BuildRandomCVM.ps1
 
-Builds a CVM with **Confidential OS disk encryption bound to a Customer Managed Key** (see [What is Confidential OS disk encryption?](#what-is-confidential-os-disk-encryption-with-cmk) below) and a private VNet (no public IP), and optionally deploys Azure Bastion for remote access. Once the VM is up, the script downloads the latest pre-built `attest` binary from [Azure/cvm-attestation-tools](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the VM, runs it against the matching SNP/TDX config, and streams the attestation JWT and claims back to the caller via `Invoke-AzVMRunCommand` (with a 60s backoff retry loop to absorb the transient 409 Conflict that the run-command extension can return immediately after VM provisioning).
+Builds a CVM with **Confidential OS disk encryption bound to a Customer Managed Key** (see [What is Confidential OS disk encryption?](#what-is-confidential-os-disk-encryption-with-cmk) below) and a private VNet (no public IP). By default, the script attaches a NAT Gateway to the VM subnet so the VM can reach the internet without exposing a public IP, and it optionally deploys Azure Bastion for remote access. If you pass `-NoInternetAccess`, the subnet remains fully isolated and the attestation download step is skipped. Otherwise, the script downloads the latest pre-built `attest` binary from [Azure/cvm-attestation-tools](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the VM, runs it against the matching SNP/TDX config, and streams the attestation JWT and claims back to the caller via `Invoke-AzVMRunCommand` (with a 60s backoff retry loop to absorb the transient 409 Conflict that the run-command extension can return immediately after VM provisioning).
 
 Supported images: Windows Server 2022, Windows Server 2019, Windows 11 Enterprise, Ubuntu 24.04 LTS, and RHEL 9.5 CVM. The script tags the resource group with the GitHub repo URL (auto-detected from git remote) for traceability.
 
@@ -94,7 +94,7 @@ Basename is a prefix assigned to all resources created by the script and will be
 The script will generate a random complex password and output it to the terminal once; make sure you copy it if you want to login to the CVM.
 
 ```powershell
-./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-vmsize <VM SIZE SKU>] [-policyFilePath <PATH>] [-DisableBastion]
+./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-vmsize <VM SIZE SKU>] [-policyFilePath <PATH>] [-DisableBastion] [-NoInternetAccess]
 ```
 
 ## Parameters:
@@ -107,6 +107,7 @@ The script will generate a random complex password and output it to the terminal
 - **vmsize**: Optional VM size SKU (defaults to `Standard_DC2as_v5`). Use SEV-SNP SKUs like `Standard_DC4as_v5` or Intel TDX SKUs like `Standard_DC2es_v6` — the script picks the matching attestation config automatically.
 - **policyFilePath**: Optional path to a custom key release policy JSON (defaults to `-UseDefaultCVMPolicy`)
 - **DisableBastion**: Optional switch that skips Azure Bastion creation; the VM will only be reachable via private network connectivity (VPN, ExpressRoute, peering)
+- **NoInternetAccess**: Optional switch that skips NAT Gateway setup and keeps the CVM subnet fully offline; attestation download is skipped
 
 ## OS Type Options:
 - **Windows**: Windows Server 2022 Datacenter (RDP via Bastion)
@@ -137,6 +138,9 @@ The script will generate a random complex password and output it to the terminal
 
 # Deploy Windows 11 CVM in a specific region
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows11" -region "eastus"
+
+# Deploy a fully isolated CVM with no outbound internet
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "isolated" -osType "Ubuntu" -NoInternetAccess
 
 # Smoketest with Windows 11 for CI/CD pipeline
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "ci" -osType "Windows11" -description "Automated testing pipeline" -smoketest
@@ -175,6 +179,7 @@ The script automatically tags the resource group with:
 - **GitRepo**: The GitHub repository URL where the script was cloned from
 - **description**: Optional description if provided
 - **smoketest**: Set to "true" when running in smoketest mode
+- **NoInternetAccess**: Set to "true" when outbound internet egress is intentionally blocked
 
 ## Smoketest Mode:
 The `-smoketest` parameter is perfect for:
