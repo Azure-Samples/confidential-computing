@@ -1,0 +1,42 @@
+{
+  "_comment_1": "Azure Key Vault Secure Key Release policy for sealed-app. This file is the SOURCE OF TRUTH; Build-SealedArtifacts.ps1 base64url-encodes the JSON object stored under 'policy' below and writes it to AKV when creating the wrapping key.",
+  "_comment_2": "All four conditions under allOf must hold simultaneously. The hostdata claim binds the key release to the exact bytes of cce-policy.rego — the ACI control plane sets SEV-SNP HOST_DATA to sha256(cce-policy) at SNP_LAUNCH_FINISH. So altering one byte of the policy means the key never releases again, even on identical hardware.",
+  "_comment_3": "The __PLACEHOLDERS__ are replaced by Build-SealedArtifacts.ps1 with values for a specific build/region.",
+
+  "version": "1.0.0-sealed-app",
+
+  "policy": {
+    "version": "1.0.0",
+    "anyOf": [
+      {
+        "authority": "https://__MAA_ENDPOINT__",
+        "allOf": [
+          {
+            "claim":  "x-ms-attestation-type",
+            "equals": "sevsnpvm"
+          },
+          {
+            "claim":  "x-ms-compliance-status",
+            "equals": "azure-compliant-uvm"
+          },
+          {
+            "claim":  "x-ms-sevsnpvm-is-debuggable",
+            "equals": "false"
+          },
+          {
+            "claim":  "x-ms-sevsnpvm-hostdata",
+            "equals": "__CCE_POLICY_SHA256_HEX__"
+          }
+        ]
+      }
+    ]
+  },
+
+  "_explained": {
+    "authority": "Only tokens signed by the regional MAA endpoint we trust are accepted. AKV pins this URL exactly — a token from a different MAA region cannot release the key.",
+    "x-ms-attestation-type=sevsnpvm": "The hardware evidence MUST be an AMD SEV-SNP guest report (not platform attestation, not TDX, not vTPM-only).",
+    "x-ms-compliance-status=azure-compliant-uvm": "MAA verified that the SNP report measurement matches a known-good Azure CC UVM, that the VCEK certificate chain is valid up to the AMD root, and that the UVM reference info matches the platform.",
+    "x-ms-sevsnpvm-is-debuggable=false": "The SEV-SNP guest policy must have the debug bit cleared. A debuggable VM would let an operator inspect guest memory.",
+    "x-ms-sevsnpvm-hostdata": "Bound to sha256(cce-policy.rego). The ACI control plane sets HOST_DATA at SNP_LAUNCH_FINISH from the CCE policy bytes. This pins the key to the EXACT confidential container policy that was approved — different policy, different hash, no key release."
+  }
+}
