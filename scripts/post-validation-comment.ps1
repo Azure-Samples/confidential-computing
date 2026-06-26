@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-Captures CVM 4-way validation output and posts it as a GitHub PR comment.
+Captures CVM 4-way validation output and optionally posts it as a GitHub PR comment.
 
 .DESCRIPTION
-Runs the 4-way CVM validation matrix, captures results, and posts them as a comment
-on the active pull request using the GitHub CLI.
+Runs the 4-way CVM validation matrix and captures results to a local file.
+Use -PostToPr to explicitly post the result as a pull request comment.
 
 .PARAMETER subsID
 Azure Subscription ID for deployments.
@@ -19,7 +19,8 @@ Path to save validation output before posting.
 param(
     [string]$subsID = "68432aaa-6eba-435c-bc7c-1d998d835e80",
     [string]$OutputFile = "./cvm-validation-results.txt",
-    [switch]$Sequential
+    [switch]$Sequential,
+    [switch]$PostToPr
 )
 
 # Ensure we're in the vm-samples directory
@@ -28,7 +29,7 @@ $vmSamplesPath = Join-Path $vmSamplesPath "vm-samples"
 Set-Location $vmSamplesPath
 
 Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "CVM 4-Way Validation Matrix with GitHub PR Comment" -ForegroundColor Cyan
+Write-Host "CVM 4-Way Validation Matrix" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host ""
 
@@ -194,41 +195,44 @@ $outputLines += ""
 $outputLines | Out-File -FilePath $OutputFile -Encoding UTF8
 Write-Host "Validation output saved to: $OutputFile" -ForegroundColor Yellow
 
-# Try to post as GitHub PR comment
-try {
-    # Check if GitHub CLI is available
-    $ghVersion = & gh --version 2>$null
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host ""
-        Write-Host "Posting comment to active pull request..." -ForegroundColor Cyan
-        
-        # Get the current PR number (if on a PR branch)
-        $prNumber = & gh pr view --json number -q .number 2>$null
-        
-        if ($LASTEXITCODE -eq 0 -and $prNumber) {
-            $commentBody = $outputLines -join "`n"
-            & gh pr comment $prNumber --body $commentBody
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "✓ Comment posted to PR #$prNumber" -ForegroundColor Green
+if ($PostToPr) {
+    try {
+        # Check if GitHub CLI is available
+        & gh --version 2>$null | Out-Null
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host ""
+            Write-Host "Posting comment to active pull request..." -ForegroundColor Cyan
+
+            # Get the current PR number (if on a PR branch)
+            $prNumber = & gh pr view --json number -q .number 2>$null
+
+            if ($LASTEXITCODE -eq 0 -and $prNumber) {
+                $commentBody = $outputLines -join "`n"
+                & gh pr comment $prNumber --body $commentBody
+
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "✓ Comment posted to PR #$prNumber" -ForegroundColor Green
+                } else {
+                    Write-Host "⚠ Failed to post comment (error: $LASTEXITCODE)" -ForegroundColor Yellow
+                    Write-Host "Run manually: gh pr comment <PR_NUMBER> --body-file $OutputFile" -ForegroundColor Yellow
+                }
             } else {
-                Write-Host "⚠ Failed to post comment (error: $LASTEXITCODE)" -ForegroundColor Yellow
-                Write-Host "Run manually: gh pr comment <PR_NUMBER> --body-file $OutputFile" -ForegroundColor Yellow
+                Write-Host "⚠ No active PR found on this branch" -ForegroundColor Yellow
+                Write-Host "To post manually, run:" -ForegroundColor Yellow
+                Write-Host "  gh pr comment <PR_NUMBER> --body-file '$OutputFile'" -ForegroundColor Cyan
             }
         } else {
-            Write-Host "⚠ No active PR found on this branch" -ForegroundColor Yellow
-            Write-Host "To post manually, run:" -ForegroundColor Yellow
-            Write-Host "  gh pr comment <PR_NUMBER> --body-file '$OutputFile'" -ForegroundColor Cyan
+            Write-Host "⚠ GitHub CLI (gh) not found. Install from: https://cli.github.com/" -ForegroundColor Yellow
+            Write-Host "Validation output saved to: $OutputFile" -ForegroundColor Yellow
         }
-    } else {
-        Write-Host "⚠ GitHub CLI (gh) not found. Install from: https://cli.github.com/" -ForegroundColor Yellow
-        Write-Host "Validation output saved to: $OutputFile" -ForegroundColor Yellow
     }
-}
-catch {
-    Write-Host "⚠ Error posting comment: $_" -ForegroundColor Yellow
-    Write-Host "Output saved to: $OutputFile" -ForegroundColor Yellow
+    catch {
+        Write-Host "⚠ Error posting comment: $_" -ForegroundColor Yellow
+        Write-Host "Output saved to: $OutputFile" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "PR comment posting is disabled. Use -PostToPr to publish this result." -ForegroundColor DarkYellow
 }
 
 Write-Host ""
