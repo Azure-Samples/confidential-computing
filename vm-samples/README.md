@@ -196,6 +196,21 @@ AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral
 ./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "psnp" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC4as_v5" -description "Production SEV-SNP workload"
 ```
 
+**AMD SEV-SNP v6 (koreacentral) — Ubuntu:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "snpv6" -osType "Ubuntu" -region "koreacentral" -vmsize "Standard_DC2as_v6"
+```
+
+**AMD SEV-SNP v6 (koreacentral) — Windows Server 2022:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "wv6" -osType "Windows" -region "koreacentral" -vmsize "Standard_DC2as_v6"
+```
+
+**AMD SEV-SNP v6 (koreacentral) — Skip preflight when SKU APIs report false negatives:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "kv6" -osType "Windows" -region "koreacentral" -vmsize "Standard_DC2as_v6" -SkipSkuPreflight
+```
+
 **Advanced: Fully isolated CVM (no outbound internet, no Bastion):**
 ```powershell
 ./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "isolt" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC2as_v5" -NoInternetAccess -DisableBastion
