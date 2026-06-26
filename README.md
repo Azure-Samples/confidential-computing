@@ -21,11 +21,17 @@ urlFragment: confidential-computing-samples
 
 ![MIT license badge](https://img.shields.io/badge/license-MIT-green.svg)
 
-**Last Updated:** May 2026
+**Last Updated:** June 2026
+
+> **Heads up — this is the new home for Azure Confidential Computing samples.**
+> [`https://aka.ms/accsamples`](https://aka.ms/accsamples) now redirects here.
+> The previous repository, [`Azure-Samples/confidential-container-samples`](https://github.com/Azure-Samples/confidential-container-samples), is still available for reference but is **no longer actively maintained**. New samples and updates land here.
 
 Security is a key driver accelerating the adoption of cloud computing, but it's also a major concern when you're moving extremely sensitive IP and data scenarios to the cloud.
 
 Confidential computing is the protection of data-in-use through isolating computations to a hardware-based trusted execution environment (TEE). While data is traditionally encrypted at rest and in transit, confidential computing protects your data while it's being processed. A TEE provides a protected container by securing a portion of the hardware's processor and memory. You can run software on top of the protected environment to shield portions of your code and data from view or modification from outside of the TEE. [read more](https://azure.microsoft.com/en-us/solutions/confidential-compute/)
+
+> 📚 **Want to learn more?** See the official Azure Confidential Computing documentation at [`https://aka.ms/accdocs`](https://aka.ms/accdocs).
 
 ## ⚠️ Disclaimer
 
@@ -39,16 +45,28 @@ Confidential computing is the protection of data-in-use through isolating comput
   - Validating cryptographic implementations meet their security requirements
   - Proper key management and secret handling
   - Any data processed using these samples
-- **AI-Generated Content:** The multi-party demonstration samples were created with assistance from AI (GitHub Copilot with Claude) to showcase modern AI-assisted development capabilities. While functional, AI-generated code should always be reviewed by qualified security professionals before use in sensitive scenarios.
+- **AI-Assisted Content:** Several samples in this repository were created with significant assistance from AI coding tools, primarily [GitHub Copilot](https://github.com/features/copilot) inside [Visual Studio Code](https://code.visualstudio.com/), to showcase modern AI-assisted development. While functional, AI-assisted code should always be reviewed by qualified security professionals before use in sensitive scenarios.
 
-## 🆕 What's New (May 2026)
+## 🆕 What's New (June 2026)
+
+| Addition | Description |
+|---|---|
+| **[Visual Attestation Demo v2 (ACI)](/aci-samples/visual-attestation-demo-v2/README.md)** 🆕 | Simplified ACI port of the AKS visual attestation sample. Flask app calls Microsoft Azure Attestation **directly** via the upstream `get-snp-report` tool — **no SKR sidecar**, single container. Side-by-side Confidential vs Standard SKU deployment demonstrates falsifiability: the same image fails deterministically on Standard (no `/dev/sev-guest`), proving the success case really came from AMD silicon. |
+| **[Sealed Container (ACI) — updated](aci-samples/sealed-container/README.md)** 🆕 | New sealed-container guidance and features: `-WelcomeSecret` encryption/decryption flow, artifact integrity verification walkthrough (checksums vs signatures), clearer UI section highlighting, and updated deployment defaults/documentation. |
+| **[Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README.md)** ⭐ | New 4-party (Contoso, Fabrikam, Wingtip Toys, Woodgrove Bank) **federated** analytics demo. Each partner decrypts its own data inside its own AMD SEV-SNP TEE and returns only aggregates — no raw PII ever crosses the trust boundary. Includes a 3-minute [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md). |
+| **[CVM samples now support Intel TDX](/vm-samples/README.md)** | [`BuildRandomCVM.ps1`](/vm-samples/BuildRandomCVM.ps1) auto-detects AMD SEV-SNP (`DCa*`/`ECa*`) vs Intel TDX (`DCe*`/`ECe*`, e.g. `Standard_DC2es_v6`) from the chosen VM SKU and runs the matching attestation config. The script now also enables outbound internet on the private VM subnet via NAT Gateway by default, with `-NoInternetAccess` available for fully isolated deployments. The June 2026 validation matrix now includes all four combinations: AMD v6 Windows, AMD v6 Linux, TDX v6 Windows, and TDX v6 Linux. See the [Intel TDX examples](/vm-samples/README.md#intel-tdx-examples) in the VM samples README. |
+| **Validation workflow update** 🆕 | Local `pre-push` performs validation only (no PR commenting). Use `./scripts/post-validation-comment.ps1` to run the 4-way CVM matrix and auto-post results as a **comment on the active PR** (use `-NoPostToPr` to skip posting). Commit-message annotation is removed. GitHub Actions is temporarily running **secret scan + syntax/parameter validation only** until service principal secrets are available. See [Validation Automation](docs/VALIDATION-AUTOMATION.md). |
+| **Updated in-VM attestation tooling** | The CVM build script now runs the latest pre-built `attest` binary from [Azure/cvm-attestation-tools](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the VM (Linux + Windows), then **decodes the returned MAA JWT** (header, payload and key claims like `x-ms-attestation-type` and `x-ms-compliance-status`) using `jq` on Linux and built-in `ConvertFrom-Json` on Windows. Linux extraction now supports `unzip`, `python3`, or `bsdtar` fallback paths to avoid image-specific package gaps. When `-NoInternetAccess` is used, this attestation step is skipped because the VM cannot reach GitHub to download the tooling. The legacy [`WindowsAttest.ps1`](/vm-samples/WindowsAttest.ps1) is kept for reference but is **no longer recommended**. |
+| **Repo redirect** | [`https://aka.ms/accsamples`](https://aka.ms/accsamples) now points to this repo. The legacy [`confidential-container-samples`](https://github.com/Azure-Samples/confidential-container-samples) repo remains read-only / archived for reference. |
+
+### Previously (May 2026)
 
 | Addition | Description |
 |---|---|
 | **[Citizen Registry (Sovereign Example)](/sov-examples/README.md)** | End-to-end data-sovereignty demo: Confidential ACI → Private VNet → App Gateway → SQL Server on CVM. Features IPv6-only CVMs, ephemeral credentials, and API-based data seeding. |
 | **[Finance + OpenAI Multi-Party Demo](/multi-party-samples/advanced-app-finance-openAI/README.md)** | 3-company financial analytics with Azure OpenAI (GPT-4o-mini) chat integration. AI assistant answers questions about decrypted partner transaction data inside the TEE. |
 | **[ACI + PostgreSQL Demo](/aci-samples/app-and-postgreSQL-demo/README.md)** | Confidential ACI with DCa/ECa AMD PostgreSQL Flexible Server, 5,000 financial transactions, and 9 documented threat scenarios. |
-| **[CVM with Azure Backup](/sov-examples/cvm-backup/README.md)** | Windows Confidential VM with Recovery Services Vault backup, Customer Managed Keys, and 4-hourly backup policy. |
+| **[CVM with Azure Backup](/cvm-backup/README.md)** | Windows Confidential VM with Recovery Services Vault backup, Customer Managed Keys, and 4-hourly backup policy. |
 | **Deploy script hardening** | All multi-party deploy scripts now use `az rest` with preview API (2025-01-31-preview) for managed identity creation, working around Azure subscription policies requiring regional isolation scope. |
 | **Pre-commit secret scanning** | Repository-wide pre-commit hook and GitHub Actions workflow to block credentials, SAS tokens, and sensitive parameter files from being committed. |
 
@@ -77,7 +95,8 @@ This repository is organized by Azure service type and deployment method:
 ### [ACI Samples](/aci-samples/README.md)
 Azure Container Instances with AMD SEV-SNP confidential computing:
 - **BuildRandomACI.ps1** - Create confidential ACI with hello-world container
-- **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA)
+- **Visual Attestation Demo** - Interactive web demo with remote attestation via Microsoft Azure Attestation (MAA) using the SKR sidecar
+- **[Visual Attestation Demo v2](/aci-samples/visual-attestation-demo-v2/README.md)** 🆕 - Simplified single-container port that calls MAA **directly** (no SKR sidecar) via the upstream `get-snp-report` tool; `-Compare` mode deploys Confidential + Standard SKUs side-by-side to demonstrate falsifiability
 - **[App + PostgreSQL Finance Demo](/aci-samples/app-and-postgreSQL-demo/README.md)** 🆕 - Confidential ACI with DCa/ECa AMD PostgreSQL, 5,000 financial transactions, Application Gateway, and 9 documented threat scenarios
   - Side-by-side comparison mode (Confidential vs Standard SKU)
   - Real-time encryption with SKR-released keys
@@ -90,7 +109,10 @@ Azure Container Instances with AMD SEV-SNP confidential computing:
   - 9 documented threat scenarios with specific mitigations
 
 ### [Multi-Party Samples](/multi-party-samples/README.md) ⭐ FEATURED
-Secure multi-party computation demonstrations with Azure Confidential Containers. Two versions available:
+Secure multi-party computation demonstrations with Azure Confidential Containers and Confidential VMs.
+
+#### [Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README.md) ⭐ NEW (June 2026)
+4 parties — **Contoso**, **Fabrikam**, **Wingtip Toys**, **Woodgrove Bank** — each running the same image with their own data, identity, and Key Vault. Woodgrove orchestrates federated analytics where every partner decrypts **only its own data inside its own TEE** and returns only counts, averages, and percentages. **Zero PII crosses the trust boundary.** Includes a 3-minute live [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md), live RSA-OAEP encryption panel, cross-company key-access denial, operator-lockout demo, and a combined demographics dashboard with country/city/generation/blood-type aggregates and a salary world map.
 
 #### [Advanced App](/multi-party-samples/advanced-app/README.md) - Full-Featured Demo
 Comprehensive 3-container demonstration with partner analytics:
@@ -132,11 +154,12 @@ Simpler 2-container demonstration (Contoso, Fabrikam Fashion) without partner an
 
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:
-- **BuildRandomCVM.ps1** - Deploy CVMs with Customer Managed Keys, Confidential Disk Encryption, and attestation
-  - Windows Server 2022 Datacenter
-  - Windows 11 Enterprise 24H2
-  - Ubuntu 24.04 LTS
-  - RHEL 9.5
+- **BuildRandomCVM.ps1** 🆕 *Updated June 2026* — Deploy CVMs with **Confidential OS disk encryption bound to a Customer Managed Key (CMK)** and automated in-VM attestation. The OS disk and VM Guest State (vTPM + Secure Boot) are encrypted with an HSM-backed RSA-3072 key in your Key Vault Premium; the key is only released after Microsoft Azure Attestation (MAA) verifies the VM is a genuine SEV-SNP / TDX CVM, so even the Azure host fabric cannot read the disk. See [What is Confidential OS disk encryption with CMK?](/vm-samples/README.md#what-is-confidential-os-disk-encryption-with-cmk) and [`https://aka.ms/accdocs`](https://aka.ms/accdocs).
+  - **AMD SEV-SNP** (`DCa*` / `ECa*`, e.g. `Standard_DC2as_v5`) **and Intel TDX** (`DCe*` / `ECe*`, e.g. `Standard_DC2es_v6`) — auto-detected from the chosen VM SKU, with the matching attestation config selected automatically
+  - Windows Server 2022 Datacenter, Windows Server 2019, Windows 11 Enterprise 24H2, Ubuntu 24.04 LTS, RHEL 9.5 — all confidential-VM images
+  - **New attestation flow** — runs the latest pre-built `attest` binary from [`Azure/cvm-attestation-tools`](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the freshly deployed VM (Linux + Windows) and decodes the returned MAA JWT (header, payload, key claims like `x-ms-attestation-type`, `x-ms-compliance-status`, `secure-boot`, `tpm-enabled`) using `jq` on Linux / built-in `ConvertFrom-Json` on Windows
+  - **Pre-flight checks** before any resources are created: rejects Intel SGX SKUs (different isolation model), validates the chosen SKU is offered in the target region, and confirms there is enough vCPU quota in the VM family
+  - **Bastion-optional** (`-DisableBastion`), **internet-optional** (`-NoInternetAccess`), and **smoketest mode** (`-smoketest`) for CI / cost-controlled validation
 - **BuildRandomSQLCVM.ps1** - SQL Server 2022 on Confidential VM
 
 ### [AKS Samples](/aks-samples/README.md)
@@ -171,12 +194,12 @@ Enclave-aware container samples for AKS with Intel SGX:
 
 ## 🤖 AI-Assisted Development Note
 
-The **multi-party-samples** in this repository were entirely created using AI-assisted development with **GitHub Copilot** powered by **Claude**. This demonstrates the capabilities of modern AI models for:
+Many of the samples in this repository — in particular the **multi-party**, **sov-examples**, and **finance + OpenAI** demos — were authored with significant assistance from AI coding tools, primarily [GitHub Copilot](https://github.com/features/copilot) running inside [Visual Studio Code](https://code.visualstudio.com/). This demonstrates the capabilities of modern AI-assisted development for:
 
-- Complex infrastructure-as-code (ARM templates, PowerShell)
-- Cryptographic implementations (AES-256-GCM encryption/decryption)
+- Complex infrastructure-as-code (ARM templates, Bicep, PowerShell, Terraform)
+- Cryptographic implementations (RSA-OAEP, AES-256-GCM, SKR flows)
 - Web application development (Flask, HTML/CSS/JavaScript)
-- Security-focused architecture design
+- Security-focused architecture and threat modeling
 - Documentation and diagram generation
 
 While these samples are functional and demonstrate real Azure Confidential Computing capabilities, **they should be reviewed by qualified security professionals** before use in production scenarios.

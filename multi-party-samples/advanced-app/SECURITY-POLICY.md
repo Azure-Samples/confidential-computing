@@ -1,9 +1,24 @@
 # Confidential Computing Enforcement Policy (ccePolicy)
 
 **Author:** Simon Gallagher, Senior Technical Program Manager, Azure Compute Security  
-**Last Updated:** February 2026
+**Last Updated:** June 2026
 
 > **Note:** See [ATTESTATION.md](ATTESTATION.md) for the full attestation flow and [README.md](README.md) for the main project documentation.
+
+## Sample Context
+
+This document describes the ccePolicy as it applies to the **`advanced-app`** sample — a **3-party** multi-party scenario:
+
+| Role | Party | Key Vault Env Var | Container URL Env Var |
+|---|---|---|---|
+| Orchestrator | **Woodgrove Bank** | `SKR_AKV_ENDPOINT` | (self) |
+| Provider | **Contoso** | `PARTNER_CONTOSO_AKV_ENDPOINT` | `PARTNER_CONTOSO_URL` |
+| Provider | **Fabrikam** | `PARTNER_FABRIKAM_AKV_ENDPOINT` | `PARTNER_FABRIKAM_URL` |
+
+All three parties run the **same container image** (`aci-attestation-demo:latest`) but receive different environment variables and identities at deployment time. Sibling samples extend this model:
+
+- [`advanced-app-finance-openAI/SECURITY-POLICY.md`](../advanced-app-finance-openAI/SECURITY-POLICY.md) — same 3 parties + Azure OpenAI for in-TEE LLM analysis.
+- [`advanced-app-federated/SECURITY-POLICY.md`](../advanced-app-federated/SECURITY-POLICY.md) — adds a 4th party (Wingtip Toys) with reciprocal SKR.
 
 ## Overview
 

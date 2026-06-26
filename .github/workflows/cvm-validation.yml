@@ -1,0 +1,81 @@
+name: CVM Validation on PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'vm-samples/**'
+      - 'scripts/**'
+      - '.github/workflows/cvm-validation.yml'
+  workflow_dispatch:
+    inputs:
+      skipCleanup:
+        description: 'Skip resource cleanup (for debugging)'
+        required: false
+        default: 'false'
+
+jobs:
+  secret-scan:
+    name: Secret Scan
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run secret scan
+        shell: pwsh
+        run: ./scripts/pre-commit.ps1 -ScanMode all
+
+  validate-syntax:
+    name: Syntax & Parameter Validation
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run pre-push validation
+        shell: pwsh
+        run: ./scripts/validate-cvm.ps1 -SkipTemplateValidation
+
+  summary:
+    name: Validation Summary
+    runs-on: windows-latest
+    needs: [secret-scan, validate-syntax]
+    if: always()
+    steps:
+      - name: Check results
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
+          Write-Host " CVM PR Validation Summary" -ForegroundColor Cyan
+          Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
+          Write-Host ""
+          
+          $results = @{
+              "Secret Scan" = "${{ needs.secret-scan.result }}"
+              "Syntax & Parameter Validation" = "${{ needs.validate-syntax.result }}"
+          }
+          
+          foreach ($check in $results.Keys) {
+              $status = $results[$check]
+              if ($status -eq "success") {
+                  Write-Host "  ✓ $check" -ForegroundColor Green
+              } elseif ($status -eq "skipped") {
+                  Write-Host "  ⊘ $check (skipped)" -ForegroundColor Yellow
+              } else {
+                  Write-Host "  ✗ $check ($status)" -ForegroundColor Red
+              }
+          }
+          
+          Write-Host ""
+          if ("${{ needs.secret-scan.result }}" -eq "success" -and 
+              "${{ needs.validate-syntax.result }}" -eq "success") {
+              Write-Host "✓ All validations passed" -ForegroundColor Green
+              Write-Host ""
+              exit 0
+          } else {
+              Write-Host "✗ Some validations failed" -ForegroundColor Red
+              Write-Host ""
+              exit 1
+          }

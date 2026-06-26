@@ -1,0 +1,119 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "Sealed-container ACI deployment. Confidential SKU only — the SKR release policy refuses to release the wrapping key off-hardware, so a Standard deploy would crash-loop forever. The container is exposed on a PUBLIC IP because Confidential ACI does not support VNet integration without a NAT gateway, and the wider sealed-container sample chooses simplicity over a multi-resource networking stack. Ingress is restricted at L7 by the app (see app.py before_request hook), driven by the signed artifacts/firewall-policy.json that the build stamped with the same sha256 recorded here as firewallPolicySha256."
+  },
+  "parameters": {
+    "containerGroupName":   { "type": "string" },
+    "location":             { "type": "string", "defaultValue": "[resourceGroup().location]" },
+    "dnsNameLabel":         { "type": "string" },
+    "appImage":             { "type": "string", "metadata": { "description": "Fully qualified image with digest, for example <registry>/sealed-app@sha256:<digest>." } },
+    "registryServer":       { "type": "string" },
+    "registryUsername":     { "type": "string" },
+    "registryPassword":     { "type": "securestring" },
+    "managedIdentityId":    { "type": "string", "metadata": { "description": "Resource ID of the user-assigned managed identity that has 'get'+'release' on the SKR key." } },
+    "maaEndpoint":          { "type": "string" },
+    "akvEndpoint":          { "type": "string" },
+    "skrKeyName":           { "type": "string" },
+    "releasePolicySha256":  { "type": "string", "metadata": { "description": "SHA-256 (hex) of the SKR release policy bytes." } },
+    "firewallPolicySha256": { "type": "string", "metadata": { "description": "SHA-256 (hex) of artifacts/firewall-policy.json. Passed to the container as FIREWALL_POLICY_SHA256 so the app can refuse to start if the on-disk file was tampered with. Also stamped on the container group as a tag for audit." } },
+    "trustedSourceCidr":    { "type": "string", "metadata": { "description": "CIDR block allowed to call the app at L7 (every route except /healthz). Enforced inside the Python app, not at the platform — Confidential ACI cannot use NSGs without a NAT gateway." } },
+    "ccePolicyBase64":      { "type": "string", "metadata": { "description": "Base64 of the az confcom acipolicygen output (Rego)." } }
+  },
+  "resources": [
+    {
+      "type":       "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2023-05-01",
+      "name":       "[parameters('containerGroupName')]",
+      "location":   "[parameters('location')]",
+      "tags": {
+        "sample":                 "sealed-container",
+        "cce_policy_sha256":      "[parameters('releasePolicySha256')]",
+        "firewall_policy_sha256": "[parameters('firewallPolicySha256')]"
+      },
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[parameters('managedIdentityId')]": {}
+        }
+      },
+      "properties": {
+        "sku": "Confidential",
+        "confidentialComputeProperties": {
+          "ccePolicy": "[parameters('ccePolicyBase64')]"
+        },
+        "containers": [
+          {
+            "name": "sealed-app",
+            "properties": {
+              "image": "[parameters('appImage')]",
+              "command": [ "python", "/app/entrypoint.py" ],
+              "ports": [
+                { "protocol": "TCP", "port": 8443 }
+              ],
+              "environmentVariables": [
+                { "name": "PATH",                    "value": "/usr/local/bin:/usr/bin:/bin" },
+                { "name": "PYTHONDONTWRITEBYTECODE", "value": "1" },
+                { "name": "PYTHONUNBUFFERED",        "value": "1" },
+                { "name": "PORT",                    "value": "8443" },
+                { "name": "SEALED_DIR",              "value": "/run/sealed" },
+                { "name": "SEALED_BUNDLE",           "value": "/app/sealed-data.enc" },
+                { "name": "GET_SNP_REPORT",          "value": "/usr/local/bin/get-snp-report" },
+                { "name": "MAA_ENDPOINT",            "value": "[parameters('maaEndpoint')]" },
+                { "name": "AKV_ENDPOINT",            "value": "[parameters('akvEndpoint')]" },
+                { "name": "SKR_KEY_NAME",            "value": "[parameters('skrKeyName')]" },
+                { "name": "RELEASE_POLICY_SHA256",   "value": "[parameters('releasePolicySha256')]" },
+                { "name": "FIREWALL_POLICY",         "value": "/app/firewall-policy.json" },
+                { "name": "FIREWALL_POLICY_SHA256",  "value": "[parameters('firewallPolicySha256')]" },
+                { "name": "TRUSTED_SOURCE_CIDR",     "value": "[parameters('trustedSourceCidr')]" }
+              ],
+              "resources": {
+                "requests": {
+                  "memoryInGB": 2,
+                  "cpu": 1
+                }
+              },
+              "volumeMounts": [
+                { "name": "sealed-tmpfs", "mountPath": "/run/sealed" }
+              ]
+            }
+          }
+        ],
+        "volumes": [
+          { "name": "sealed-tmpfs", "emptyDir": {} }
+        ],
+        "imageRegistryCredentials": [
+          {
+            "server":   "[parameters('registryServer')]",
+            "username": "[parameters('registryUsername')]",
+            "password": "[parameters('registryPassword')]"
+          }
+        ],
+        "ipAddress": {
+          "type":         "Public",
+          "dnsNameLabel": "[parameters('dnsNameLabel')]",
+          "ports": [
+            { "protocol": "TCP", "port": 8443 }
+          ]
+        },
+        "osType":         "Linux",
+        "restartPolicy":  "Always"
+      }
+    }
+  ],
+  "outputs": {
+    "publicIp": {
+      "type":  "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.ip]"
+    },
+    "fqdn": {
+      "type":  "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.fqdn]"
+    },
+    "url": {
+      "type":  "string",
+      "value": "[concat('http://', reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.fqdn, ':8443')]"
+    }
+  }
+}
