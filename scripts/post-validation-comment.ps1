@@ -31,6 +31,42 @@ Write-Host "CVM 4-Way Validation Matrix with GitHub PR Comment" -ForegroundColor
 Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host ""
 
+function Get-AttestationSummary {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Text
+    )
+
+    $attestationType = $null
+    $compliance = $null
+    $secureBoot = $null
+    $tpmEnabled = $null
+
+    $typeMatch = [regex]::Match($Text, 'x-ms-attestation-type\s*[":=]\s*"?([A-Za-z0-9\-]+)"?', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($typeMatch.Success) { $attestationType = $typeMatch.Groups[1].Value }
+
+    $complianceMatch = [regex]::Match($Text, 'x-ms-compliance-status\s*[":=]\s*"?([A-Za-z0-9\-]+)"?', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($complianceMatch.Success) { $compliance = $complianceMatch.Groups[1].Value }
+
+    $secureBootMatch = [regex]::Match($Text, 'secure-boot\s*[":=]\s*(true|false|True|False)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($secureBootMatch.Success) { $secureBoot = $secureBootMatch.Groups[1].Value.ToLower() }
+
+    $tpmMatch = [regex]::Match($Text, 'tpm-enabled\s*[":=]\s*(true|false|True|False)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($tpmMatch.Success) { $tpmEnabled = $tpmMatch.Groups[1].Value.ToLower() }
+
+    $parts = @()
+    if ($attestationType) { $parts += "type=$attestationType" }
+    if ($compliance) { $parts += "compliance=$compliance" }
+    if ($secureBoot) { $parts += "secureBoot=$secureBoot" }
+    if ($tpmEnabled) { $parts += "tpm=$tpmEnabled" }
+
+    if ($parts.Count -eq 0) {
+        return "attestation-details-unavailable"
+    }
+
+    return ($parts -join ", ")
+}
+
 # Capture validation output
 $outputLines = @()
 $outputLines += "# CVM 4-Way Validation Results"
@@ -55,10 +91,9 @@ foreach($scenario in $scenarios) {
     
     try {
         $output = & ./BuildRandomCVM.ps1 -subsID $subsID -basename $scenario.basename -osType $scenario.os -region $scenario.region -vmsize $scenario.vmsize -smoketest -DisableBastion -ErrorAction Stop 2>&1
-        
-        # Extract attestation info
-        $attestationMatch = $output | Select-String -Pattern "(x-ms-attestation-type|x-ms-compliance-status|ATTEST_TYPE|COMPLIANCE|SECURE_BOOT|TPM_ENABLED)" | Select-Object -First 3
-        $attestationStr = if ($attestationMatch) { ($attestationMatch | ForEach-Object {$_.Line.Trim()}) -join " / " } else { "N/A" }
+
+        $outputText = ($output | Out-String)
+        $attestationStr = Get-AttestationSummary -Text $outputText
         
         Write-Host "  ✓ $($scenario.name) PASSED" -ForegroundColor Green
         $outputLines += "| $($scenario.name) | ✅ PASS | $attestationStr |"
