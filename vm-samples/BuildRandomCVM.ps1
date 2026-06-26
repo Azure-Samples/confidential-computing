@@ -24,8 +24,8 @@
 # You'll need to have the latest Azure PowerShell module installed as older versions don't have the parameters for AKV & ACC (update-module -force)
 #
 
-# TODO
-# - look at the credential handling, it's not optimal
+# TODO (cosmetic/docs)
+# - review credential handling guidance; current flow is functional but not ideal
 
 # handle command line parameters, mandatory, will force you to enter them
 param (
