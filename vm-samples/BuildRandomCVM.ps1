@@ -520,11 +520,53 @@ fi
 WORKDIR=`$(mktemp -d)
 cd "`$WORKDIR"
 echo "Downloading latest attest-lin.zip from cvm-attestation-tools..."
-curl -fsSL -o attest-lin.zip https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-lin.zip
+URLS="https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-lin.zip"
+
+# Try to discover a concrete asset URL via GitHub API as a fallback.
+API_URL=`$(curl -fsSL https://api.github.com/repos/Azure/cvm-attestation-tools/releases/latest 2>/dev/null \
+    | tr -d '\n' \
+    | sed -n 's/.*"browser_download_url":"\\([^"]*attest-lin.zip\\)".*/\\1/p' \
+    | sed 's#\\/#/#g')
+if [ -n "`$API_URL" ]; then
+    URLS="`$URLS `$API_URL"
+fi
+
+DOWNLOADED=0
+for URL in `$URLS; do
+    for TRY in 1 2 3; do
+        echo "Download attempt `$TRY/3: `$URL"
+        if curl -fsSL -o attest-lin.zip "`$URL"; then
+            if [ -s attest-lin.zip ]; then
+                DOWNLOADED=1
+                break
+            fi
+            echo "Downloaded file is empty, retrying..."
+        else
+            echo "Download failed on attempt `$TRY for `$URL"
+        fi
+        [ `$TRY -lt 3 ] && sleep 10
+    done
+    [ `$DOWNLOADED -eq 1 ] && break
+done
+
+if [ `$DOWNLOADED -ne 1 ]; then
+    echo "Failed to download attest-lin.zip after retries. Ensure outbound internet to github.com and objects.githubusercontent.com is allowed from the CVM subnet."
+    exit 1
+fi
+
+if ! command -v unzip >/dev/null 2>&1; then
+    echo "unzip is not installed in the VM. Please install unzip and rerun attestation."
+    exit 1
+fi
+
 unzip -q attest-lin.zip
 chmod +x attest read_report 2>/dev/null || true
 echo "--------- attest --c $attestConfig ---------"
-./attest --c $attestConfig 2>&1 | tee attest.out || echo "attest exited with code `$?"
+./attest --c $attestConfig 2>&1 | tee attest.out
+ATTEST_EXIT=`${PIPESTATUS[0]}
+if [ `$ATTEST_EXIT -ne 0 ]; then
+    echo "attest exited with code `$ATTEST_EXIT"
+fi
 
 # Extract JWT (a single token of the form xxx.yyy.zzz with base64url chars)
 # from the attest output and pretty-print header + payload claims using jq.
@@ -688,7 +730,7 @@ Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
     }
 
     # Fail loudly if the in-VM script output clearly contains download/attestation errors.
-    if ($attestationText -match 'Unable to connect to the remote server|Invoke-WebRequest\s*:|Failed to download attest-win\.zip|attest\.exe exited with code\s+[1-9]') {
+    if ($attestationText -match 'Unable to connect to the remote server|Invoke-WebRequest\s*:|Failed to download attest-win\.zip|Failed to download attest-lin\.zip|curl:\s*\(|unzip is not installed|attest\.exe exited with code\s+[1-9]|attest exited with code\s+[1-9]') {
         write-host "Attestation failed inside the VM. See output above for details." -ForegroundColor Red
         throw "In-VM attestation failed"
     }
