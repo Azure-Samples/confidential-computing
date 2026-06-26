@@ -148,7 +148,7 @@ The script will generate a random complex password and output it to the terminal
 
 The script auto-detects the isolation type from your VM SKU. Choose **Intel TDX** (newer, available in select regions) or **AMD SEV-SNP** (widely available).
 
-### Intel TDX CVM (Recommended for new deployments)
+### Intel TDX CVM
 
 Intel TDX SKUs (`DCe*`/`ECe*`) available in: westeurope, westus3, northeurope, and select others.
 
