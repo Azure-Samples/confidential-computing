@@ -54,6 +54,34 @@ Builds a CVM with **Confidential OS disk encryption bound to a Customer Managed 
 
 Supported images: Windows Server 2022, Windows Server 2019, Windows 11 Enterprise, Ubuntu 24.04 LTS, and RHEL 9.5 CVM. The script tags the resource group with the GitHub repo URL (auto-detected from git remote) for traceability.
 
+### Prerequisites
+
+Before running `BuildRandomCVM.ps1`, ensure you have the following:
+
+**Environment:**
+- **Azure subscription** with Owner or Contributor role (required to create resources, Key Vaults, and assign RBAC roles)
+- **PowerShell 7.0+** (tested on Windows and macOS with both PowerShell 7.4 and 7.5)
+- **Azure PowerShell module** (Az.Accounts, Az.Compute, Az.KeyVault, Az.Network) — version 12.0 or later. Update with: `Update-Module -Name Az -Force`
+- **Azure CLI** (optional, used for additional queries and Bastion RDP tunneling)
+
+**Permissions & Services:**
+- **Confidential VM Orchestrator service principal** must be registered in your tenant:
+  - The script checks for `bf7b6499-ff71-4aa2-97a4-f372087be7f0` (Microsoft-owned SPN)
+  - If missing, contact your Azure administrator or see the troubleshooting step in the script comments
+- **Azure Key Vault Premium** with HSM support (required for Confidential OS disk encryption with Customer Managed Keys)
+- **Sufficient vCPU quota** in the target region for the chosen VM SKU family (e.g., `standardDCASv5Family` for SEV-SNP, `standardDCESv6Family` for Intel TDX)
+
+**Regional & SKU Requirements:**
+- **Target region must support Confidential VMs:**
+  - **AMD SEV-SNP**: `DCa*`/`ECa*` SKUs available in most regions (e.g., northeurope, eastus, koreacentral)
+  - **Intel TDX**: `DCe*`/`ECe*` SKUs available in subset of regions (e.g., westeurope, westus3, northeurope)
+- **Verify availability** before running (or use `-SkipSkuPreflight` to let ARM validate)
+
+**Authentication:**
+- **Logged into Azure** via `Connect-AzAccount` with the target subscription selected, OR
+- **AZURE_SUBSCRIPTION_ID** environment variable set and authenticated via Azure CLI
+- Run `Set-AzContext -SubscriptionId "<your-sub-id>"` if needed
+
 ### Pre-flight checks (before any resources are created)
 
 To save you a half-built deployment in a region or subscription that can't actually host the VM, the script runs the following checks **before** creating the resource group, Key Vault, DES, VNet or VM:

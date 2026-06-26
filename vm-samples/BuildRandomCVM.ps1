@@ -49,6 +49,93 @@ if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
     exit
 }# exit if any of the parameters are empty
 
+#---------Prerequisite Checks: PowerShell version and required Az modules-----------------------------------------------
+function Test-PrerequisitesInstalled {
+    param(
+        [Parameter(Mandatory=$false)][switch]$StrictMode  # If true, fail on missing optional tools like Azure CLI
+    )
+    
+    $missingPrereqs = @()
+    
+    # Check PowerShell version (need 7.0+)
+    $psVersion = $PSVersionTable.PSVersion
+    if ($psVersion.Major -lt 7) {
+        $missingPrereqs += "PowerShell 7.0+ (currently running: $($psVersion.Major).$($psVersion.Minor).$($psVersion.Patch))"
+    }
+    
+    # Check required Az modules
+    $requiredModules = @("Az.Accounts", "Az.Compute", "Az.KeyVault", "Az.Network")
+    foreach ($moduleName in $requiredModules) {
+        $module = Get-Module -Name $moduleName -ListAvailable -ErrorAction SilentlyContinue
+        if (-not $module) {
+            $missingPrereqs += "$moduleName (required)"
+        }
+    }
+    
+    # Check optional but recommended tools (just warnings, not errors)
+    $optionalTools = @()
+    $azCli = Get-Command az -ErrorAction SilentlyContinue
+    if (-not $azCli) {
+        $optionalTools += "Azure CLI 2.60+ (optional, used for enhanced queries and Bastion RDP tunneling)"
+    }
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        $optionalTools += "git (optional, used to auto-detect repository URL)"
+    }
+    
+    # Display results
+    write-host ""
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "Prerequisite Check" -ForegroundColor Cyan
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    
+    # PowerShell version (OK)
+    if ($psVersion.Major -ge 7) {
+        write-host "✓ PowerShell $($psVersion.Major).$($psVersion.Minor).$($psVersion.Patch)" -ForegroundColor Green
+    }
+    
+    # Required modules status
+    foreach ($moduleName in $requiredModules) {
+        $module = Get-Module -Name $moduleName -ListAvailable -ErrorAction SilentlyContinue
+        if ($module) {
+            $version = $module.Version | Sort-Object -Descending | Select-Object -First 1
+            write-host "✓ $moduleName (v$version)" -ForegroundColor Green
+        }
+    }
+    
+    # Optional tools (just info, don't block)
+    if ($optionalTools.Count -gt 0) {
+        write-host ""
+        foreach ($tool in $optionalTools) {
+            write-host "⚠ $tool" -ForegroundColor Yellow
+        }
+    }
+    
+    # Display errors and exit if critical prereqs missing
+    if ($missingPrereqs.Count -gt 0) {
+        write-host ""
+        write-host "MISSING PREREQUISITES:" -ForegroundColor Red
+        foreach ($prereq in $missingPrereqs) {
+            write-host "✗ $prereq" -ForegroundColor Red
+        }
+        write-host ""
+        write-host "Installation steps:" -ForegroundColor Yellow
+        write-host "  PowerShell 7+: https://github.com/PowerShell/PowerShell/releases" -ForegroundColor Gray
+        write-host "  Azure PowerShell: Update-Module -Name Az -Force" -ForegroundColor Gray
+        write-host "  Azure CLI (optional): https://learn.microsoft.com/cli/azure/install-azure-cli" -ForegroundColor Gray
+        write-host ""
+        write-host "After installing, restart PowerShell and run this script again." -ForegroundColor Yellow
+        write-host "----------------------------------------------------------------------------------------------------------------"
+        exit 1
+    }
+    
+    write-host "✓ All required prerequisites are installed" -ForegroundColor Green
+    write-host "----------------------------------------------------------------------------------------------------------------"
+}
+
+# Run the prerequisite check
+Test-PrerequisitesInstalled
+
 # mark the start time of the script execution
 $startTime = Get-Date
 # get the name of the script so we can tag the resource group with it
