@@ -172,7 +172,7 @@ Intel TDX SKUs (`DCe*`/`ECe*`) available in: westeurope, westus3, northeurope, a
 ./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "prod-tdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC4es_v6" -description "Production TDX workload"
 ```
 
-### AMD SEV-SNP CVM (Widely available, larger regional support)
+### AMD SEV-SNP CVM
 
 AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral, australiaeast, and many others.
 
@@ -236,8 +236,6 @@ AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "ci" -osType "Windows11" -description "Automated testing pipeline" -smoketest
 ```
 
-## Intel TDX Examples
-
 The script auto-detects the isolation type from the VM SKU and runs the matching attestation flow inside the VM:
 
 - **AMD SEV-SNP** SKUs (`DCa*` / `DCad*` / `ECa*` / `ECad*`, e.g. `Standard_DC2as_v5`) → uses `config_snp.json`, expect `x-ms-attestation-type: sevsnpvm`.
@@ -249,17 +247,6 @@ Intel TDX SKUs are available in a subset of regions (e.g. `westeurope`, `westus3
 Get-AzComputeResourceSku -Location westeurope |
     Where-Object { $_.Name -match '^Standard_(DC|EC)\d+e' -and $_.ResourceType -eq 'virtualMachines' } |
     Select-Object Name, @{N='Restrictions';E={ $_.Restrictions.ReasonCode -join ',' }}
-```
-
-```powershell
-# Deploy Ubuntu 24.04 Intel TDX CVM in West Europe
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "mytdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC2es_v6" -DisableBastion -description "ubuntu tdx attestation"
-
-# Deploy Windows Server 2022 Intel TDX CVM
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "wintdx" -osType "Windows" -region "westeurope" -vmsize "Standard_DC2es_v6"
-
-# Smoketest a TDX deployment
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "tdxci" -osType "Ubuntu" -region "westus3" -vmsize "Standard_DC4es_v6" -smoketest
 ```
 
 The script automatically tags the resource group with:
