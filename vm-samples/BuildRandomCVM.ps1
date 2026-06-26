@@ -560,7 +560,42 @@ New-Item -ItemType Directory -Path `$work -Force | Out-Null
 Set-Location `$work
 Write-Host "Downloading latest attest-win.zip from cvm-attestation-tools..."
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -Uri 'https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-win.zip' -OutFile 'attest-win.zip' -UseBasicParsing
+`$downloadUrls = @('https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-win.zip')
+
+# Try to discover the concrete asset URL as a fallback (often resolves to objects.githubusercontent.com)
+try {
+    `$release = Invoke-RestMethod -Uri 'https://api.github.com/repos/Azure/cvm-attestation-tools/releases/latest' -Headers @{ 'User-Agent' = 'BuildRandomCVM' } -UseBasicParsing
+    `$asset = `$release.assets | Where-Object { `$_.name -eq 'attest-win.zip' } | Select-Object -First 1
+    if (`$asset -and `$asset.browser_download_url) {
+        `$downloadUrls += `$asset.browser_download_url
+    }
+} catch {
+    Write-Host "Warning: unable to query GitHub release API for fallback URL: `$(`$_.Exception.Message)" -ForegroundColor Yellow
+}
+
+`$downloaded = `$false
+foreach (`$url in (`$downloadUrls | Select-Object -Unique)) {
+    for (`$i = 1; `$i -le 3; `$i++) {
+        try {
+            Write-Host "Download attempt `$i/3: `$url"
+            Invoke-WebRequest -Uri `$url -OutFile 'attest-win.zip' -UseBasicParsing -Headers @{ 'User-Agent' = 'BuildRandomCVM' }
+            if ((Test-Path 'attest-win.zip') -and ((Get-Item 'attest-win.zip').Length -gt 0)) {
+                `$downloaded = `$true
+                break
+            }
+            throw "Downloaded file is missing or empty"
+        } catch {
+            Write-Host "Download failed on attempt `$i for `$url: `$(`$_.Exception.Message)" -ForegroundColor Yellow
+            if (`$i -lt 3) { Start-Sleep -Seconds 10 }
+        }
+    }
+    if (`$downloaded) { break }
+}
+
+if (-not `$downloaded) {
+    throw "Failed to download attest-win.zip after retries. Ensure outbound internet to github.com and objects.githubusercontent.com is allowed from the CVM subnet."
+}
+
 Expand-Archive -Path 'attest-win.zip' -DestinationPath '.' -Force
 Write-Host "--------- attest.exe --c $attestConfig ---------"
 
@@ -644,8 +679,18 @@ Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
 
     write-host "----------------------------------------------------------------------------------------------------------------"
     write-host "--------------Output from cvm-attestation-tools running inside the VM--------------"
+    $attestationText = ""
     foreach ($entry in $output.Value) {
-        if ($entry.Message) { write-host $entry.Message }
+        if ($entry.Message) {
+            write-host $entry.Message
+            $attestationText += $entry.Message
+        }
+    }
+
+    # Fail loudly if the in-VM script output clearly contains download/attestation errors.
+    if ($attestationText -match 'Unable to connect to the remote server|Invoke-WebRequest\s*:|Failed to download attest-win\.zip|attest\.exe exited with code\s+[1-9]') {
+        write-host "Attestation failed inside the VM. See output above for details." -ForegroundColor Red
+        throw "In-VM attestation failed"
     }
     write-host "----------------------------------------------------------------------------------------------------------------"
     write-host "Build and attestation complete." -ForegroundColor Green
