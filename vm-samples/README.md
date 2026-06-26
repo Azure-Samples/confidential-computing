@@ -159,17 +159,17 @@ Intel TDX SKUs (`DCe*`/`ECe*`) available in: westeurope, westus3, northeurope, a
 
 **Windows Server 2022 with Intel TDX:**
 ```powershell
-./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "wintdx" -osType "Windows" -region "westeurope" -vmsize "Standard_DC2es_v6"
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "wtdx" -osType "Windows" -region "westeurope" -vmsize "Standard_DC2es_v6"
 ```
 
 **Windows 11 Enterprise with Intel TDX:**
 ```powershell
-./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "win11tdx" -osType "Windows11" -region "westeurope" -vmsize "Standard_DC2es_v6"
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "w11tx" -osType "Windows11" -region "westeurope" -vmsize "Standard_DC2es_v6"
 ```
 
 **Production-grade: Larger TDX VM (4 vCPU) with custom description:**
 ```powershell
-./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "prodtdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC4es_v6" -description "Production TDX workload"
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "ptdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC4es_v6" -description "Production TDX workload"
 ```
 
 ### AMD SEV-SNP CVM
@@ -183,22 +183,22 @@ AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral
 
 **Windows Server 2022 with AMD SEV-SNP:**
 ```powershell
-./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "winsnp" -osType "Windows" -region "northeurope" -vmsize "Standard_DC2as_v5"
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "wsnp" -osType "Windows" -region "northeurope" -vmsize "Standard_DC2as_v5"
 ```
 
 **Windows 11 Enterprise with AMD SEV-SNP:**
 ```powershell
-./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "win11snp" -osType "Windows11" -region "northeurope" -vmsize "Standard_DC2as_v5"
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "w11sp" -osType "Windows11" -region "northeurope" -vmsize "Standard_DC2as_v5"
 ```
 
 **Production-grade: Larger SEV-SNP VM (4 vCPU) with custom description:**
 ```powershell
-./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "prodsnp" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC4as_v5" -description "Production SEV-SNP workload"
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "psnp" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC4as_v5" -description "Production SEV-SNP workload"
 ```
 
 **Advanced: Fully isolated CVM (no outbound internet, no Bastion):**
 ```powershell
-./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "isolated" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC2as_v5" -NoInternetAccess -DisableBastion
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "isolt" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC2as_v5" -NoInternetAccess -DisableBastion
 ```
 
 **Test/Demo: Quick smoketest that auto-cleans up after 10 seconds:**
@@ -209,7 +209,7 @@ AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral
 ## Example:
 ```powershell
 # Deploy Ubuntu CVM with a larger VM size
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myubuntu" -osType "Ubuntu" -vmsize "Standard_DC4as_v5"
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myubu" -osType "Ubuntu" -vmsize "Standard_DC4as_v5"
 ```
 
 ## Examples:
@@ -218,7 +218,7 @@ AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows"
 
 # Deploy Windows 11 Enterprise CVM
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "mywin11" -osType "Windows11"
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myw11" -osType "Windows11"
 
 # Deploy Ubuntu CVM with description
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Ubuntu" -description "Development testing environment"
@@ -230,7 +230,7 @@ AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows11" -region "eastus"
 
 # Deploy a fully isolated CVM with no outbound internet
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "isolated" -osType "Ubuntu" -NoInternetAccess
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "isolt" -osType "Ubuntu" -NoInternetAccess
 
 # Smoketest with Windows 11 for CI/CD pipeline
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "ci" -osType "Windows11" -description "Automated testing pipeline" -smoketest
