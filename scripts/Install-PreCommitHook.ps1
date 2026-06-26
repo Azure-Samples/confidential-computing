@@ -102,7 +102,7 @@ Write-Host "  pre-push runs: .\scripts\validate-cvm.ps1" -ForegroundColor White
 Write-Host "    • PowerShell syntax checks"
 Write-Host "    • ARM template validation (dry-run)"
 Write-Host "    • Parameter file validation"
-Write-Host "    • Posts validation results as GitHub PR comment (if gh CLI + active PR)"
+Write-Host "    • Does not post GitHub PR comments automatically"
 Write-Host ""
 Write-Host "  Emergency bypass:" -ForegroundColor Yellow
 Write-Host "    git commit --no-verify          (skip pre-commit hook)" -ForegroundColor Gray
