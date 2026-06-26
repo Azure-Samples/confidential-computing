@@ -144,6 +144,68 @@ The script will generate a random complex password and output it to the terminal
 - **Ubuntu**: Ubuntu 24.04 LTS CVM (SSH via Bastion)
 - **RHEL**: Red Hat Enterprise Linux 9.5 CVM (SSH via Bastion)
 
+## Quickstart
+
+The script auto-detects the isolation type from your VM SKU. Choose **Intel TDX** (newer, available in select regions) or **AMD SEV-SNP** (widely available).
+
+### Intel TDX CVM (Recommended for new deployments)
+
+Intel TDX SKUs (`DCe*`/`ECe*`) available in: westeurope, westus3, northeurope, and select others.
+
+**Fastest start — Ubuntu 24.04 with Bastion:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "tdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC2es_v6"
+```
+
+**Windows Server 2022 with Intel TDX:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "wintdx" -osType "Windows" -region "westeurope" -vmsize "Standard_DC2es_v6"
+```
+
+**Windows 11 Enterprise with Intel TDX:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "win11tdx" -osType "Windows11" -region "westeurope" -vmsize "Standard_DC2es_v6"
+```
+
+**Production-grade: Larger TDX VM (4 vCPU) with custom description:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "prod-tdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC4es_v6" -description "Production TDX workload"
+```
+
+### AMD SEV-SNP CVM (Widely available, larger regional support)
+
+AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral, australiaeast, and many others.
+
+**Fastest start — Ubuntu 24.04 with Bastion:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "snp" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC2as_v5"
+```
+
+**Windows Server 2022 with AMD SEV-SNP:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "winsnp" -osType "Windows" -region "northeurope" -vmsize "Standard_DC2as_v5"
+```
+
+**Windows 11 Enterprise with AMD SEV-SNP:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "win11snp" -osType "Windows11" -region "northeurope" -vmsize "Standard_DC2as_v5"
+```
+
+**Production-grade: Larger SEV-SNP VM (4 vCPU) with custom description:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "prod-snp" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC4as_v5" -description "Production SEV-SNP workload"
+```
+
+**Advanced: Fully isolated CVM (no outbound internet, no Bastion):**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "isolated" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC2as_v5" -NoInternetAccess -DisableBastion
+```
+
+**Test/Demo: Quick smoketest that auto-cleans up after 10 seconds:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "test" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC2as_v5" -smoketest
+```
+
 ## Example:
 ```powershell
 # Deploy Ubuntu CVM with a larger VM size
