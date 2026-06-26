@@ -90,7 +90,7 @@ foreach($scenario in $scenarios) {
     Write-Host "▶ Testing: $($scenario.name)" -ForegroundColor White
     
     try {
-        $output = & ./BuildRandomCVM.ps1 -subsID $subsID -basename $scenario.basename -osType $scenario.os -region $scenario.region -vmsize $scenario.vmsize -smoketest -DisableBastion -ErrorAction Stop 2>&1
+        $output = & ./BuildRandomCVM.ps1 -subsID $subsID -basename $scenario.basename -osType $scenario.os -region $scenario.region -vmsize $scenario.vmsize -smoketest -DisableBastion -ErrorAction Stop *>&1
 
         $outputText = ($output | Out-String)
         $attestationStr = Get-AttestationSummary -Text $outputText
