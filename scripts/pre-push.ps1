@@ -25,5 +25,45 @@ if (-not (Test-Path "./scripts/validate-cvm.ps1")) {
     exit 1
 }
 
-& ./scripts/validate-cvm.ps1
-exit $LASTEXITCODE
+$validationOutput = & ./scripts/validate-cvm.ps1 2>&1 | Out-String
+$validationExitCode = $LASTEXITCODE
+
+Write-Host $validationOutput
+
+# Best-effort PR comment: do not block push if GitHub comment fails.
+if (Get-Command gh -ErrorAction SilentlyContinue) {
+    $prNumber = & gh pr view --json number -q .number 2>$null
+    if ($LASTEXITCODE -eq 0 -and $prNumber) {
+        $branch = git rev-parse --abbrev-ref HEAD
+        $statusLabel = if ($validationExitCode -eq 0) { "PASS" } else { "FAIL" }
+        $statusIcon = if ($validationExitCode -eq 0) { "✅" } else { "❌" }
+
+        $lines = $validationOutput -split "`r?`n"
+        $maxLines = 200
+        if ($lines.Count -gt $maxLines) {
+            $lines = $lines[($lines.Count - $maxLines)..($lines.Count - 1)]
+            $lines = @("[truncated to last $maxLines lines]") + $lines
+        }
+        $trimmedOutput = ($lines -join "`n").Trim()
+
+        $commentBody = @"
+## $statusIcon Local Pre-Push CVM Validation: $statusLabel
+
+- Branch: $branch
+- Timestamp (UTC): $(Get-Date -Format "u")
+
+```text
+$trimmedOutput
+```
+"@
+
+        & gh pr comment $prNumber --body $commentBody 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Posted validation results to PR #$prNumber" -ForegroundColor Green
+        } else {
+            Write-Host "WARNING: Failed to post validation comment to PR #$prNumber" -ForegroundColor Yellow
+        }
+    }
+}
+
+exit $validationExitCode

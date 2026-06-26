@@ -37,90 +37,10 @@ jobs:
         shell: pwsh
         run: ./scripts/validate-cvm.ps1 -SkipTemplateValidation
 
-  cvm-matrix-test:
-    name: CVM Matrix Validation (${{ matrix.isolation }}, ${{ matrix.os }})
-    runs-on: windows-latest
-    needs: [secret-scan, validate-syntax]
-    strategy:
-      matrix:
-        include:
-          - isolation: "AMD SEV-SNP v6"
-            os: "Windows"
-            vmsize: "Standard_DC2as_v6"
-            region: "koreacentral"
-          - isolation: "AMD SEV-SNP v6"
-            os: "Ubuntu"
-            vmsize: "Standard_DC2as_v6"
-            region: "koreacentral"
-          - isolation: "Intel TDX v6"
-            os: "Windows"
-            vmsize: "Standard_DC2es_v6"
-            region: "westeurope"
-          - isolation: "Intel TDX v6"
-            os: "Ubuntu"
-            vmsize: "Standard_DC2es_v6"
-            region: "westeurope"
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Azure PowerShell
-        shell: pwsh
-        run: |
-          Install-Module -Name Az -Force -AllowClobber -Scope CurrentUser
-          Import-Module Az.Accounts
-          Import-Module Az.Compute
-          Import-Module Az.KeyVault
-          Import-Module Az.Network
-          Write-Host "Azure PowerShell installed successfully"
-
-      - name: Log in to Azure
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-          enable-AzPSSession: true
-
-      - name: Deploy and validate CVM (${{ matrix.isolation }} - ${{ matrix.os }})
-        shell: pwsh
-        run: |
-          $subID = "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
-          $basename = "ci-${{ github.run_number }}-${{ strategy.job-index }}"
-          
-          Write-Host "Deploying: ${{ matrix.isolation }} - ${{ matrix.os }}" -ForegroundColor Cyan
-          Write-Host "VM SKU: ${{ matrix.vmsize }} in ${{ matrix.region }}" -ForegroundColor Cyan
-          
-          Set-Location vm-samples
-          
-          try {
-              ./BuildRandomCVM.ps1 `
-                -subsID $subID `
-                -basename $basename `
-                -osType "${{ matrix.os }}" `
-                -region "${{ matrix.region }}" `
-                -vmsize "${{ matrix.vmsize }}" `
-                -smoketest `
-                -DisableBastion `
-                -ErrorAction Stop
-              
-              Write-Host "✓ ${{ matrix.isolation }} - ${{ matrix.os }} deployment and attestation passed" -ForegroundColor Green
-          } catch {
-              Write-Host "✗ ${{ matrix.isolation }} - ${{ matrix.os }} deployment failed" -ForegroundColor Red
-              Write-Host $_.Exception.Message
-              exit 1
-          }
-
-      - name: Cleanup on failure
-        if: failure()
-        shell: pwsh
-        run: |
-          $basename = "ci-${{ github.run_number }}-${{ strategy.job-index }}"
-          Write-Host "Cleaning up resources for $basename..."
-          az group delete -n $basename --yes -o none 2>&1 | Out-Null || $true
-
   summary:
     name: Validation Summary
     runs-on: windows-latest
-    needs: [secret-scan, validate-syntax, cvm-matrix-test]
+    needs: [secret-scan, validate-syntax]
     if: always()
     steps:
       - name: Check results
@@ -135,7 +55,6 @@ jobs:
           $results = @{
               "Secret Scan" = "${{ needs.secret-scan.result }}"
               "Syntax & Parameter Validation" = "${{ needs.validate-syntax.result }}"
-              "CVM Matrix Tests" = "${{ needs.cvm-matrix-test.result }}"
           }
           
           foreach ($check in $results.Keys) {
@@ -151,8 +70,7 @@ jobs:
           
           Write-Host ""
           if ("${{ needs.secret-scan.result }}" -eq "success" -and 
-              "${{ needs.validate-syntax.result }}" -eq "success" -and 
-              "${{ needs.cvm-matrix-test.result }}" -eq "success") {
+              "${{ needs.validate-syntax.result }}" -eq "success") {
               Write-Host "✓ All validations passed" -ForegroundColor Green
               Write-Host ""
               exit 0

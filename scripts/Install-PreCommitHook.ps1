@@ -19,10 +19,8 @@ if (-not $repoRoot) {
 $hooksDir = Join-Path $repoRoot ".git" "hooks"
 $sourcePreCommitScript = Join-Path $repoRoot "scripts" "pre-commit.ps1"
 $sourcePrePushScript = Join-Path $repoRoot "scripts" "pre-push.ps1"
-$sourcePostPushScript = Join-Path $repoRoot "scripts" "post-push.ps1"
 $targetPreCommitHook = Join-Path $hooksDir "pre-commit"
 $targetPrePushHook = Join-Path $hooksDir "pre-push"
-$targetPostPushHook = Join-Path $hooksDir "post-push"
 
 if (-not (Test-Path $sourcePreCommitScript)) {
     Write-Host "ERROR: Source script not found at: $sourcePreCommitScript" -ForegroundColor Red
@@ -34,15 +32,9 @@ if (-not (Test-Path $sourcePrePushScript)) {
     exit 1
 }
 
-if (-not (Test-Path $sourcePostPushScript)) {
-    Write-Host "ERROR: Source script not found at: $sourcePostPushScript" -ForegroundColor Red
-    exit 1
-}
-
 # Copy the PowerShell scripts into .git/hooks/
 Copy-Item $sourcePreCommitScript (Join-Path $hooksDir "pre-commit.ps1") -Force
 Copy-Item $sourcePrePushScript (Join-Path $hooksDir "pre-push.ps1") -Force
-Copy-Item $sourcePostPushScript (Join-Path $hooksDir "post-push.ps1") -Force
 
 # Create shell wrappers that call PowerShell (works on Windows Git Bash and *nix)
 $preCommitHookContent = @'
@@ -84,26 +76,8 @@ else
 fi
 '@
 
-$postPushHookContent = @'
-#!/bin/sh
-# Auto-generated wrapper - calls the PowerShell post-push hook
-# To update, re-run: .\scripts\Install-PreCommitHook.ps1
-# This hook runs AFTER a successful push to post validation results to GitHub PR
-
-# Try pwsh (PowerShell 7+) first, fall back to powershell
-if command -v pwsh >/dev/null 2>&1; then
-    pwsh -NoProfile -ExecutionPolicy Bypass -File "$(dirname "$0")/post-push.ps1"
-elif command -v powershell >/dev/null 2>&1; then
-    powershell -NoProfile -ExecutionPolicy Bypass -File "$(dirname "$0")/post-push.ps1"
-else
-    # Fail silently - not critical for push
-    exit 0
-fi
-'@
-
 Set-Content -Path $targetPreCommitHook -Value $preCommitHookContent -Encoding UTF8 -NoNewline
 Set-Content -Path $targetPrePushHook -Value $prePushHookContent -Encoding UTF8 -NoNewline
-Set-Content -Path $targetPostPushHook -Value $postPushHookContent -Encoding UTF8 -NoNewline
 
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Green
@@ -112,7 +86,6 @@ Write-Host "══════════════════════�
 Write-Host ""
 Write-Host "  pre-commit hook: $targetPreCommitHook" -ForegroundColor Gray
 Write-Host "  pre-push hook  : $targetPrePushHook" -ForegroundColor Gray
-Write-Host "  post-push hook : $targetPostPushHook" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  pre-commit scans every commit for:" -ForegroundColor White
 Write-Host "    • Azure subscription IDs in resource paths"
@@ -129,13 +102,9 @@ Write-Host "  pre-push runs: .\scripts\validate-cvm.ps1" -ForegroundColor White
 Write-Host "    • PowerShell syntax checks"
 Write-Host "    • ARM template validation (dry-run)"
 Write-Host "    • Parameter file validation"
-Write-Host ""
-Write-Host "  post-push (after successful push) runs:" -ForegroundColor White
-Write-Host "    • .\scripts\post-validation-comment.ps1"
-Write-Host "    • Posts validation results as GitHub PR comment (if on PR branch)"
+Write-Host "    • Posts validation results as GitHub PR comment (if gh CLI + active PR)"
 Write-Host ""
 Write-Host "  Emergency bypass:" -ForegroundColor Yellow
 Write-Host "    git commit --no-verify          (skip pre-commit hook)" -ForegroundColor Gray
 Write-Host "    git push --no-verify             (skip pre-push hook)" -ForegroundColor Gray
-Write-Host "    git push --no-verify 2>&1 | Out-Null  (skip post-push hook)" -ForegroundColor Gray
 Write-Host ""

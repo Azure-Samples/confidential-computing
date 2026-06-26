@@ -41,10 +41,10 @@ $outputLines += "| Scenario | Status | Attestation |"
 $outputLines += "|----------|--------|-------------|"
 
 $scenarios = @(
-    @{name="AMD SEV-SNP v6 Windows"; os="Windows"; region="koreacentral"; vmsize="Standard_DC2as_v6"; basename="test-amd-win"}
-    @{name="AMD SEV-SNP v6 Linux"; os="Ubuntu"; region="koreacentral"; vmsize="Standard_DC2as_v6"; basename="test-amd-lin"}
-    @{name="Intel TDX v6 Windows"; os="Windows"; region="westeurope"; vmsize="Standard_DC2es_v6"; basename="test-tdx-win"}
-    @{name="Intel TDX v6 Linux"; os="Ubuntu"; region="westeurope"; vmsize="Standard_DC2es_v6"; basename="test-tdx-lin"}
+    @{name="AMD SEV-SNP v6 Windows"; os="Windows"; region="koreacentral"; vmsize="Standard_DC2as_v6"; basename="amdw"}
+    @{name="AMD SEV-SNP v6 Linux"; os="Ubuntu"; region="koreacentral"; vmsize="Standard_DC2as_v6"; basename="amdl"}
+    @{name="Intel TDX v6 Windows"; os="Windows"; region="westeurope"; vmsize="Standard_DC2es_v6"; basename="tdxw"}
+    @{name="Intel TDX v6 Linux"; os="Ubuntu"; region="westeurope"; vmsize="Standard_DC2es_v6"; basename="tdxl"}
 )
 
 $passed = 0
