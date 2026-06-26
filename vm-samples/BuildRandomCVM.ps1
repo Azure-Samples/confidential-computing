@@ -10,7 +10,7 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion] [-SkipSkuPreflight]
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion] [-NoInternetAccess] [-SkipSkuPreflight]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
 # osType specifies which OS to deploy: Windows (Server 2022), Windows11 (Windows 11 Enterprise), Ubuntu (24.04), or RHEL (9.5)
@@ -19,12 +19,13 @@
 # region is an optional parameter that specifies the Azure region (defaults to northeurope)
 # policyFilePath is an optional parameter that specifies the path to a custom policy file for key vault key creation
 # DisableBastion is an optional switch that skips the creation of Azure Bastion (VM will only be accessible via private network)
+# NoInternetAccess is an optional switch that blocks outbound internet access from the CVM subnet by not attaching NAT Gateway egress
 #
 # You'll need to have the latest Azure PowerShell module installed as older versions don't have the parameters for AKV & ACC (update-module -force)
 #
 
-# TODO
-# - look at the credential handling, it's not optimal
+# TODO (cosmetic/docs)
+# - review credential handling guidance; current flow is functional but not ideal
 
 # handle command line parameters, mandatory, will force you to enter them
 param (
@@ -39,6 +40,7 @@ param (
     [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v5",
     [Parameter(Mandatory=$false)]$policyFilePath = "",
     [Parameter(Mandatory=$false)][switch]$DisableBastion,
+    [Parameter(Mandatory=$false)][switch]$NoInternetAccess,
     [Parameter(Mandatory=$false)][switch]$SkipSkuPreflight
 )
 
@@ -46,6 +48,93 @@ if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
     write-host "You must enter a subscription ID, basename, and OS type (Windows, Windows11, Ubuntu, or RHEL)"
     exit
 }# exit if any of the parameters are empty
+
+#---------Prerequisite Checks: PowerShell version and required Az modules-----------------------------------------------
+function Test-PrerequisitesInstalled {
+    param(
+        [Parameter(Mandatory=$false)][switch]$StrictMode  # If true, fail on missing optional tools like Azure CLI
+    )
+    
+    $missingPrereqs = @()
+    
+    # Check PowerShell version (need 7.0+)
+    $psVersion = $PSVersionTable.PSVersion
+    if ($psVersion.Major -lt 7) {
+        $missingPrereqs += "PowerShell 7.0+ (currently running: $($psVersion.Major).$($psVersion.Minor).$($psVersion.Patch))"
+    }
+    
+    # Check required Az modules
+    $requiredModules = @("Az.Accounts", "Az.Compute", "Az.KeyVault", "Az.Network")
+    foreach ($moduleName in $requiredModules) {
+        $module = Get-Module -Name $moduleName -ListAvailable -ErrorAction SilentlyContinue
+        if (-not $module) {
+            $missingPrereqs += "$moduleName (required)"
+        }
+    }
+    
+    # Check optional but recommended tools (just warnings, not errors)
+    $optionalTools = @()
+    $azCli = Get-Command az -ErrorAction SilentlyContinue
+    if (-not $azCli) {
+        $optionalTools += "Azure CLI 2.60+ (optional, used for enhanced queries and Bastion RDP tunneling)"
+    }
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        $optionalTools += "git (optional, used to auto-detect repository URL)"
+    }
+    
+    # Display results
+    write-host ""
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "Prerequisite Check" -ForegroundColor Cyan
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    
+    # PowerShell version (OK)
+    if ($psVersion.Major -ge 7) {
+        write-host "✓ PowerShell $($psVersion.Major).$($psVersion.Minor).$($psVersion.Patch)" -ForegroundColor Green
+    }
+    
+    # Required modules status
+    foreach ($moduleName in $requiredModules) {
+        $module = Get-Module -Name $moduleName -ListAvailable -ErrorAction SilentlyContinue
+        if ($module) {
+            $version = $module.Version | Sort-Object -Descending | Select-Object -First 1
+            write-host "✓ $moduleName (v$version)" -ForegroundColor Green
+        }
+    }
+    
+    # Optional tools (just info, don't block)
+    if ($optionalTools.Count -gt 0) {
+        write-host ""
+        foreach ($tool in $optionalTools) {
+            write-host "⚠ $tool" -ForegroundColor Yellow
+        }
+    }
+    
+    # Display errors and exit if critical prereqs missing
+    if ($missingPrereqs.Count -gt 0) {
+        write-host ""
+        write-host "MISSING PREREQUISITES:" -ForegroundColor Red
+        foreach ($prereq in $missingPrereqs) {
+            write-host "✗ $prereq" -ForegroundColor Red
+        }
+        write-host ""
+        write-host "Installation steps:" -ForegroundColor Yellow
+        write-host "  PowerShell 7+: https://github.com/PowerShell/PowerShell/releases" -ForegroundColor Gray
+        write-host "  Azure PowerShell: Update-Module -Name Az -Force" -ForegroundColor Gray
+        write-host "  Azure CLI (optional): https://learn.microsoft.com/cli/azure/install-azure-cli" -ForegroundColor Gray
+        write-host ""
+        write-host "After installing, restart PowerShell and run this script again." -ForegroundColor Yellow
+        write-host "----------------------------------------------------------------------------------------------------------------"
+        exit 1
+    }
+    
+    write-host "✓ All required prerequisites are installed" -ForegroundColor Green
+    write-host "----------------------------------------------------------------------------------------------------------------"
+}
+
+# Run the prerequisite check
+Test-PrerequisitesInstalled
 
 # mark the start time of the script execution
 $startTime = Get-Date
@@ -76,6 +165,8 @@ $vmname = $basename # name of the VM, copied from $basename, or customise it her
 $vnetname = $vmname + "vnet" # name of the VNET
 $bastionname = $vnetname + "-bastion" # name of the bastion host
 $vnetipname = $vnetname + "-pip"     #Name of the VNET IP
+$natGatewayName = $vnetname + "-nat" # name of the NAT gateway used for outbound internet
+$natPublicIpName = $vnetname + "-nat-pip" # name of the NAT gateway public IP
 $nicPrefix = $basename + "-nic"    #Name of the NIC
 $bastionsubnetName = "AzureBastionSubnet" # don't change this
 $vmsubnetname = $basename + "vmsubnet" # don't change this
@@ -103,6 +194,11 @@ if ($smoketest) {
 }
 if ($DisableBastion) {
     write-host "BASTION DISABLED: VM will only be accessible via private network connectivity" -ForegroundColor Yellow
+}
+if ($NoInternetAccess) {
+    write-host "INTERNET DISABLED: CVM subnet will not have outbound internet access" -ForegroundColor Yellow
+} else {
+    write-host "INTERNET ENABLED: CVM subnet will use NAT Gateway for outbound internet access" -ForegroundColor Cyan
 }
 write-host "IMPORTANT"
 write-host "VM admin username is " $vmusername
@@ -253,6 +349,11 @@ if ($DisableBastion) {
     $resourceGroupTags.Add("BastionDisabled", "true")
 }
 
+# Add NoInternetAccess tag if outbound internet is disabled
+if ($NoInternetAccess) {
+    $resourceGroupTags.Add("NoInternetAccess", "true")
+}
+
 New-AzResourceGroup -Name $resgrp -Location $region -Tag $resourceGroupTags -force
 
 #create a credential object
@@ -326,10 +427,45 @@ switch ($osType) {
     }
 }
         
-$subnet = New-AzVirtualNetworkSubnetConfig -Name ($vmsubnetName) -AddressPrefix "10.0.0.0/24";
+$subnet = New-AzVirtualNetworkSubnetConfig -Name ($vmsubnetName) -AddressPrefix "10.0.0.0/24" -DefaultOutboundAccess $false;
 $vnet = New-AzVirtualNetwork -Force -Name ($vnetname) -ResourceGroupName $resgrp -Location $region -AddressPrefix "10.0.0.0/16" -Subnet $subnet;
 $vnet = Get-AzVirtualNetwork -Name ($vnetname) -ResourceGroupName $resgrp;
-$subnetId = $vnet.Subnets[0].Id;
+
+# Configure outbound internet path for the VM subnet via NAT Gateway unless explicitly disabled.
+if ($NoInternetAccess) {
+    write-host "No NAT Gateway attached to VM subnet due to -NoInternetAccess. Outbound internet will be blocked." -ForegroundColor Yellow
+}
+else {
+    write-host "Configuring NAT Gateway egress so the private CVM can access internet without a public IP..." -ForegroundColor Cyan
+    $natPublicIp = New-AzPublicIpAddress -ResourceGroupName $resgrp -Name $natPublicIpName -Location $region -AllocationMethod Static -Sku Standard
+    $natGateway = New-AzNatGateway -ResourceGroupName $resgrp -Name $natGatewayName -Location $region -IdleTimeoutInMinutes 10 -Sku Standard -PublicIpAddress $natPublicIp
+    # Some Az.Network module versions do not persist NAT association via Set-AzVirtualNetworkSubnetConfig.
+    # Try native cmdlet first, then verify; if missing, fall back to Azure CLI subnet update.
+    Set-AzVirtualNetworkSubnetConfig -Name ($vmsubnetName) -VirtualNetwork $vnet -AddressPrefix "10.0.0.0/24" -DefaultOutboundAccess $false -InputObject $natGateway | Set-AzVirtualNetwork | Out-Null
+    $vnet = Get-AzVirtualNetwork -Name ($vnetname) -ResourceGroupName $resgrp
+    $vmSubnet = $vnet.Subnets | Where-Object { $_.Name -eq $vmsubnetName } | Select-Object -First 1
+
+    if (-not $vmSubnet -or -not $vmSubnet.NatGateway -or -not $vmSubnet.NatGateway.Id) {
+        $azCli = Get-Command az -ErrorAction SilentlyContinue
+        if ($azCli) {
+            write-host "Az.Network cmdlet did not persist NAT association on this host; falling back to Azure CLI subnet update..." -ForegroundColor Yellow
+            & $azCli.Source network vnet subnet update --resource-group $resgrp --vnet-name $vnetname --name $vmsubnetName --nat-gateway $natGatewayName --only-show-errors -o none
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to attach NAT Gateway '$natGatewayName' to subnet '$vmsubnetName' via Azure CLI."
+            }
+            $vnet = Get-AzVirtualNetwork -Name ($vnetname) -ResourceGroupName $resgrp
+            $vmSubnet = $vnet.Subnets | Where-Object { $_.Name -eq $vmsubnetName } | Select-Object -First 1
+        }
+    }
+
+    if (-not $vmSubnet -or -not $vmSubnet.NatGateway -or -not $vmSubnet.NatGateway.Id) {
+        throw "NAT Gateway '$natGatewayName' is not associated with subnet '$vmsubnetName'. Outbound internet will fail."
+    }
+
+    write-host "NAT Gateway '$natGatewayName' attached to subnet '$vmsubnetname'." -ForegroundColor Green
+}
+
+$subnetId = ($vnet.Subnets | Where-Object { $_.Name -eq $vmsubnetName } | Select-Object -First 1).Id;
 #uncomment the below if you want to add a public IP address to the VM
 #$pubip = New-AzPublicIpAddress -Force -Name ($pubIpPrefix + $resgrp) -ResourceGroupName $resgrp -Location $region -AllocationMethod Static -DomainNameLabel $domainNameLabel2;
 #$pubip = Get-AzPublicIpAddress -Name ($pubIpPrefix + $resgrp) -ResourceGroupName $resgrp;
@@ -351,8 +487,38 @@ $VirtualMachine = Set-AzVmSecurityProfile -VM $VirtualMachine -SecurityType $vmS
 $VirtualMachine = Set-AzVmUefi -VM $VirtualMachine -EnableVtpm $true -EnableSecureBoot $true;
 $VirtualMachine = Set-AzVMBootDiagnostic -VM $VirtualMachine -disable #disable boot diagnostics, you can re-enable if required
 
-New-AzVM -ResourceGroupName $resgrp -Location $region -Vm $VirtualMachine;
-$vm = Get-AzVm -ResourceGroupName $resgrp -Name $vmname;
+try {
+    New-AzVM -ResourceGroupName $resgrp -Location $region -Vm $VirtualMachine -ErrorAction Stop
+} catch {
+    throw "VM deployment failed for '$vmname' in '$region': $($_.Exception.Message)"
+}
+
+# ARM can briefly report the VM as missing or not yet running immediately after creation.
+# Wait for the VM resource to become visible and the guest to reach a running state before
+# proceeding to Bastion setup or in-guest attestation.
+$vm = $null
+$vmReady = $false
+for ($vmAttempt = 1; $vmAttempt -le 20; $vmAttempt++) {
+    try {
+        $vm = Get-AzVm -ResourceGroupName $resgrp -Name $vmname -Status -ErrorAction Stop
+        $powerState = $vm.Statuses | Where-Object { $_.Code -like 'PowerState/*' } | Select-Object -First 1
+        if ($powerState -and $powerState.DisplayStatus -eq 'VM running') {
+            $vmReady = $true
+            break
+        }
+    } catch {
+        # Resource can lag briefly behind the successful create response.
+    }
+
+    if ($vmAttempt -lt 20) {
+        write-host "Waiting for VM '$vmname' to reach running state ($vmAttempt/20)..." -ForegroundColor DarkGray
+        Start-Sleep -Seconds 15
+    }
+}
+
+if (-not $vmReady) {
+    throw "VM '$vmname' was created but did not reach 'VM running' state in the expected time window."
+}
 
 # Create the Bastion to allow accessing the VM via the Azure portal (unless disabled)
 if (-not $DisableBastion) {
@@ -370,40 +536,99 @@ if (-not $DisableBastion) {
 # Downloads the latest pre-built attest CLI release from https://github.com/Azure/cvm-attestation-tools/releases
 # and runs it inside the freshly deployed CVM, returning the output to the caller.
 
-# Pick the right config based on the VM SKU's isolation type:
-#   AMD SEV-SNP: DCa*/DCad*/ECa*/ECad*  (e.g. Standard_DC2as_v5)  -> config_snp.json
-#   Intel TDX  : DCe*/DCed*/ECe*/ECed*  (e.g. Standard_DC2es_v5)  -> config_tdx.json
-if ($vmSize -match '_(DC|EC)\d+e[a-z]*_') {
-    $attestConfig = "config_tdx.json"
-    $isolationType = "Intel TDX"
-} else {
-    $attestConfig = "config_snp.json"
-    $isolationType = "AMD SEV-SNP"
+if ($NoInternetAccess) {
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "Skipping in-VM attestation because -NoInternetAccess blocks outbound internet access required to download cvm-attestation-tools." -ForegroundColor Yellow
+    write-host "Build complete (attestation skipped due to -NoInternetAccess)." -ForegroundColor Green
 }
+else {
+    # Pick the right config based on the VM SKU's isolation type:
+    #   AMD SEV-SNP: DCa*/DCad*/ECa*/ECad*  (e.g. Standard_DC2as_v5)  -> config_snp.json
+    #   Intel TDX  : DCe*/DCed*/ECe*/ECed*  (e.g. Standard_DC2es_v5)  -> config_tdx.json
+    if ($vmSize -match '_(DC|EC)\d+e[a-z]*_') {
+        $attestConfig = "config_tdx.json"
+        $isolationType = "Intel TDX"
+    } else {
+        $attestConfig = "config_snp.json"
+        $isolationType = "AMD SEV-SNP"
+    }
 
-write-host "----------------------------------------------------------------------------------------------------------------"
-write-host "Running attestation inside the $osType VM using cvm-attestation-tools (isolation: $isolationType, config: $attestConfig)..." -ForegroundColor Cyan
-write-host "This downloads the latest release of attest from https://github.com/Azure/cvm-attestation-tools/releases inside the VM."
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "Running attestation inside the $osType VM using cvm-attestation-tools (isolation: $isolationType, config: $attestConfig)..." -ForegroundColor Cyan
+    write-host "This downloads the latest release of attest from https://github.com/Azure/cvm-attestation-tools/releases inside the VM."
 
-if ($VMisLinux) {
+    if ($VMisLinux) {
     # Linux: download attest-lin.zip from the latest release, extract, run attest
     # Note: the zip extracts files at its root (no "attest-lin/" subfolder)
     $attestScript = @"
 #!/bin/bash
 set -e
 export DEBIAN_FRONTEND=noninteractive
-if ! command -v unzip >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
-    (apt-get update -y && apt-get install -y unzip jq) >/dev/null 2>&1 || \
-        (dnf install -y unzip jq || yum install -y unzip jq) >/dev/null 2>&1
+if ! command -v jq >/dev/null 2>&1; then
+    (apt-get update -y && apt-get install -y jq) >/dev/null 2>&1 || \
+        (dnf install -y jq || yum install -y jq) >/dev/null 2>&1
+fi
+if ! command -v unzip >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1 && ! command -v bsdtar >/dev/null 2>&1; then
+    (apt-get update -y && apt-get install -y unzip) >/dev/null 2>&1 || \
+        (dnf install -y unzip || yum install -y unzip) >/dev/null 2>&1
 fi
 WORKDIR=`$(mktemp -d)
 cd "`$WORKDIR"
 echo "Downloading latest attest-lin.zip from cvm-attestation-tools..."
-curl -fsSL -o attest-lin.zip https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-lin.zip
-unzip -q attest-lin.zip
+URLS="https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-lin.zip"
+
+# Try to discover a concrete asset URL via GitHub API as a fallback.
+API_URL=`$(curl -fsSL https://api.github.com/repos/Azure/cvm-attestation-tools/releases/latest 2>/dev/null \
+    | tr -d '\n' \
+    | sed -n 's/.*"browser_download_url":"\\([^"]*attest-lin.zip\\)".*/\\1/p' \
+    | sed 's#\\/#/#g')
+if [ -n "`$API_URL" ]; then
+    URLS="`$URLS `$API_URL"
+fi
+
+DOWNLOADED=0
+for URL in `$URLS; do
+    for TRY in 1 2 3; do
+        echo "Download attempt `$TRY/3: `$URL"
+        if curl -fsSL -o attest-lin.zip "`$URL"; then
+            if [ -s attest-lin.zip ]; then
+                DOWNLOADED=1
+                break
+            fi
+            echo "Downloaded file is empty, retrying..."
+        else
+            echo "Download failed on attempt `$TRY for `$URL"
+        fi
+        [ `$TRY -lt 3 ] && sleep 10
+    done
+    [ `$DOWNLOADED -eq 1 ] && break
+done
+
+if [ `$DOWNLOADED -ne 1 ]; then
+    echo "Failed to download attest-lin.zip after retries. Ensure outbound internet to github.com and objects.githubusercontent.com is allowed from the CVM subnet."
+    exit 1
+fi
+
+if command -v unzip >/dev/null 2>&1; then
+    unzip -q attest-lin.zip
+elif command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import zipfile
+zipfile.ZipFile('attest-lin.zip').extractall('.')
+PY
+elif command -v bsdtar >/dev/null 2>&1; then
+    bsdtar -xf attest-lin.zip
+else
+    echo "No zip extractor available (requires unzip, python3, or bsdtar)."
+    exit 1
+fi
 chmod +x attest read_report 2>/dev/null || true
 echo "--------- attest --c $attestConfig ---------"
-./attest --c $attestConfig 2>&1 | tee attest.out || echo "attest exited with code `$?"
+./attest --c $attestConfig 2>&1 | tee attest.out
+ATTEST_EXIT=`${PIPESTATUS[0]}
+if [ `$ATTEST_EXIT -ne 0 ]; then
+    echo "attest exited with code `$ATTEST_EXIT"
+fi
 
 # Extract JWT (a single token of the form xxx.yyy.zzz with base64url chars)
 # from the attest output and pretty-print header + payload claims using jq.
@@ -427,8 +652,8 @@ fi
 cd /
 rm -rf "`$WORKDIR"
 "@
-    $runCommandId = 'RunShellScript'
-} else {
+        $runCommandId = 'RunShellScript'
+    } else {
     # Windows: download attest-win.zip from the latest release, extract, run attest.exe
     # Note: the zip extracts files at its root (no "attest-win/" subfolder)
     $attestScript = @"
@@ -439,7 +664,74 @@ New-Item -ItemType Directory -Path `$work -Force | Out-Null
 Set-Location `$work
 Write-Host "Downloading latest attest-win.zip from cvm-attestation-tools..."
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -Uri 'https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-win.zip' -OutFile 'attest-win.zip' -UseBasicParsing
+# Run-command runs as SYSTEM, which has no IE/WinINet proxy config; Invoke-WebRequest then
+# fails with "Unable to connect to the remote server" even though outbound is fine.
+# Prefer curl.exe (in-box on Win10/11/Server2019+, doesn't use WinINet); fall back to
+# Invoke-WebRequest with the default proxy explicitly cleared.
+`$attestUrl = 'https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-win.zip'
+`$dlOk = `$false
+`$curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+# Wait for outbound to github.com:443 to come up before the real download. A freshly-attached
+# NAT Gateway on the VM subnet can take a couple of minutes to become effective, during which
+# every connection out of the VM fails with TCP connect timeout (curl exit 28). Probe with a
+# 5s timeout per attempt and back off; total ~5 minutes.
+Write-Host "Waiting for outbound connectivity to github.com:443..."
+for (`$i = 1; `$i -le 30; `$i++) {
+    `$ok = `$false
+    if (`$curl) {
+        try {
+            `$prevProbeEap = `$ErrorActionPreference
+            `$ErrorActionPreference = 'Continue'
+            if (`$PSVersionTable.PSVersion.Major -ge 7) { `$PSNativeCommandUseErrorActionPreference = `$false }
+            & `$curl.Source -fsS --max-time 5 -o NUL https://github.com 2>`$null | Out-Null
+            if (`$LASTEXITCODE -eq 0) { `$ok = `$true }
+        } catch {
+            `$ok = `$false
+        } finally {
+            `$ErrorActionPreference = `$prevProbeEap
+        }
+    } else {
+        try {
+            `$tnc = Test-NetConnection -ComputerName 'github.com' -Port 443 -WarningAction SilentlyContinue
+            if (`$tnc.TcpTestSucceeded) { `$ok = `$true }
+        } catch { `$ok = `$false }
+    }
+    if (`$ok) { Write-Host "Outbound to github.com is up (attempt `$i)." -ForegroundColor Green; break }
+    if (`$i -eq 30) {
+        Write-Host "WARNING: github.com still unreachable after 5 minutes; attempting download anyway." -ForegroundColor Yellow
+    } else {
+        Write-Host "  attempt `${i}: outbound not yet ready, sleeping 10s..." -ForegroundColor DarkGray
+        Start-Sleep -Seconds 10
+    }
+}
+if (`$curl) {
+    try {
+        `$prevCurlEap = `$ErrorActionPreference
+        `$ErrorActionPreference = 'Continue'
+        if (`$PSVersionTable.PSVersion.Major -ge 7) { `$PSNativeCommandUseErrorActionPreference = `$false }
+        & `$curl.Source -fsSL --retry 5 --retry-connrefused --retry-delay 5 -o 'attest-win.zip' `$attestUrl 2>`$null | Out-Null
+        if (`$LASTEXITCODE -eq 0 -and (Test-Path 'attest-win.zip') -and ((Get-Item 'attest-win.zip').Length -gt 0)) { `$dlOk = `$true }
+        else { Write-Host "curl.exe download failed (exit `$LASTEXITCODE); falling back to Invoke-WebRequest..." -ForegroundColor Yellow }
+    } catch {
+        Write-Host "curl.exe threw an exception; falling back to Invoke-WebRequest..." -ForegroundColor Yellow
+    } finally {
+        `$ErrorActionPreference = `$prevCurlEap
+    }
+}
+if (-not `$dlOk) {
+    [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy
+    for (`$i = 1; `$i -le 5 -and -not `$dlOk; `$i++) {
+        try {
+            Invoke-WebRequest -Uri `$attestUrl -OutFile 'attest-win.zip' -UseBasicParsing
+            `$dlOk = `$true
+        } catch {
+            Write-Host "Invoke-WebRequest attempt `$i failed: `$(`$_.Exception.Message)" -ForegroundColor Yellow
+            if (`$i -lt 5) { Start-Sleep -Seconds 10 }
+        }
+    }
+}
+if (-not `$dlOk) { throw "Failed to download attest-win.zip from `$attestUrl" }
+
 Expand-Archive -Path 'attest-win.zip' -DestinationPath '.' -Force
 Write-Host "--------- attest.exe --c $attestConfig ---------"
 
@@ -452,8 +744,21 @@ Write-Host "--------- attest.exe --c $attestConfig ---------"
 `$prevEap = `$ErrorActionPreference
 `$ErrorActionPreference = 'Continue'
 if (`$PSVersionTable.PSVersion.Major -ge 7) { `$PSNativeCommandUseErrorActionPreference = `$false }
-`$attestOut = (& .\attest.exe --c $attestConfig 2>&1 | Out-String -Width 16384)
-`$attestExit = `$LASTEXITCODE
+# Retry attest.exe a few times: the attestation provider's internal retry budget is short,
+# and on a brand-new VM the SNAT mapping to the MAA endpoint can take a minute or two to
+# warm up after NAT GW attach, surfacing as ConnectTimeoutError to *.attest.azure.net even
+# though github.com is already reachable by the time we finish downloading.
+`$attestOut = ''
+`$attestExit = -1
+for (`$i = 1; `$i -le 5; `$i++) {
+    `$attestOut = (& .\attest.exe --c $attestConfig 2>&1 | Out-String -Width 16384)
+    `$attestExit = `$LASTEXITCODE
+    if (`$attestExit -eq 0) { break }
+    if (`$i -lt 5) {
+        Write-Host "attest.exe attempt `$i exited with code `$attestExit; sleeping 30s before retry..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 30
+    }
+}
 `$ErrorActionPreference = `$prevEap
 Write-Host `$attestOut
 if (`$attestExit -ne 0) { Write-Host "attest.exe exited with code `$attestExit" -ForegroundColor Yellow }
@@ -497,37 +802,51 @@ if (`$jwtMatch) {
 Set-Location `$env:TEMP
 Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
 "@
-    $runCommandId = 'RunPowerShellScript'
-}
+        $runCommandId = 'RunPowerShellScript'
+    }
 
-# Retry loop: Invoke-AzVMRunCommand can return 409 Conflict for several minutes
-# after VM creation while the run-command extension is still finalising. This is
-# especially common on TDX SKUs. Back off and retry on Conflict / "in progress".
-$output = $null
-$maxAttempts = 10
-for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-    try {
-        write-host "Attestation run-command attempt $attempt of $maxAttempts..." -ForegroundColor Cyan
-        $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId $runCommandId -ScriptString $attestScript -ErrorAction Stop
-        break
-    } catch {
-        $msg = $_.Exception.Message
-        if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*')) {
-            write-host "Run-command extension busy (409); waiting 60s before retry..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 60
-        } else {
-            throw
+    # Retry loop: Invoke-AzVMRunCommand can return 409 Conflict for several minutes
+    # after VM creation while the run-command extension is still finalising. This is
+    # especially common on TDX SKUs. Back off and retry on Conflict / "in progress".
+    $output = $null
+    $maxAttempts = 10
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            write-host "Attestation run-command attempt $attempt of $maxAttempts..." -ForegroundColor Cyan
+            $output = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId $runCommandId -ScriptString $attestScript -ErrorAction Stop
+            break
+        } catch {
+            $msg = $_.Exception.Message
+            if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*')) {
+                write-host "Run-command extension busy (409); waiting 60s before retry..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 60
+            } elseif ($attempt -lt $maxAttempts -and ($msg -like '*ResourceNotFound*' -or $msg -like '*was not found*')) {
+                write-host "VM/run-command endpoint not yet visible (404); waiting 30s before retry..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 30
+            } else {
+                throw
+            }
         }
     }
-}
 
-write-host "----------------------------------------------------------------------------------------------------------------"
-write-host "--------------Output from cvm-attestation-tools running inside the VM--------------"
-foreach ($entry in $output.Value) {
-    if ($entry.Message) { write-host $entry.Message }
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "--------------Output from cvm-attestation-tools running inside the VM--------------"
+    $attestationText = ""
+    foreach ($entry in $output.Value) {
+        if ($entry.Message) {
+            write-host $entry.Message
+            $attestationText += $entry.Message
+        }
+    }
+
+    # Fail loudly if the in-VM script output clearly contains download/attestation errors.
+    if ($attestationText -match 'Failed to download attest-win\.zip|Failed to download attest-lin\.zip|No zip extractor available|attest\.exe exited with code\s+[1-9]|attest exited with code\s+[1-9]') {
+        write-host "Attestation failed inside the VM. See output above for details." -ForegroundColor Red
+        throw "In-VM attestation failed"
+    }
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "Build and attestation complete." -ForegroundColor Green
 }
-write-host "----------------------------------------------------------------------------------------------------------------"
-write-host "Build and attestation complete." -ForegroundColor Green
 
 
 # Smoketest cleanup - automatically remove all resources if smoketest flag is used

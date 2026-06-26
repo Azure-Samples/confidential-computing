@@ -1,0 +1,99 @@
+{
+  "_schema": "https://github.com/Azure-Samples/confidential-computing/sealed-container/firewall-policy-v1",
+  "_comment_1": "Declarative, vendor-neutral firewall policy. This is the SOURCE OF TRUTH. Build-SealedArtifacts.ps1 substitutes __TRUSTED_SOURCE_CIDR__ with the deployer's /32, hashes the rendered file, bakes the SHA-256 into the CCE policy via the FIREWALL_POLICY_SHA256 env var, and copies the rendered file into the container image at /app/firewall-policy.json. Tampering between build and run is caught by app.py at module load.",
+  "_comment_2": "Enforcement is L7, inside the Flask app, NOT at an NSG. Confidential ACI does not support VNet integration without a NAT Gateway, so the container has a public IP and the ingress rule below is checked in a Flask before_request hook. The egress rules are documentary only: the app only ever talks to IMDS / MAA / AKV / ACR, but that is not enforced in-process. See policies/README.md for the rationale.",
+
+  "version": "1.0.0",
+  "default_action": "deny",
+
+  "ingress": {
+    "_comment": "Inbound rules. Anything not in this list is rejected with HTTP 403 by app.py's before_request hook before any route logic runs.",
+    "rules": [
+      {
+        "name":              "allow-app-https-from-trusted",
+        "priority":          100,
+        "protocol":          "Tcp",
+        "destination_port":  8443,
+        "source":            "__TRUSTED_SOURCE_CIDR__",
+        "description":       "The single application port, enforced at L7 in app.py's before_request hook. The deployer's public IP is substituted at build time (see acr-config.json.trustedSourceCidr). Update this and rebuild to rotate access."
+      },
+      {
+        "name":              "allow-azure-loadbalancer-probe",
+        "priority":          200,
+        "protocol":          "*",
+        "destination_port":  "*",
+        "source":            "AzureLoadBalancer",
+        "description":       "Documentary: the /healthz path is exempt from the L7 firewall check so the ACI platform TCP probe always succeeds."
+      },
+      {
+        "name":              "deny-all-other-inbound",
+        "priority":          4096,
+        "protocol":          "*",
+        "destination_port":  "*",
+        "source":            "*",
+        "action":            "deny",
+        "description":       "Explicit catch-all. Any source IP not in the trusted CIDR gets a 403 from app.py before any route logic runs."
+      }
+    ]
+  },
+
+  "egress": {
+    "_comment": "Outbound rules. The container ONLY needs to reach: (a) Microsoft Azure Attestation, (b) Azure Key Vault, (c) Azure Container Registry (for the initial image pull), (d) IMDS for managed-identity tokens. Everything else is dropped so a compromised process cannot exfiltrate the unsealed plaintext.",
+    "rules": [
+      {
+        "name":              "allow-imds",
+        "priority":          100,
+        "protocol":          "Tcp",
+        "destination":       "169.254.169.254/32",
+        "destination_port":  80,
+        "description":       "Instance Metadata Service — managed-identity token for AKV."
+      },
+      {
+        "name":              "allow-maa",
+        "priority":          110,
+        "protocol":          "Tcp",
+        "destination":       "AzureAttestation",
+        "destination_port":  443,
+        "description":       "Microsoft Azure Attestation /attest/SevSnpVm endpoint."
+      },
+      {
+        "name":              "allow-akv",
+        "priority":          120,
+        "protocol":          "Tcp",
+        "destination":       "AzureKeyVault",
+        "destination_port":  443,
+        "description":       "Azure Key Vault for /keys/<name>/release (SKR)."
+      },
+      {
+        "name":              "allow-acr",
+        "priority":          130,
+        "protocol":          "Tcp",
+        "destination":       "AzureContainerRegistry",
+        "destination_port":  443,
+        "description":       "Initial image pull. After the container is running this is no longer needed; it stays open so restarts can succeed."
+      },
+      {
+        "name":              "allow-azure-platform-dns",
+        "priority":          140,
+        "protocol":          "Udp",
+        "destination":       "168.63.129.16/32",
+        "destination_port":  53,
+        "description":       "Azure-provided DNS resolver — required to resolve the FQDNs of the destinations above."
+      },
+      {
+        "name":              "deny-all-other-outbound",
+        "priority":          4096,
+        "protocol":          "*",
+        "destination":       "*",
+        "destination_port":  "*",
+        "action":            "deny",
+        "description":       "Catch-all egress deny. Blocks data exfiltration to attacker-controlled endpoints."
+      }
+    ]
+  },
+
+  "_chain_of_trust": {
+    "_comment_1": "The SHA-256 of this rendered file is embedded in artifacts/MANIFEST.json under firewall.policy_sha256 AND in the FIREWALL_POLICY_SHA256 env var on the container spec (which is in turn part of the CCE policy, so the platform refuses to start the container if it has been tampered with).",
+    "_comment_2": "app.py reads /app/firewall-policy.json at module load and refuses to start if its SHA-256 does not match FIREWALL_POLICY_SHA256, so the policy a reader can audit here is provably the one in force at runtime."
+  }
+}

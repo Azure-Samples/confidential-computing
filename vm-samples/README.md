@@ -50,9 +50,46 @@ Deploy Confidential Virtual Machines (CVMs) with AMD SEV-SNP or Intel TDX hardwa
 
 ## BuildRandomCVM.ps1
 
-Builds a CVM with **Confidential OS disk encryption bound to a Customer Managed Key** (see [What is Confidential OS disk encryption?](#what-is-confidential-os-disk-encryption-with-cmk) below) and a private VNet (no public IP), and optionally deploys Azure Bastion for remote access. Once the VM is up, the script downloads the latest pre-built `attest` binary from [Azure/cvm-attestation-tools](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the VM, runs it against the matching SNP/TDX config, and streams the attestation JWT and claims back to the caller via `Invoke-AzVMRunCommand` (with a 60s backoff retry loop to absorb the transient 409 Conflict that the run-command extension can return immediately after VM provisioning).
+Builds a CVM with **Confidential OS disk encryption bound to a Customer Managed Key** (see [What is Confidential OS disk encryption?](#what-is-confidential-os-disk-encryption-with-cmk) below) and a private VNet (no public IP). By default, the script attaches a NAT Gateway to the VM subnet so the VM can reach the internet without exposing a public IP, and it optionally deploys Azure Bastion for remote access. If you pass `-NoInternetAccess`, the subnet remains fully isolated and the attestation download step is skipped. Otherwise, the script downloads the latest pre-built `attest` binary from [Azure/cvm-attestation-tools](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the VM, runs it against the matching SNP/TDX config, and streams the attestation JWT and claims back to the caller via `Invoke-AzVMRunCommand` (with a 60s backoff retry loop to absorb the transient 409 Conflict that the run-command extension can return immediately after VM provisioning).
 
 Supported images: Windows Server 2022, Windows Server 2019, Windows 11 Enterprise, Ubuntu 24.04 LTS, and RHEL 9.5 CVM. The script tags the resource group with the GitHub repo URL (auto-detected from git remote) for traceability.
+
+### Prerequisites
+
+Before running `BuildRandomCVM.ps1`, ensure you have the following:
+
+**Environment:**
+- **Azure subscription** with Owner or Contributor role (required to create resources, Key Vaults, and assign RBAC roles)
+- **PowerShell 7.0+** (tested on Windows and macOS with both PowerShell 7.4 and 7.5)
+- **Azure PowerShell module** (Az.Accounts, Az.Compute, Az.KeyVault, Az.Network) — version 12.0 or later. Update with: `Update-Module -Name Az -Force`
+- **Azure CLI** (optional, used for additional queries and Bastion RDP tunneling)
+
+**Permissions & Services:**
+- **Confidential VM Orchestrator service principal** must be registered in your tenant:
+  - The script checks for `bf7b6499-ff71-4aa2-97a4-f372087be7f0` (Microsoft-owned SPN)
+  - If missing, contact your Azure administrator or see the troubleshooting step in the script comments
+- **Azure Key Vault Premium** with HSM support (required for Confidential OS disk encryption with Customer Managed Keys)
+- **Sufficient vCPU quota** in the target region for the chosen VM SKU family (e.g., `standardDCASv5Family` for SEV-SNP, `standardDCESv6Family` for Intel TDX)
+
+**Regional & SKU Requirements:**
+- **Target region must support Confidential VMs:**
+  - **AMD SEV-SNP**: `DCa*`/`ECa*` SKUs available in most regions (e.g., northeurope, eastus, koreacentral)
+  - **Intel TDX**: `DCe*`/`ECe*` SKUs available in subset of regions (e.g., westeurope, westus3, northeurope)
+- **Verify availability** before running (or use `-SkipSkuPreflight` to let ARM validate)
+
+**Authentication:**
+- **Logged into Azure** via `Connect-AzAccount` with the target subscription selected, OR
+- **AZURE_SUBSCRIPTION_ID** environment variable set and authenticated via Azure CLI
+- Run `Set-AzContext -SubscriptionId "<your-sub-id>"` if needed
+
+### Validation workflow (local + CI)
+
+- Install hooks once per clone with `./scripts/Install-PreCommitHook.ps1` from repo root.
+- `pre-commit` performs secret scanning.
+- `pre-push` runs `scripts/validate-cvm.ps1` and blocks push on failures.
+- Run `./scripts/post-validation-comment.ps1` from repo root to execute the 4-way CVM matrix (parallel by default) and post results as a comment on the active PR.
+- Use `-NoPostToPr` with `post-validation-comment.ps1` when you want a local-only run without posting a PR comment.
+- GitHub Actions currently runs secret scan + syntax/parameter checks only; cloud CVM matrix validation is temporarily disabled until service principal secrets are configured.
 
 ### Pre-flight checks (before any resources are created)
 
@@ -94,7 +131,7 @@ Basename is a prefix assigned to all resources created by the script and will be
 The script will generate a random complex password and output it to the terminal once; make sure you copy it if you want to login to the CVM.
 
 ```powershell
-./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-vmsize <VM SIZE SKU>] [-policyFilePath <PATH>] [-DisableBastion]
+./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-vmsize <VM SIZE SKU>] [-policyFilePath <PATH>] [-DisableBastion] [-NoInternetAccess]
 ```
 
 ## Parameters:
@@ -107,6 +144,7 @@ The script will generate a random complex password and output it to the terminal
 - **vmsize**: Optional VM size SKU (defaults to `Standard_DC2as_v5`). Use SEV-SNP SKUs like `Standard_DC4as_v5` or Intel TDX SKUs like `Standard_DC2es_v6` — the script picks the matching attestation config automatically.
 - **policyFilePath**: Optional path to a custom key release policy JSON (defaults to `-UseDefaultCVMPolicy`)
 - **DisableBastion**: Optional switch that skips Azure Bastion creation; the VM will only be reachable via private network connectivity (VPN, ExpressRoute, peering)
+- **NoInternetAccess**: Optional switch that skips NAT Gateway setup and keeps the CVM subnet fully offline; attestation download is skipped
 
 ## OS Type Options:
 - **Windows**: Windows Server 2022 Datacenter (RDP via Bastion)
@@ -115,10 +153,87 @@ The script will generate a random complex password and output it to the terminal
 - **Ubuntu**: Ubuntu 24.04 LTS CVM (SSH via Bastion)
 - **RHEL**: Red Hat Enterprise Linux 9.5 CVM (SSH via Bastion)
 
+## Quickstart
+
+The script auto-detects the isolation type from your VM SKU. Choose **Intel TDX** (newer, available in select regions) or **AMD SEV-SNP** (widely available).
+
+### Intel TDX CVM
+
+Intel TDX SKUs (`DCe*`/`ECe*`) available in: westeurope, westus3, northeurope, and select others.
+
+**Fastest start — Ubuntu 24.04 with Bastion:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "tdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC2es_v6"
+```
+
+**Windows Server 2022 with Intel TDX:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "wtdx" -osType "Windows" -region "westeurope" -vmsize "Standard_DC2es_v6"
+```
+
+**Windows 11 Enterprise with Intel TDX:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "w11tx" -osType "Windows11" -region "westeurope" -vmsize "Standard_DC2es_v6"
+```
+
+**Production-grade: Larger TDX VM (4 vCPU) with custom description:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "ptdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC4es_v6" -description "Production TDX workload"
+```
+
+### AMD SEV-SNP CVM
+
+AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral, australiaeast, and many others.
+
+**Fastest start — Ubuntu 24.04 with Bastion:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "snp" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC2as_v5"
+```
+
+**Windows Server 2022 with AMD SEV-SNP:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "wsnp" -osType "Windows" -region "northeurope" -vmsize "Standard_DC2as_v5"
+```
+
+**Windows 11 Enterprise with AMD SEV-SNP:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "w11sp" -osType "Windows11" -region "northeurope" -vmsize "Standard_DC2as_v5"
+```
+
+**Production-grade: Larger SEV-SNP VM (4 vCPU) with custom description:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "psnp" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC4as_v5" -description "Production SEV-SNP workload"
+```
+
+**AMD SEV-SNP v6 (koreacentral) — Ubuntu:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "snpv6" -osType "Ubuntu" -region "koreacentral" -vmsize "Standard_DC2as_v6"
+```
+
+**AMD SEV-SNP v6 (koreacentral) — Windows Server 2022:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "wv6" -osType "Windows" -region "koreacentral" -vmsize "Standard_DC2as_v6"
+```
+
+**AMD SEV-SNP v6 (koreacentral) — Skip preflight when SKU APIs report false negatives:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "kv6" -osType "Windows" -region "koreacentral" -vmsize "Standard_DC2as_v6" -SkipSkuPreflight
+```
+
+**Advanced: Fully isolated CVM (no outbound internet, no Bastion):**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "isolt" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC2as_v5" -NoInternetAccess -DisableBastion
+```
+
+**Test/Demo: Quick smoketest that auto-cleans up after 10 seconds:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "test" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC2as_v5" -smoketest
+```
+
 ## Example:
 ```powershell
 # Deploy Ubuntu CVM with a larger VM size
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myubuntu" -osType "Ubuntu" -vmsize "Standard_DC4as_v5"
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myubu" -osType "Ubuntu" -vmsize "Standard_DC4as_v5"
 ```
 
 ## Examples:
@@ -127,7 +242,7 @@ The script will generate a random complex password and output it to the terminal
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows"
 
 # Deploy Windows 11 Enterprise CVM
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "mywin11" -osType "Windows11"
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myw11" -osType "Windows11"
 
 # Deploy Ubuntu CVM with description
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Ubuntu" -description "Development testing environment"
@@ -138,11 +253,12 @@ The script will generate a random complex password and output it to the terminal
 # Deploy Windows 11 CVM in a specific region
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "myvm" -osType "Windows11" -region "eastus"
 
+# Deploy a fully isolated CVM with no outbound internet
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "isolt" -osType "Ubuntu" -NoInternetAccess
+
 # Smoketest with Windows 11 for CI/CD pipeline
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "ci" -osType "Windows11" -description "Automated testing pipeline" -smoketest
 ```
-
-## Intel TDX Examples
 
 The script auto-detects the isolation type from the VM SKU and runs the matching attestation flow inside the VM:
 
@@ -157,16 +273,50 @@ Get-AzComputeResourceSku -Location westeurope |
     Select-Object Name, @{N='Restrictions';E={ $_.Restrictions.ReasonCode -join ',' }}
 ```
 
+## AMD SEV-SNP v6 CVMs — Widely Available, Production-Proven
+
+AMD SEV-SNP (Secure Encrypted Virtualization - Secure Nested Paging) v6 provides **memory encryption at the CPU level**, preventing the hypervisor and Azure fabric from reading VM memory. This is the **most widely available Confidential VM option** across Azure regions and has been production-deployed since 2023.
+
+### Key Features
+
+- **Memory Encryption**: All guest VM memory encrypted with per-VM keys that never leave the processor package
+- **Attestation**: Remote attestation proves the VM is running on genuine AMD EPYC hardware with SEV-SNP enabled
+- **Regional Availability**: `DCa*`/`ECa*` SKUs available in **30+ regions** including: northeurope, eastus, westus, southcentralus, koreacentral, australiaeast, ukwest, and others
+- **SKU Families**:
+  - `DCasv5` / `ECasv5`: Single-socket with up to 32 vCPU per VM (e.g., `Standard_DC2as_v5`, `Standard_DC32as_v5`)
+  - `DCadsv5` / `ECadsv5`: Dual-socket with up to 64 vCPU per VM (e.g., `Standard_DC2ads_v5`, `Standard_DC64ads_v5`)
+
+### Verify SEV-SNP v6 Availability in Your Region
+
 ```powershell
-# Deploy Ubuntu 24.04 Intel TDX CVM in West Europe
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "mytdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC2es_v6" -DisableBastion -description "ubuntu tdx attestation"
+# List all SEV-SNP v5 SKUs available in a region
+Get-AzComputeResourceSku -Location northeurope |
+    Where-Object { $_.ResourceType -eq 'virtualMachines' -and $_.Name -match '^Standard_(DC|EC)\d+a' } |
+    Select-Object Name, @{N='Restrictions';E={if($_.Restrictions.Count -eq 0) { 'Available' } else { $_.Restrictions[0].ReasonCode }}} |
+    Sort-Object Name
 
-# Deploy Windows Server 2022 Intel TDX CVM
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "wintdx" -osType "Windows" -region "westeurope" -vmsize "Standard_DC2es_v6"
-
-# Smoketest a TDX deployment
-./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "tdxci" -osType "Ubuntu" -region "westus3" -vmsize "Standard_DC4es_v6" -smoketest
+# Check quota for SEV-SNP family in a region
+Get-AzVMUsage -Location northeurope | 
+    Where-Object { $_.Name.Value -match 'DCASv5|ECASv5|cores' } | 
+    Format-Table Name, CurrentValue, Limit
 ```
+
+### Use Cases & Benefits
+
+| Use Case | Why SEV-SNP v6 | Example |
+|----------|---|---|
+| **Compliance & Data Protection** | Memory encryption + Confidential OS disk encryption with CMK meets strict regulatory requirements (PCI-DSS, HIPAA, SOC 2) | Regulated financial processing, healthcare data analytics |
+| **Multi-Cloud & Hybrid** | Attestation-bound key release ensures keys only unlock on genuine AMD TEE | Key management across on-premises EPYC and Azure CVMs |
+| **High-Performance Computing (HPC)** | Dual-socket SKUs with up to 64 vCPU support memory-intensive workloads with encryption | Molecular simulation, genomics analysis, scientific computing |
+| **Database & Cache Encryption** | Encrypt sensitive data structures in memory without losing performance | Redis, PostgreSQL, MySQL with customer-owned encryption keys |
+| **Mature & Battle-Tested** | Production-deployed across thousands of customer workloads since 2023 | Production SLAs: 99.95% availability with committed uptime |
+
+### Documentation & Resources
+
+- **Official AMD SEV-SNP Overview**: [Microsoft Docs - Confidential VM Overview](https://learn.microsoft.com/azure/confidential-computing/confidential-vm-overview)
+- **Attestation for SEV-SNP**: [Attestation Claims and Report Format](https://learn.microsoft.com/azure/confidential-computing/confidential-vm-overview#attestation)
+- **Hands-On Quickstart**: [Create and attest a Confidential VM (Azure CLI)](https://learn.microsoft.com/azure/confidential-computing/quick-create-confidential-vm-azure-cli)
+- **Advanced Topics**: [SEV-SNP Firmware Reference (AMD)](https://www.amd.com/system/files/TechDocs/SEV-SNP-strengthening-vm-isolation-with-integrity-protection-and-more.pdf), [Azure Confidential Computing Docs Hub](https://aka.ms/accdocs)
 
 The script automatically tags the resource group with:
 - **owner**: Your Azure user principal name
@@ -175,6 +325,7 @@ The script automatically tags the resource group with:
 - **GitRepo**: The GitHub repository URL where the script was cloned from
 - **description**: Optional description if provided
 - **smoketest**: Set to "true" when running in smoketest mode
+- **NoInternetAccess**: Set to "true" when outbound internet egress is intentionally blocked
 
 ## Smoketest Mode:
 The `-smoketest` parameter is perfect for:
@@ -267,6 +418,53 @@ New-AzResourceGroupDeployment -Name DeployLocalTemplate -ResourceGroupName "<YOU
 
 A successful run prints the JWT plus parsed claims and ends with `Attested Platform Successfully!!` and `x-ms-compliance-status: azure-compliant-cvm`.
 
+### Validation Matrix (June 2026)
+
+The following end-to-end deployments were validated with successful in-VM attestation:
+
+| Isolation | OS | VM SKU | Region | Result | Key claims |
+|---|---|---|---|---|---|
+| AMD SEV-SNP v6 | Windows Server 2022 | `Standard_DC2as_v6` | `koreacentral` | ✅ Deploy + attest pass | `x-ms-attestation-type=sevsnpvm`, `x-ms-compliance-status=azure-compliant-cvm` |
+| AMD SEV-SNP v6 | Ubuntu 24.04 | `Standard_DC2as_v6` | `koreacentral` | ✅ Deploy + attest pass | `ATT_EXIT=0`, `ATTEST_TYPE=sevsnpvm`, `COMPLIANCE=azure-compliant-cvm`, `SECURE_BOOT=True`, `TPM_ENABLED=True` |
+| Intel TDX v6 | Windows Server 2022 | `Standard_DC2es_v6` | `westeurope` | ✅ Deploy + attest pass | `ATTEST_TYPE=tdxvm`, `COMPLIANCE=azure-compliant-cvm`, `SECURE_BOOT=True`, `TPM_ENABLED=True` |
+| Intel TDX v6 | Ubuntu 24.04 | `Standard_DC2es_v6` | `westeurope` | ✅ Deploy + attest pass | `ATT_EXIT=0`, `ATTEST_TYPE=tdxvm`, `COMPLIANCE=azure-compliant-cvm`, `SECURE_BOOT=True`, `TPM_ENABLED=True` |
+
+### Redacted Attestation Output Example
+
+Sample parsed output from a successful in-VM attestation run (sensitive and unique values removed):
+
+```text
+ATT_EXIT=0
+ATTEST_TYPE=sevsnpvm
+COMPLIANCE=azure-compliant-cvm
+SECURE_BOOT=True
+TPM_ENABLED=True
+
+JWT header:
+{
+  "alg": "RS256",
+  "typ": "JWT",
+  "kid": "<redacted-key-id>"
+}
+
+JWT payload (selected claims):
+{
+  "iss": "https://<redacted-attestation-endpoint>/",
+  "x-ms-attestation-type": "sevsnpvm",
+  "x-ms-compliance-status": "azure-compliant-cvm",
+  "x-ms-runtime": {
+    "vm-configuration": {
+      "secure-boot": true,
+      "tpm-enabled": true
+    }
+  },
+  "iat": <redacted>,
+  "exp": <redacted>
+}
+```
+
+For Intel TDX runs, `x-ms-attestation-type` is expected to be `tdxvm`.
+
 ## Running attestation manually against an existing CVM
 
 From an authenticated PowerShell session you can re-run attestation against an already-deployed CVM by reusing the same payload `BuildRandomCVM.ps1` injects. Replace `<RG>` and `<VM>` with your values, and switch the config filename for the isolation type of the target VM.
@@ -277,10 +475,21 @@ Linux (Ubuntu / RHEL) target:
 $attest = @'
 #!/bin/bash
 set -e
-command -v unzip >/dev/null || (apt-get update -y && apt-get install -y unzip) >/dev/null 2>&1 || (dnf install -y unzip || yum install -y unzip) >/dev/null 2>&1
 W=$(mktemp -d); cd "$W"
 curl -fsSL -o a.zip https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-lin.zip
-unzip -q a.zip
+if command -v unzip >/dev/null 2>&1; then
+  unzip -q a.zip
+elif command -v python3 >/dev/null 2>&1; then
+  python3 - <<'PY'
+import zipfile
+zipfile.ZipFile('a.zip').extractall('.')
+PY
+elif command -v bsdtar >/dev/null 2>&1; then
+  bsdtar -xf a.zip
+else
+  (apt-get update -y && apt-get install -y unzip) >/dev/null 2>&1 || (dnf install -y unzip || yum install -y unzip) >/dev/null 2>&1
+  unzip -q a.zip
+fi
 chmod +x attest 2>/dev/null || true
 ./attest --c config_snp.json   # use config_tdx.json for Intel TDX SKUs
 cd /; rm -rf "$W"

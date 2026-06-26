@@ -1,0 +1,277 @@
+{# Single self-contained page. No external JS/CSS, no third-party CDNs —
+   the CCE policy denies egress to anything other than MAA + AKV. #}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ app_name }} — Sealed Confidential Container</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root {
+      --fg:#0f172a; --muted:#475569; --subtle:#64748b;
+      --bg:#f8fafc; --card:#ffffff; --border:#e2e8f0; --th:#f1f5f9;
+      --accent:#0ea5e9; --accent-h:#0284c7; --good:#16a34a; --bad:#dc2626;
+      --ok-bg:#dcfce7; --bad-bg:#fee2e2; --err-bg:#fef2f2; --err-border:#fecaca; --err-fg:#7f1d1d;
+      --link:#0369a1; --code:#0f172a; --header-from:#0c4a6e; --header-to:#0ea5e9;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    html[data-theme="dark"] {
+      --fg:#e2e8f0; --muted:#94a3b8; --subtle:#94a3b8;
+      --bg:#020617; --card:#0f172a; --border:#1e293b; --th:#1e293b;
+      --accent:#38bdf8; --accent-h:#0ea5e9; --good:#4ade80; --bad:#f87171;
+      --ok-bg:#064e3b; --bad-bg:#7f1d1d; --err-bg:#3f1d1d; --err-border:#7f1d1d; --err-fg:#fecaca;
+      --link:#7dd3fc; --code:#e2e8f0; --header-from:#020617; --header-to:#0c4a6e;
+    }
+    @media (prefers-color-scheme: dark) {
+      html:not([data-theme]) {
+        --fg:#e2e8f0; --muted:#94a3b8; --bg:#020617; --card:#0f172a;
+        --border:#1e293b; --th:#1e293b; --accent:#38bdf8; --accent-h:#0ea5e9;
+        --good:#4ade80; --bad:#f87171; --ok-bg:#064e3b; --bad-bg:#7f1d1d;
+        --err-bg:#3f1d1d; --err-border:#7f1d1d; --err-fg:#fecaca; --link:#7dd3fc;
+        --code:#e2e8f0; --header-from:#020617; --header-to:#0c4a6e;
+      }
+    }
+    * { box-sizing:border-box; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--fg); background:var(--bg); margin:0; }
+    a { color:var(--link); }
+    header { background:linear-gradient(90deg,var(--header-from),var(--header-to)); color:white; padding:24px; position:relative; }
+    header h1 { margin:0; font-size:1.5rem; }
+    header p { margin:.4rem 0 0; opacity:.9; max-width:1100px; }
+    .theme-toggle { position:absolute; top:20px; right:24px; background:rgba(255,255,255,.15); color:white; border:1px solid rgba(255,255,255,.3); border-radius:6px; padding:6px 12px; font-size:.85rem; cursor:pointer; }
+    main { max-width: 1280px; margin: 24px auto; padding: 0 24px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:20px 24px; margin-bottom:20px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    @media (max-width: 900px) { .row { grid-template-columns:1fr; } }
+    h2 { margin-top:0; }
+    button.attest { background:var(--accent); color:white; border:none; border-radius:6px; padding:12px 24px; font-size:1rem; cursor:pointer; }
+    button.attest:hover { background:var(--accent-h); }
+    button.attest:disabled { background:#94a3b8; cursor:not-allowed; }
+    .meta { font-family: var(--mono); font-size:.85rem; color:var(--muted); word-break:break-all; }
+    .pill { display:inline-block; padding:2px 10px; border-radius:9999px; font-size:.78rem; font-weight:600; }
+    .pill.ok  { background:var(--ok-bg);  color:var(--good); }
+    .pill.bad { background:var(--bad-bg); color:var(--bad);  }
+    table { width:100%; border-collapse:collapse; font-size:.92rem; table-layout:fixed; }
+    col.col-k { width:22%; } col.col-v { width:38%; } col.col-e { width:40%; }
+    th, td { text-align:left; padding:8px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+    th { background:var(--th); font-weight:600; }
+    td.k { font-family:var(--mono); }
+    td.v { font-family:var(--mono); font-size:.85rem; word-break:break-all; }
+    td.v pre { margin:0; white-space:pre-wrap; word-break:break-all; max-height:300px; overflow:auto; font-size:.78rem; }
+    details > summary { cursor:pointer; font-weight:600; padding:6px 0; }
+    details pre { background:var(--th); padding:10px; border-radius:6px; overflow:auto; max-height:300px; }
+    .error { background:var(--err-bg); border:1px solid var(--err-border); color:var(--err-fg); padding:14px; border-radius:6px; }
+    .ts { color:var(--subtle); font-size:.78rem; }
+    code { font-family:var(--mono); font-size:.85rem; background:var(--th); padding:1px 4px; border-radius:3px; }
+    code.token { display:block; padding:10px; max-height:200px; overflow:auto; font-size:.75rem; }
+    .section-sealed { background:#f0f9ff; border-left:4px solid #0284c7; padding:16px; margin-top:16px; border-radius:6px; }
+    .section-files { background:#fef3c7; border-left:4px solid #d97706; padding:16px; margin-top:16px; border-radius:6px; }
+    .section-secret { background:#f0fdf4; border-left:4px solid #16a34a; padding:16px; margin-top:16px; border-radius:6px; }
+    html[data-theme="dark"] .section-sealed { background:#0c2540; border-left-color:#38bdf8; }
+    html[data-theme="dark"] .section-files { background:#2d2410; border-left-color:#fbbf24; }
+    html[data-theme="dark"] .section-secret { background:#0f2818; border-left-color:#4ade80; }
+    ul.locks { margin:0; padding-left:1.2rem; }
+    ul.locks li { margin:.2rem 0; }
+    .spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.7s linear infinite; vertical-align:-2px; margin-right:6px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <button class="theme-toggle" type="button" onclick="toggleTheme()">Toggle theme</button>
+    <h1>{{ app_name }} — Sealed Confidential Container</h1>
+    <p>
+      Hand-authored CCE policy &middot; signed container image &middot; SBOM + vuln-scan attestations &middot;
+      in-memory file system unwrapped via Secure Key Release. MAA: <code>{{ maa_endpoint }}</code>
+    </p>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>What is locked down inside this container?</h2>
+      <ul class="locks">
+        <li><strong>No interactive access.</strong> The CCE policy denies <code>exec_in_container</code>, <code>exec_external</code>, signals, stdio access, runtime logging, and stack dumping. <code>az container exec</code> will fail.</li>
+        <li><strong>Read-only root filesystem.</strong> The only writable mount is an in-memory tmpfs at <code>/run/sealed</code>.</li>
+        <li><strong>Signed image, pinned digest, single layer.</strong> The CCE policy is bound to one immutable image digest; the SKR release policy is in turn bound to the SHA-256 of the CCE policy via the SEV-SNP <code>HOST_DATA</code> field.</li>
+        <li><strong>Sealed data bundle.</strong> Application data ships encrypted inside the image (<code>artifacts/sealed-data.enc</code>); the AES-256-GCM key is only released by Azure Key Vault after MAA verifies this container is running on genuine AMD SEV-SNP hardware <em>with the expected CCE policy</em>.</li>
+        <li><strong>Non-root.</strong> Runs as <code>sealed:sealed</code> (uid 10001) with <code>no_new_privileges</code>.</li>
+      </ul>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <h2>Hardware attestation</h2>
+        <p>Generate a fresh AMD SEV-SNP report against <code>/dev/sev-guest</code>, post it to MAA, and inspect the returned JWT.</p>
+        <p>
+          <button id="btn-attest" class="attest" type="button" onclick="runAttest()">Run attestation</button>
+          <span id="status-attest" class="meta" style="margin-left:12px;"></span>
+        </p>
+        <p class="meta">Result will show below.</p>
+      </div>
+
+      <div class="card section-sealed">
+        <h2>Sealed data status</h2>
+        <p>Metadata only — the unsealed bytes never leave the tmpfs.</p>
+        <p>
+          <button id="btn-sealed" class="attest" type="button" onclick="loadSealed()">Refresh</button>
+          <span id="status-sealed" class="meta" style="margin-left:12px;"></span>
+        </p>
+        <div id="sealed-result"></div>
+      </div>
+    </div>
+
+    <div id="attest-result"></div>
+  </main>
+
+<script>
+function applyTheme(t){
+  if (t==='dark' || t==='light') document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+}
+function toggleTheme(){
+  const cur = document.documentElement.getAttribute('data-theme');
+  const sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const eff = cur || (sysDark ? 'dark' : 'light');
+  const next = eff==='dark' ? 'light' : 'dark';
+  try { localStorage.setItem('theme', next); } catch(e) {}
+  applyTheme(next);
+}
+(function(){
+  try { applyTheme(localStorage.getItem('theme')); } catch(e) {}
+})();
+
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtVal(v){
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') return '<pre>'+esc(JSON.stringify(v, null, 2))+'</pre>';
+  return esc(String(v));
+}
+
+let attestationCompleted = false;
+
+async function runAttest(){
+  const btn = document.getElementById('btn-attest');
+  const status = document.getElementById('status-attest');
+  const out = document.getElementById('attest-result');
+  btn.disabled = true;
+  status.innerHTML = '<span class="spinner"></span>Asking SEV-SNP and MAA…';
+  out.innerHTML = '';
+  try {
+    const r = await fetch('/api/attest', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    const data = await r.json();
+    if (!data.ok) {
+      out.innerHTML = '<div class="card"><div class="error"><strong>Attestation failed.</strong><br>'+esc(data.error||'')+'<details><summary>Trace</summary><pre>'+esc(data.trace||'')+'</pre></details></div></div>';
+      return;
+    }
+    attestationCompleted = true;
+    renderAttest(data);
+    await loadSealed();
+  } catch (e) {
+    out.innerHTML = '<div class="card"><div class="error">'+esc(e.message)+'</div></div>';
+  } finally {
+    btn.disabled = false;
+    status.textContent = '';
+  }
+}
+
+function renderAttest(data){
+  const compliance = (data.payload['x-ms-compliance-status']||'').toString();
+  const ok = compliance.includes('compliant');
+  const pill = '<span class="pill '+(ok?'ok':'bad')+'">'+esc(compliance||'unknown')+'</span>';
+  const ttype = (data.payload['x-ms-attestation-type']||'').toString();
+  const rows = (data.claims||[]).map(c => {
+    const ts = c.timestamp ? '<div class="ts">'+esc(c.timestamp)+'</div>' : '';
+    return '<tr><td class="k">'+esc(c.key)+'</td><td class="v">'+fmtVal(c.value)+ts+'</td><td>'+esc(c.explanation)+'</td></tr>';
+  }).join('');
+  const hw = data.hardware_evidence || {};
+  const s  = hw.snp_summary || {};
+  const hwRows = [
+    ['MAA endpoint', hw.maa_endpoint],
+    ['UVM context source', hw.uvm_source],
+    ['SNP version / VMPL', s.version+' / VMPL '+s.vmpl],
+    ['Launch measurement', s.measurement],
+    ['Host data (CCE policy SHA-256)', s.host_data],
+    ['Chip ID', s.chip_id],
+    ['REPORT_DATA', s.report_data],
+    ['Runtime data', JSON.stringify(hw.runtime_data)],
+    ['SHA-256(runtime data)', hw.runtime_data_sha256],
+  ].map(([k,v]) => '<tr><td class="k">'+esc(k)+'</td><td class="v">'+fmtVal(v)+'</td></tr>').join('');
+
+  document.getElementById('attest-result').innerHTML =
+    '<div class="card"><h2>Attestation result</h2>'+
+      '<p class="meta">MAA: '+esc(data.endpoint)+' &middot; isolation: '+esc(data.isolation_type)+' &middot; nonce: '+esc(data.nonce)+'</p>'+
+      '<p>TEE: <strong>'+esc(ttype||'?')+'</strong> &nbsp; Verdict: '+pill+'</p>'+
+    '</div>'+
+    '<div class="card"><h3 style="margin-top:0">MAA token claims</h3>'+
+      '<table><colgroup><col class="col-k"><col class="col-v"><col class="col-e"></colgroup>'+
+      '<thead><tr><th>Claim</th><th>Value</th><th>Meaning</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '</div>'+
+    '<div class="card"><h3 style="margin-top:0">Hardware evidence</h3>'+
+      '<table><tbody>'+hwRows+'</tbody></table>'+
+    '</div>'+
+    '<div class="card">'+
+      '<details><summary>JWT header</summary><pre>'+esc(JSON.stringify(data.header,null,2))+'</pre></details>'+
+      '<details><summary>Raw token</summary><code class="token">'+esc(data.token)+'</code></details>'+
+      '<details><summary>Raw SNP report (hex)</summary><code class="token">'+esc(hw.snp_report_hex)+'</code></details>'+
+    '</div>';
+}
+
+async function loadSealed(){
+  const btn = document.getElementById('btn-sealed');
+  const status = document.getElementById('status-sealed');
+  const out = document.getElementById('sealed-result');
+  btn.disabled = true;
+  status.innerHTML = '<span class="spinner"></span>Reading manifest…';
+  try {
+    const r = await fetch('/api/sealed');
+    const data = await r.json();
+    if (!data.unsealed) {
+      out.innerHTML = '<div class="error"><strong>Bundle is still sealed.</strong><br>'+esc(data.reason||'')+'</div>';
+      return;
+    }
+    const rows = [
+      ['Sealed at',          data.sealed_at],
+      ['Unsealed at (inside TEE)', data.unsealed_at],
+      ['AKV endpoint',       data.akv_endpoint],
+      ['Key',                data.key_name+' @ '+data.key_version],
+      ['Wrap algorithm',     data.wrap_algorithm],
+      ['Ciphertext SHA-256', data.ciphertext_sha256],
+      ['Plaintext SHA-256',  data.plaintext_sha256],
+      ['Release policy SHA-256', data.release_policy_sha256],
+    ].map(([k,v]) => '<tr><td class="k">'+esc(k)+'</td><td class="v">'+esc(v||'')+'</td></tr>').join('');
+    const files = (data.files||[]).map(f =>
+      '<tr><td class="k">'+esc(f.name||'')+'</td><td class="v">'+esc((f.size||0)+' bytes')+'</td><td class="v">'+esc(f.sha256||f.error||'')+'</td></tr>'
+    ).join('');
+
+    let secretSection = '';
+    if (attestationCompleted && data.welcome_secret) {
+      const ws = data.welcome_secret;
+      const enc = ws.encrypted_form ? '<pre>'+esc(JSON.stringify(ws.encrypted_form, null, 2))+'</pre>' : '<em>n/a</em>';
+      const dec = ws.ok ? esc(ws.plaintext||'') : ('<span class="error">'+esc(ws.error||'Unable to decrypt')+'</span>');
+      secretSection =
+        '<h4 style="margin-top:0">Secret payload decrypted after attestation</h4>'+
+        '<table><tbody>'+
+          '<tr><td class="k">Encrypted form (welcome.txt)</td><td class="v">'+enc+'</td></tr>'+
+          '<tr><td class="k">Key used to decrypt</td><td class="v">'+esc(ws.decryption_key_hex||'')+'</td></tr>'+
+          '<tr><td class="k">Key release policy SHA-256</td><td class="v">'+esc(ws.release_policy_sha256||data.release_policy_sha256||'')+'</td></tr>'+
+          '<tr><td class="k">Decrypted plaintext</td><td class="v">'+dec+'</td></tr>'+
+        '</tbody></table>';
+    }
+
+    out.innerHTML =
+      '<div class="section-sealed"><table style="margin-top:0"><tbody>'+rows+'</tbody></table></div>'+
+      '<div class="section-files"><h4 style="margin-top:0">Decrypted files (metadata only)</h4>'+
+      '<table><thead><tr><th>Name</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>'+files+'</tbody></table></div>'+
+      (secretSection ? '<div class="section-secret">'+secretSection+'</div>' : '');
+  } catch (e) {
+    out.innerHTML = '<div class="error">'+esc(e.message)+'</div>';
+  } finally {
+    btn.disabled = false;
+    status.textContent = '';
+  }
+}
+
+// Auto-load the sealed status on first paint.
+loadSealed();
+</script>
+</body>
+</html>
