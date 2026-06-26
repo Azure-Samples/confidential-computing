@@ -489,9 +489,35 @@ $VirtualMachine = Set-AzVMBootDiagnostic -VM $VirtualMachine -disable #disable b
 
 try {
     New-AzVM -ResourceGroupName $resgrp -Location $region -Vm $VirtualMachine -ErrorAction Stop
-    $vm = Get-AzVm -ResourceGroupName $resgrp -Name $vmname -ErrorAction Stop
 } catch {
     throw "VM deployment failed for '$vmname' in '$region': $($_.Exception.Message)"
+}
+
+# ARM can briefly report the VM as missing or not yet running immediately after creation.
+# Wait for the VM resource to become visible and the guest to reach a running state before
+# proceeding to Bastion setup or in-guest attestation.
+$vm = $null
+$vmReady = $false
+for ($vmAttempt = 1; $vmAttempt -le 20; $vmAttempt++) {
+    try {
+        $vm = Get-AzVm -ResourceGroupName $resgrp -Name $vmname -Status -ErrorAction Stop
+        $powerState = $vm.Statuses | Where-Object { $_.Code -like 'PowerState/*' } | Select-Object -First 1
+        if ($powerState -and $powerState.DisplayStatus -eq 'VM running') {
+            $vmReady = $true
+            break
+        }
+    } catch {
+        # Resource can lag briefly behind the successful create response.
+    }
+
+    if ($vmAttempt -lt 20) {
+        write-host "Waiting for VM '$vmname' to reach running state ($vmAttempt/20)..." -ForegroundColor DarkGray
+        Start-Sleep -Seconds 15
+    }
+}
+
+if (-not $vmReady) {
+    throw "VM '$vmname' was created but did not reach 'VM running' state in the expected time window."
 }
 
 # Create the Bastion to allow accessing the VM via the Azure portal (unless disabled)
@@ -783,6 +809,9 @@ Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
             if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*')) {
                 write-host "Run-command extension busy (409); waiting 60s before retry..." -ForegroundColor Yellow
                 Start-Sleep -Seconds 60
+            } elseif ($attempt -lt $maxAttempts -and ($msg -like '*ResourceNotFound*' -or $msg -like '*was not found*')) {
+                write-host "VM/run-command endpoint not yet visible (404); waiting 30s before retry..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 30
             } else {
                 throw
             }
