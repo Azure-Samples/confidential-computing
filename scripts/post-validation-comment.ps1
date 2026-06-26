@@ -4,7 +4,8 @@ Captures CVM 4-way validation output and optionally posts it as a GitHub PR comm
 
 .DESCRIPTION
 Runs the 4-way CVM validation matrix and captures results to a local file.
-Use -PostToPr to explicitly post the result as a pull request comment.
+Posts the result as a pull request comment by default.
+Use -NoPostToPr to skip pull request comment posting.
 
 .PARAMETER subsID
 Azure Subscription ID for deployments.
@@ -20,7 +21,7 @@ param(
     [string]$subsID = "68432aaa-6eba-435c-bc7c-1d998d835e80",
     [string]$OutputFile = "./cvm-validation-results.txt",
     [switch]$Sequential,
-    [switch]$PostToPr
+    [switch]$NoPostToPr
 )
 
 # Ensure we're in the vm-samples directory
@@ -195,7 +196,7 @@ $outputLines += ""
 $outputLines | Out-File -FilePath $OutputFile -Encoding UTF8
 Write-Host "Validation output saved to: $OutputFile" -ForegroundColor Yellow
 
-if ($PostToPr) {
+if (-not $NoPostToPr) {
     try {
         # Check if GitHub CLI is available
         & gh --version 2>$null | Out-Null
@@ -232,7 +233,7 @@ if ($PostToPr) {
         Write-Host "Output saved to: $OutputFile" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "PR comment posting is disabled. Use -PostToPr to publish this result." -ForegroundColor DarkYellow
+    Write-Host "PR comment posting skipped because -NoPostToPr was provided." -ForegroundColor DarkYellow
 }
 
 Write-Host ""
