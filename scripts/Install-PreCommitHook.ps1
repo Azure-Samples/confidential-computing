@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Installs the pre-commit secret-scanning hook for this repository.
+    Installs local git hooks for this repository.
 
 .DESCRIPTION
-    Copies the PowerShell pre-commit hook into .git/hooks/ and creates
-    a shell wrapper so git can invoke it on any platform.
+    Copies the PowerShell pre-commit and pre-push hooks into .git/hooks/
+    and creates shell wrappers so git can invoke them on any platform.
 
 .EXAMPLE
     .\scripts\Install-PreCommitHook.ps1
@@ -17,19 +17,27 @@ if (-not $repoRoot) {
 }
 
 $hooksDir = Join-Path $repoRoot ".git" "hooks"
-$sourceScript = Join-Path $repoRoot "scripts" "pre-commit.ps1"
-$targetHook = Join-Path $hooksDir "pre-commit"
+$sourcePreCommitScript = Join-Path $repoRoot "scripts" "pre-commit.ps1"
+$sourcePrePushScript = Join-Path $repoRoot "scripts" "pre-push.ps1"
+$targetPreCommitHook = Join-Path $hooksDir "pre-commit"
+$targetPrePushHook = Join-Path $hooksDir "pre-push"
 
-if (-not (Test-Path $sourceScript)) {
-    Write-Host "ERROR: Source script not found at: $sourceScript" -ForegroundColor Red
+if (-not (Test-Path $sourcePreCommitScript)) {
+    Write-Host "ERROR: Source script not found at: $sourcePreCommitScript" -ForegroundColor Red
     exit 1
 }
 
-# Copy the PowerShell script into .git/hooks/
-Copy-Item $sourceScript (Join-Path $hooksDir "pre-commit.ps1") -Force
+if (-not (Test-Path $sourcePrePushScript)) {
+    Write-Host "ERROR: Source script not found at: $sourcePrePushScript" -ForegroundColor Red
+    exit 1
+}
 
-# Create a shell wrapper that calls PowerShell (works on Windows Git Bash and *nix)
-$hookContent = @'
+# Copy the PowerShell scripts into .git/hooks/
+Copy-Item $sourcePreCommitScript (Join-Path $hooksDir "pre-commit.ps1") -Force
+Copy-Item $sourcePrePushScript (Join-Path $hooksDir "pre-push.ps1") -Force
+
+# Create shell wrappers that call PowerShell (works on Windows Git Bash and *nix)
+$preCommitHookContent = @'
 #!/bin/sh
 # Auto-generated wrapper - calls the PowerShell pre-commit hook
 # To update, re-run: .\scripts\Install-PreCommitHook.ps1
@@ -52,17 +60,34 @@ else
 fi
 '@
 
-Set-Content -Path $targetHook -Value $hookContent -Encoding UTF8 -NoNewline
+$prePushHookContent = @'
+#!/bin/sh
+# Auto-generated wrapper - calls the PowerShell pre-push hook
+# To update, re-run: .\scripts\Install-PreCommitHook.ps1
+
+# Try pwsh (PowerShell 7+) first, fall back to powershell
+if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "$(dirname "$0")/pre-push.ps1"
+elif command -v powershell >/dev/null 2>&1; then
+    powershell -NoProfile -ExecutionPolicy Bypass -File "$(dirname "$0")/pre-push.ps1"
+else
+    echo "ERROR: PowerShell not found. Blocking push."
+    exit 1
+fi
+'@
+
+Set-Content -Path $targetPreCommitHook -Value $preCommitHookContent -Encoding UTF8 -NoNewline
+Set-Content -Path $targetPrePushHook -Value $prePushHookContent -Encoding UTF8 -NoNewline
 
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host " Pre-commit hook installed successfully!" -ForegroundColor Green
+Write-Host " Git hooks installed successfully!" -ForegroundColor Green
 Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Hook location : $targetHook" -ForegroundColor Gray
-Write-Host "  Script source : $sourceScript" -ForegroundColor Gray
+Write-Host "  pre-commit hook: $targetPreCommitHook" -ForegroundColor Gray
+Write-Host "  pre-push hook  : $targetPrePushHook" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  The hook will scan every commit for:" -ForegroundColor White
+Write-Host "  pre-commit scans every commit for:" -ForegroundColor White
 Write-Host "    • Azure subscription IDs in resource paths"
 Write-Host "    • Storage account keys & connection strings"
 Write-Host "    • SAS tokens, client secrets, API keys"
@@ -73,5 +98,9 @@ Write-Host "    • Specific Key Vault & ACR endpoint names"
 Write-Host "    • Database connection strings"
 Write-Host "    • Certificate/key/env files"
 Write-Host ""
-Write-Host "  To bypass in emergencies: git commit --no-verify" -ForegroundColor Yellow
+Write-Host "  pre-push runs: .\scripts\validate-cvm.ps1" -ForegroundColor White
+Write-Host ""
+Write-Host "  Emergency bypass:" -ForegroundColor Yellow
+Write-Host "    git commit --no-verify"
+Write-Host "    git push --no-verify"
 Write-Host ""

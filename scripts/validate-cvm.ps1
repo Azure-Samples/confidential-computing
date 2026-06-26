@@ -50,6 +50,7 @@ $psScripts = @(
     "vm-samples/BuildRandomCVM.ps1"
     "vm-samples/BuildRandomSQLCVM.ps1"
     "scripts/pre-commit.ps1"
+    "scripts/pre-push.ps1"
     "scripts/validate-cvm.ps1"
 )
 

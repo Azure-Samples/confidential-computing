@@ -45,7 +45,7 @@ When you create or update a pull request, GitHub Actions automatically runs:
    - Auto-cleans up test resources
    - Blocks merge if any test fails
 
-## Pre-Commit Hook (Local)
+## Local Git Hooks (One-Time Setup)
 
 To automatically run secret scanning on every commit:
 
@@ -53,7 +53,13 @@ To automatically run secret scanning on every commit:
 .\scripts\Install-PreCommitHook.ps1
 ```
 
-This installs a git hook that runs before each commit. Use `git commit --no-verify` to bypass in emergencies.
+This installs both local hooks:
+- `pre-commit` → runs `scripts/pre-commit.ps1` (secret/credential scan)
+- `pre-push` → runs `scripts/validate-cvm.ps1` (lightweight CVM validation)
+
+Emergency bypass options:
+- `git commit --no-verify`
+- `git push --no-verify`
 
 ## GitHub Secrets Setup
 
