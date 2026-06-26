@@ -409,6 +409,53 @@ New-AzResourceGroupDeployment -Name DeployLocalTemplate -ResourceGroupName "<YOU
 
 A successful run prints the JWT plus parsed claims and ends with `Attested Platform Successfully!!` and `x-ms-compliance-status: azure-compliant-cvm`.
 
+### Validation Matrix (June 2026)
+
+The following end-to-end deployments were validated with successful in-VM attestation:
+
+| Isolation | OS | VM SKU | Region | Result | Key claims |
+|---|---|---|---|---|---|
+| AMD SEV-SNP v6 | Windows Server 2022 | `Standard_DC2as_v6` | `koreacentral` | ✅ Deploy + attest pass | `x-ms-attestation-type=sevsnpvm`, `x-ms-compliance-status=azure-compliant-cvm` |
+| AMD SEV-SNP v6 | Ubuntu 24.04 | `Standard_DC2as_v6` | `koreacentral` | ✅ Deploy + attest pass | `ATT_EXIT=0`, `ATTEST_TYPE=sevsnpvm`, `COMPLIANCE=azure-compliant-cvm`, `SECURE_BOOT=True`, `TPM_ENABLED=True` |
+| Intel TDX v6 | Windows Server 2022 | `Standard_DC2es_v6` | `westeurope` | ✅ Deploy + attest pass | `ATTEST_TYPE=tdxvm`, `COMPLIANCE=azure-compliant-cvm`, `SECURE_BOOT=True`, `TPM_ENABLED=True` |
+| Intel TDX v6 | Ubuntu 24.04 | `Standard_DC2es_v6` | `westeurope` | ✅ Deploy + attest pass | `ATT_EXIT=0`, `ATTEST_TYPE=tdxvm`, `COMPLIANCE=azure-compliant-cvm`, `SECURE_BOOT=True`, `TPM_ENABLED=True` |
+
+### Redacted Attestation Output Example
+
+Sample parsed output from a successful in-VM attestation run (sensitive and unique values removed):
+
+```text
+ATT_EXIT=0
+ATTEST_TYPE=sevsnpvm
+COMPLIANCE=azure-compliant-cvm
+SECURE_BOOT=True
+TPM_ENABLED=True
+
+JWT header:
+{
+  "alg": "RS256",
+  "typ": "JWT",
+  "kid": "<redacted-key-id>"
+}
+
+JWT payload (selected claims):
+{
+  "iss": "https://<redacted-attestation-endpoint>/",
+  "x-ms-attestation-type": "sevsnpvm",
+  "x-ms-compliance-status": "azure-compliant-cvm",
+  "x-ms-runtime": {
+    "vm-configuration": {
+      "secure-boot": true,
+      "tpm-enabled": true
+    }
+  },
+  "iat": <redacted>,
+  "exp": <redacted>
+}
+```
+
+For Intel TDX runs, `x-ms-attestation-type` is expected to be `tdxvm`.
+
 ## Running attestation manually against an existing CVM
 
 From an authenticated PowerShell session you can re-run attestation against an already-deployed CVM by reusing the same payload `BuildRandomCVM.ps1` injects. Replace `<RG>` and `<VM>` with your values, and switch the config filename for the isolation type of the target VM.
@@ -419,10 +466,21 @@ Linux (Ubuntu / RHEL) target:
 $attest = @'
 #!/bin/bash
 set -e
-command -v unzip >/dev/null || (apt-get update -y && apt-get install -y unzip) >/dev/null 2>&1 || (dnf install -y unzip || yum install -y unzip) >/dev/null 2>&1
 W=$(mktemp -d); cd "$W"
 curl -fsSL -o a.zip https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-lin.zip
-unzip -q a.zip
+if command -v unzip >/dev/null 2>&1; then
+  unzip -q a.zip
+elif command -v python3 >/dev/null 2>&1; then
+  python3 - <<'PY'
+import zipfile
+zipfile.ZipFile('a.zip').extractall('.')
+PY
+elif command -v bsdtar >/dev/null 2>&1; then
+  bsdtar -xf a.zip
+else
+  (apt-get update -y && apt-get install -y unzip) >/dev/null 2>&1 || (dnf install -y unzip || yum install -y unzip) >/dev/null 2>&1
+  unzip -q a.zip
+fi
 chmod +x attest 2>/dev/null || true
 ./attest --c config_snp.json   # use config_tdx.json for Intel TDX SKUs
 cd /; rm -rf "$W"

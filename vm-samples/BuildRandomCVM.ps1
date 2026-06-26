@@ -564,9 +564,13 @@ else {
 #!/bin/bash
 set -e
 export DEBIAN_FRONTEND=noninteractive
-if ! command -v unzip >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
-    (apt-get update -y && apt-get install -y unzip jq) >/dev/null 2>&1 || \
-        (dnf install -y unzip jq || yum install -y unzip jq) >/dev/null 2>&1
+if ! command -v jq >/dev/null 2>&1; then
+    (apt-get update -y && apt-get install -y jq) >/dev/null 2>&1 || \
+        (dnf install -y jq || yum install -y jq) >/dev/null 2>&1
+fi
+if ! command -v unzip >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1 && ! command -v bsdtar >/dev/null 2>&1; then
+    (apt-get update -y && apt-get install -y unzip) >/dev/null 2>&1 || \
+        (dnf install -y unzip || yum install -y unzip) >/dev/null 2>&1
 fi
 WORKDIR=`$(mktemp -d)
 cd "`$WORKDIR"
@@ -605,12 +609,19 @@ if [ `$DOWNLOADED -ne 1 ]; then
     exit 1
 fi
 
-if ! command -v unzip >/dev/null 2>&1; then
-    echo "unzip is not installed in the VM. Please install unzip and rerun attestation."
+if command -v unzip >/dev/null 2>&1; then
+    unzip -q attest-lin.zip
+elif command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import zipfile
+zipfile.ZipFile('attest-lin.zip').extractall('.')
+PY
+elif command -v bsdtar >/dev/null 2>&1; then
+    bsdtar -xf attest-lin.zip
+else
+    echo "No zip extractor available (requires unzip, python3, or bsdtar)."
     exit 1
 fi
-
-unzip -q attest-lin.zip
 chmod +x attest read_report 2>/dev/null || true
 echo "--------- attest --c $attestConfig ---------"
 ./attest --c $attestConfig 2>&1 | tee attest.out
@@ -829,7 +840,7 @@ Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
     }
 
     # Fail loudly if the in-VM script output clearly contains download/attestation errors.
-    if ($attestationText -match 'Failed to download attest-win\.zip|Failed to download attest-lin\.zip|unzip is not installed|attest\.exe exited with code\s+[1-9]|attest exited with code\s+[1-9]') {
+    if ($attestationText -match 'Failed to download attest-win\.zip|Failed to download attest-lin\.zip|No zip extractor available|attest\.exe exited with code\s+[1-9]|attest exited with code\s+[1-9]') {
         write-host "Attestation failed inside the VM. See output above for details." -ForegroundColor Red
         throw "In-VM attestation failed"
     }
