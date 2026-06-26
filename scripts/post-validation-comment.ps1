@@ -18,7 +18,8 @@ Path to save validation output before posting.
 
 param(
     [string]$subsID = "68432aaa-6eba-435c-bc7c-1d998d835e80",
-    [string]$OutputFile = "./cvm-validation-results.txt"
+    [string]$OutputFile = "./cvm-validation-results.txt",
+    [switch]$Sequential
 )
 
 # Ensure we're in the vm-samples directory
@@ -37,22 +38,46 @@ function Get-AttestationSummary {
         [string]$Text
     )
 
-    $attestationType = $null
-    $compliance = $null
-    $secureBoot = $null
-    $tpmEnabled = $null
+    function Get-FirstMatch {
+        param(
+            [string]$Source,
+            [string[]]$Patterns
+        )
 
-    $typeMatch = [regex]::Match($Text, 'x-ms-attestation-type\s*[":=]\s*"?([A-Za-z0-9\-]+)"?', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    if ($typeMatch.Success) { $attestationType = $typeMatch.Groups[1].Value }
+        foreach ($pattern in $Patterns) {
+            $m = [regex]::Match($Source, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if ($m.Success) {
+                return $m.Groups[1].Value
+            }
+        }
+        return $null
+    }
 
-    $complianceMatch = [regex]::Match($Text, 'x-ms-compliance-status\s*[":=]\s*"?([A-Za-z0-9\-]+)"?', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    if ($complianceMatch.Success) { $compliance = $complianceMatch.Groups[1].Value }
+    $attestationType = Get-FirstMatch -Source $Text -Patterns @(
+        'x-ms-attestation-type\s*[":=]\s*"?([A-Za-z0-9\-]+)"?',
+        '"x-ms-attestation-type"\s*:\s*"([A-Za-z0-9\-]+)"'
+    )
 
-    $secureBootMatch = [regex]::Match($Text, 'secure-boot\s*[":=]\s*(true|false|True|False)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    if ($secureBootMatch.Success) { $secureBoot = $secureBootMatch.Groups[1].Value.ToLower() }
+    $compliance = Get-FirstMatch -Source $Text -Patterns @(
+        'x-ms-compliance-status\s*[":=]\s*"?([A-Za-z0-9\-]+)"?',
+        '"x-ms-compliance-status"\s*:\s*"([A-Za-z0-9\-]+)"'
+    )
 
-    $tpmMatch = [regex]::Match($Text, 'tpm-enabled\s*[":=]\s*(true|false|True|False)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    if ($tpmMatch.Success) { $tpmEnabled = $tpmMatch.Groups[1].Value.ToLower() }
+    $secureBoot = Get-FirstMatch -Source $Text -Patterns @(
+        'secure-boot\s*[":=]\s*(true|false|True|False)',
+        '"secure-boot"\s*:\s*(true|false)',
+        'x-ms-runtime-vm-configuration-secure-boot\s*[":=]\s*(true|false|True|False)',
+        '"x-ms-runtime-vm-configuration-secure-boot"\s*:\s*(true|false)'
+    )
+    if ($secureBoot) { $secureBoot = $secureBoot.ToLower() }
+
+    $tpmEnabled = Get-FirstMatch -Source $Text -Patterns @(
+        'tpm-enabled\s*[":=]\s*(true|false|True|False)',
+        '"tpm-enabled"\s*:\s*(true|false)',
+        'x-ms-runtime-vm-configuration-tpm-enabled\s*[":=]\s*(true|false|True|False)',
+        '"x-ms-runtime-vm-configuration-tpm-enabled"\s*:\s*(true|false)'
+    )
+    if ($tpmEnabled) { $tpmEnabled = $tpmEnabled.ToLower() }
 
     $parts = @()
     if ($attestationType) { $parts += "type=$attestationType" }
@@ -73,12 +98,14 @@ $outputLines += "# CVM 4-Way Validation Results"
 $outputLines += ""
 $outputLines += "**Date:** $(Get-Date -Format 'u')"
 $outputLines += ""
+$outputLines += "**Execution mode:** $(if ($Sequential) { 'sequential' } else { 'parallel' })"
+$outputLines += ""
 $outputLines += "| Scenario | Status | Attestation |"
 $outputLines += "|----------|--------|-------------|"
 
 $scenarios = @(
-    @{name="AMD SEV-SNP v6 Windows"; os="Windows"; region="koreacentral"; vmsize="Standard_DC2as_v6"; basename="amdw"}
-    @{name="AMD SEV-SNP v6 Linux"; os="Ubuntu"; region="koreacentral"; vmsize="Standard_DC2as_v6"; basename="amdl"}
+    @{name="AMD SEV-SNP v6 Windows"; os="Windows"; region="koreacentral"; vmsize="Standard_DC2as_v6"; basename="amdw"; skipPreflight=$true}
+    @{name="AMD SEV-SNP v6 Linux"; os="Ubuntu"; region="koreacentral"; vmsize="Standard_DC2as_v6"; basename="amdl"; skipPreflight=$true}
     @{name="Intel TDX v6 Windows"; os="Windows"; region="westeurope"; vmsize="Standard_DC2es_v6"; basename="tdxw"}
     @{name="Intel TDX v6 Linux"; os="Ubuntu"; region="westeurope"; vmsize="Standard_DC2es_v6"; basename="tdxl"}
 )
@@ -86,26 +113,79 @@ $scenarios = @(
 $passed = 0
 $failed = 0
 
-foreach($scenario in $scenarios) {
-    Write-Host "▶ Testing: $($scenario.name)" -ForegroundColor White
-    
-    try {
-        $output = & ./BuildRandomCVM.ps1 -subsID $subsID -basename $scenario.basename -osType $scenario.os -region $scenario.region -vmsize $scenario.vmsize -smoketest -DisableBastion -ErrorAction Stop *>&1
+$jobScript = {
+    param($scenario, $subscriptionId, $samplesPath)
 
-        $outputText = ($output | Out-String)
-        $attestationStr = Get-AttestationSummary -Text $outputText
-        
+    Set-Location $samplesPath
+    $args = @(
+        '-subsID', $subscriptionId,
+        '-basename', $scenario.basename,
+        '-osType', $scenario.os,
+        '-region', $scenario.region,
+        '-vmsize', $scenario.vmsize,
+        '-smoketest',
+        '-DisableBastion'
+    )
+
+    if ($scenario.skipPreflight) {
+        $args += '-SkipSkuPreflight'
+    }
+
+    $output = & ./BuildRandomCVM.ps1 @args *>&1
+    $outputText = ($output | Out-String)
+    $exitCode = $LASTEXITCODE
+
+    [PSCustomObject]@{
+        name = $scenario.name
+        outputText = $outputText
+        exitCode = $exitCode
+    }
+}
+
+$results = @()
+if ($Sequential) {
+    foreach ($scenario in $scenarios) {
+        Write-Host "▶ Testing: $($scenario.name)" -ForegroundColor White
+        $results += & $jobScript $scenario $subsID $vmSamplesPath
+        Write-Host ""
+    }
+} else {
+    Write-Host "Starting all 4 scenarios in parallel..." -ForegroundColor Cyan
+    $jobs = @()
+    foreach ($scenario in $scenarios) {
+        $jobs += Start-Job -ScriptBlock $jobScript -ArgumentList $scenario, $subsID, $vmSamplesPath
+    }
+
+    Wait-Job -Job $jobs | Out-Null
+    $results = $jobs | Receive-Job
+    $jobs | Remove-Job -Force | Out-Null
+}
+
+foreach ($scenario in $scenarios) {
+    $result = $results | Where-Object { $_.name -eq $scenario.name } | Select-Object -First 1
+    if (-not $result) {
+        Write-Host "  ✗ $($scenario.name) FAILED: no result" -ForegroundColor Red
+        $outputLines += "| $($scenario.name) | ❌ FAIL | result-unavailable |"
+        $failed++
+        continue
+    }
+
+    $attestationStr = Get-AttestationSummary -Text $result.outputText
+
+    $sawCompletion = $result.outputText -match 'Build and attestation complete'
+    $sawFatalError = $result.outputText -match 'ERROR:\s|FAILED:\s|VM deployment failed'
+    $isPass = ($result.exitCode -eq 0 -or $null -eq $result.exitCode) -and $sawCompletion -and (-not $sawFatalError)
+
+    if ($isPass) {
         Write-Host "  ✓ $($scenario.name) PASSED" -ForegroundColor Green
         $outputLines += "| $($scenario.name) | ✅ PASS | $attestationStr |"
         $passed++
-    } 
-    catch {
-        Write-Host "  ✗ $($scenario.name) FAILED: $_" -ForegroundColor Red
-        $outputLines += "| $($scenario.name) | ❌ FAIL | Error: $_ |"
+    } else {
+        Write-Host "  ✗ $($scenario.name) FAILED" -ForegroundColor Red
+        $errorHint = if ($result.outputText -match 'NotAvailableForSubscription') { 'sku-not-available-for-subscription' } elseif ($result.outputText -match 'Run-command extension busy') { 'run-command-timeout-or-busy' } else { 'deployment-or-attestation-failure' }
+        $outputLines += "| $($scenario.name) | ❌ FAIL | $attestationStr ($errorHint) |"
         $failed++
     }
-    
-    Write-Host ""
 }
 
 $outputLines += ""
