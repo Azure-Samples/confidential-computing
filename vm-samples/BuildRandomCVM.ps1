@@ -439,12 +439,33 @@ else {
     write-host "Configuring NAT Gateway egress so the private CVM can access internet without a public IP..." -ForegroundColor Cyan
     $natPublicIp = New-AzPublicIpAddress -ResourceGroupName $resgrp -Name $natPublicIpName -Location $region -AllocationMethod Static -Sku Standard
     $natGateway = New-AzNatGateway -ResourceGroupName $resgrp -Name $natGatewayName -Location $region -IdleTimeoutInMinutes 10 -Sku Standard -PublicIpAddress $natPublicIp
+    # Some Az.Network module versions do not persist NAT association via Set-AzVirtualNetworkSubnetConfig.
+    # Try native cmdlet first, then verify; if missing, fall back to Azure CLI subnet update.
     Set-AzVirtualNetworkSubnetConfig -Name ($vmsubnetName) -VirtualNetwork $vnet -AddressPrefix "10.0.0.0/24" -DefaultOutboundAccess $false -InputObject $natGateway | Set-AzVirtualNetwork | Out-Null
     $vnet = Get-AzVirtualNetwork -Name ($vnetname) -ResourceGroupName $resgrp
+    $vmSubnet = $vnet.Subnets | Where-Object { $_.Name -eq $vmsubnetName } | Select-Object -First 1
+
+    if (-not $vmSubnet -or -not $vmSubnet.NatGateway -or -not $vmSubnet.NatGateway.Id) {
+        $azCli = Get-Command az -ErrorAction SilentlyContinue
+        if ($azCli) {
+            write-host "Az.Network cmdlet did not persist NAT association on this host; falling back to Azure CLI subnet update..." -ForegroundColor Yellow
+            & $azCli.Source network vnet subnet update --resource-group $resgrp --vnet-name $vnetname --name $vmsubnetName --nat-gateway $natGatewayName --only-show-errors -o none
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to attach NAT Gateway '$natGatewayName' to subnet '$vmsubnetName' via Azure CLI."
+            }
+            $vnet = Get-AzVirtualNetwork -Name ($vnetname) -ResourceGroupName $resgrp
+            $vmSubnet = $vnet.Subnets | Where-Object { $_.Name -eq $vmsubnetName } | Select-Object -First 1
+        }
+    }
+
+    if (-not $vmSubnet -or -not $vmSubnet.NatGateway -or -not $vmSubnet.NatGateway.Id) {
+        throw "NAT Gateway '$natGatewayName' is not associated with subnet '$vmsubnetName'. Outbound internet will fail."
+    }
+
     write-host "NAT Gateway '$natGatewayName' attached to subnet '$vmsubnetname'." -ForegroundColor Green
 }
 
-$subnetId = $vnet.Subnets[0].Id;
+$subnetId = ($vnet.Subnets | Where-Object { $_.Name -eq $vmsubnetName } | Select-Object -First 1).Id;
 #uncomment the below if you want to add a public IP address to the VM
 #$pubip = New-AzPublicIpAddress -Force -Name ($pubIpPrefix + $resgrp) -ResourceGroupName $resgrp -Location $region -AllocationMethod Static -DomainNameLabel $domainNameLabel2;
 #$pubip = Get-AzPublicIpAddress -Name ($pubIpPrefix + $resgrp) -ResourceGroupName $resgrp;
@@ -466,8 +487,12 @@ $VirtualMachine = Set-AzVmSecurityProfile -VM $VirtualMachine -SecurityType $vmS
 $VirtualMachine = Set-AzVmUefi -VM $VirtualMachine -EnableVtpm $true -EnableSecureBoot $true;
 $VirtualMachine = Set-AzVMBootDiagnostic -VM $VirtualMachine -disable #disable boot diagnostics, you can re-enable if required
 
-New-AzVM -ResourceGroupName $resgrp -Location $region -Vm $VirtualMachine;
-$vm = Get-AzVm -ResourceGroupName $resgrp -Name $vmname;
+try {
+    New-AzVM -ResourceGroupName $resgrp -Location $region -Vm $VirtualMachine -ErrorAction Stop
+    $vm = Get-AzVm -ResourceGroupName $resgrp -Name $vmname -ErrorAction Stop
+} catch {
+    throw "VM deployment failed for '$vmname' in '$region': $($_.Exception.Message)"
+}
 
 # Create the Bastion to allow accessing the VM via the Azure portal (unless disabled)
 if (-not $DisableBastion) {
@@ -602,41 +627,73 @@ New-Item -ItemType Directory -Path `$work -Force | Out-Null
 Set-Location `$work
 Write-Host "Downloading latest attest-win.zip from cvm-attestation-tools..."
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-`$downloadUrls = @('https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-win.zip')
-
-# Try to discover the concrete asset URL as a fallback (often resolves to objects.githubusercontent.com)
-try {
-    `$release = Invoke-RestMethod -Uri 'https://api.github.com/repos/Azure/cvm-attestation-tools/releases/latest' -Headers @{ 'User-Agent' = 'BuildRandomCVM' } -UseBasicParsing
-    `$asset = `$release.assets | Where-Object { `$_.name -eq 'attest-win.zip' } | Select-Object -First 1
-    if (`$asset -and `$asset.browser_download_url) {
-        `$downloadUrls += `$asset.browser_download_url
-    }
-} catch {
-    Write-Host "Warning: unable to query GitHub release API for fallback URL: `$(`$_.Exception.Message)" -ForegroundColor Yellow
-}
-
-`$downloaded = `$false
-foreach (`$url in (`$downloadUrls | Select-Object -Unique)) {
-    for (`$i = 1; `$i -le 3; `$i++) {
+# Run-command runs as SYSTEM, which has no IE/WinINet proxy config; Invoke-WebRequest then
+# fails with "Unable to connect to the remote server" even though outbound is fine.
+# Prefer curl.exe (in-box on Win10/11/Server2019+, doesn't use WinINet); fall back to
+# Invoke-WebRequest with the default proxy explicitly cleared.
+`$attestUrl = 'https://github.com/Azure/cvm-attestation-tools/releases/latest/download/attest-win.zip'
+`$dlOk = `$false
+`$curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+# Wait for outbound to github.com:443 to come up before the real download. A freshly-attached
+# NAT Gateway on the VM subnet can take a couple of minutes to become effective, during which
+# every connection out of the VM fails with TCP connect timeout (curl exit 28). Probe with a
+# 5s timeout per attempt and back off; total ~5 minutes.
+Write-Host "Waiting for outbound connectivity to github.com:443..."
+for (`$i = 1; `$i -le 30; `$i++) {
+    `$ok = `$false
+    if (`$curl) {
         try {
-            Write-Host "Download attempt `$i/3: `$url"
-            Invoke-WebRequest -Uri `$url -OutFile 'attest-win.zip' -UseBasicParsing -Headers @{ 'User-Agent' = 'BuildRandomCVM' }
-            if ((Test-Path 'attest-win.zip') -and ((Get-Item 'attest-win.zip').Length -gt 0)) {
-                `$downloaded = `$true
-                break
-            }
-            throw "Downloaded file is missing or empty"
+            `$prevProbeEap = `$ErrorActionPreference
+            `$ErrorActionPreference = 'Continue'
+            if (`$PSVersionTable.PSVersion.Major -ge 7) { `$PSNativeCommandUseErrorActionPreference = `$false }
+            & `$curl.Source -fsS --max-time 5 -o NUL https://github.com 2>`$null | Out-Null
+            if (`$LASTEXITCODE -eq 0) { `$ok = `$true }
         } catch {
-            Write-Host "Download failed on attempt `$i for `$url: `$(`$_.Exception.Message)" -ForegroundColor Yellow
-            if (`$i -lt 3) { Start-Sleep -Seconds 10 }
+            `$ok = `$false
+        } finally {
+            `$ErrorActionPreference = `$prevProbeEap
+        }
+    } else {
+        try {
+            `$tnc = Test-NetConnection -ComputerName 'github.com' -Port 443 -WarningAction SilentlyContinue
+            if (`$tnc.TcpTestSucceeded) { `$ok = `$true }
+        } catch { `$ok = `$false }
+    }
+    if (`$ok) { Write-Host "Outbound to github.com is up (attempt `$i)." -ForegroundColor Green; break }
+    if (`$i -eq 30) {
+        Write-Host "WARNING: github.com still unreachable after 5 minutes; attempting download anyway." -ForegroundColor Yellow
+    } else {
+        Write-Host "  attempt `${i}: outbound not yet ready, sleeping 10s..." -ForegroundColor DarkGray
+        Start-Sleep -Seconds 10
+    }
+}
+if (`$curl) {
+    try {
+        `$prevCurlEap = `$ErrorActionPreference
+        `$ErrorActionPreference = 'Continue'
+        if (`$PSVersionTable.PSVersion.Major -ge 7) { `$PSNativeCommandUseErrorActionPreference = `$false }
+        & `$curl.Source -fsSL --retry 5 --retry-connrefused --retry-delay 5 -o 'attest-win.zip' `$attestUrl 2>`$null | Out-Null
+        if (`$LASTEXITCODE -eq 0 -and (Test-Path 'attest-win.zip') -and ((Get-Item 'attest-win.zip').Length -gt 0)) { `$dlOk = `$true }
+        else { Write-Host "curl.exe download failed (exit `$LASTEXITCODE); falling back to Invoke-WebRequest..." -ForegroundColor Yellow }
+    } catch {
+        Write-Host "curl.exe threw an exception; falling back to Invoke-WebRequest..." -ForegroundColor Yellow
+    } finally {
+        `$ErrorActionPreference = `$prevCurlEap
+    }
+}
+if (-not `$dlOk) {
+    [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy
+    for (`$i = 1; `$i -le 5 -and -not `$dlOk; `$i++) {
+        try {
+            Invoke-WebRequest -Uri `$attestUrl -OutFile 'attest-win.zip' -UseBasicParsing
+            `$dlOk = `$true
+        } catch {
+            Write-Host "Invoke-WebRequest attempt `$i failed: `$(`$_.Exception.Message)" -ForegroundColor Yellow
+            if (`$i -lt 5) { Start-Sleep -Seconds 10 }
         }
     }
-    if (`$downloaded) { break }
 }
-
-if (-not `$downloaded) {
-    throw "Failed to download attest-win.zip after retries. Ensure outbound internet to github.com and objects.githubusercontent.com is allowed from the CVM subnet."
-}
+if (-not `$dlOk) { throw "Failed to download attest-win.zip from `$attestUrl" }
 
 Expand-Archive -Path 'attest-win.zip' -DestinationPath '.' -Force
 Write-Host "--------- attest.exe --c $attestConfig ---------"
@@ -650,8 +707,21 @@ Write-Host "--------- attest.exe --c $attestConfig ---------"
 `$prevEap = `$ErrorActionPreference
 `$ErrorActionPreference = 'Continue'
 if (`$PSVersionTable.PSVersion.Major -ge 7) { `$PSNativeCommandUseErrorActionPreference = `$false }
-`$attestOut = (& .\attest.exe --c $attestConfig 2>&1 | Out-String -Width 16384)
-`$attestExit = `$LASTEXITCODE
+# Retry attest.exe a few times: the attestation provider's internal retry budget is short,
+# and on a brand-new VM the SNAT mapping to the MAA endpoint can take a minute or two to
+# warm up after NAT GW attach, surfacing as ConnectTimeoutError to *.attest.azure.net even
+# though github.com is already reachable by the time we finish downloading.
+`$attestOut = ''
+`$attestExit = -1
+for (`$i = 1; `$i -le 5; `$i++) {
+    `$attestOut = (& .\attest.exe --c $attestConfig 2>&1 | Out-String -Width 16384)
+    `$attestExit = `$LASTEXITCODE
+    if (`$attestExit -eq 0) { break }
+    if (`$i -lt 5) {
+        Write-Host "attest.exe attempt `$i exited with code `$attestExit; sleeping 30s before retry..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 30
+    }
+}
 `$ErrorActionPreference = `$prevEap
 Write-Host `$attestOut
 if (`$attestExit -ne 0) { Write-Host "attest.exe exited with code `$attestExit" -ForegroundColor Yellow }
@@ -730,7 +800,7 @@ Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
     }
 
     # Fail loudly if the in-VM script output clearly contains download/attestation errors.
-    if ($attestationText -match 'Unable to connect to the remote server|Invoke-WebRequest\s*:|Failed to download attest-win\.zip|Failed to download attest-lin\.zip|curl:\s*\(|unzip is not installed|attest\.exe exited with code\s+[1-9]|attest exited with code\s+[1-9]') {
+    if ($attestationText -match 'Failed to download attest-win\.zip|Failed to download attest-lin\.zip|unzip is not installed|attest\.exe exited with code\s+[1-9]|attest exited with code\s+[1-9]') {
         write-host "Attestation failed inside the VM. See output above for details." -ForegroundColor Red
         throw "In-VM attestation failed"
     }
