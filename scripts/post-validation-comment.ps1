@@ -34,9 +34,12 @@ Write-Host ""
 
 function Get-AttestationSummary {
     param(
-        [Parameter(Mandatory)]
         [string]$Text
     )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return "attestation-details-unavailable"
+    }
 
     function Get-FirstMatch {
         param(
@@ -117,21 +120,12 @@ $jobScript = {
     param($scenario, $subscriptionId, $samplesPath)
 
     Set-Location $samplesPath
-    $args = @(
-        '-subsID', $subscriptionId,
-        '-basename', $scenario.basename,
-        '-osType', $scenario.os,
-        '-region', $scenario.region,
-        '-vmsize', $scenario.vmsize,
-        '-smoketest',
-        '-DisableBastion'
-    )
 
     if ($scenario.skipPreflight) {
-        $args += '-SkipSkuPreflight'
+        $output = & ./BuildRandomCVM.ps1 -subsID $subscriptionId -basename $scenario.basename -osType $scenario.os -region $scenario.region -vmsize $scenario.vmsize -smoketest -DisableBastion -SkipSkuPreflight *>&1
+    } else {
+        $output = & ./BuildRandomCVM.ps1 -subsID $subscriptionId -basename $scenario.basename -osType $scenario.os -region $scenario.region -vmsize $scenario.vmsize -smoketest -DisableBastion *>&1
     }
-
-    $output = & ./BuildRandomCVM.ps1 @args *>&1
     $outputText = ($output | Out-String)
     $exitCode = $LASTEXITCODE
 
