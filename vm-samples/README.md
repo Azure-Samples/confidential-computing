@@ -82,6 +82,14 @@ Before running `BuildRandomCVM.ps1`, ensure you have the following:
 - **AZURE_SUBSCRIPTION_ID** environment variable set and authenticated via Azure CLI
 - Run `Set-AzContext -SubscriptionId "<your-sub-id>"` if needed
 
+### Validation workflow (local + CI)
+
+- Install hooks once per clone with `./scripts/Install-PreCommitHook.ps1` from repo root.
+- `pre-commit` performs secret scanning.
+- `pre-push` runs `scripts/validate-cvm.ps1` and blocks push on failures.
+- On successful local validation, `pre-push` posts validation output as a comment to the active PR when `gh` CLI is installed/authenticated and a PR exists for the branch.
+- GitHub Actions currently runs secret scan + syntax/parameter checks only; cloud CVM matrix validation is temporarily disabled until service principal secrets are configured.
+
 ### Pre-flight checks (before any resources are created)
 
 To save you a half-built deployment in a region or subscription that can't actually host the VM, the script runs the following checks **before** creating the resource group, Key Vault, DES, VNet or VM:
