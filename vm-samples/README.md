@@ -169,7 +169,7 @@ Intel TDX SKUs (`DCe*`/`ECe*`) available in: westeurope, westus3, northeurope, a
 
 **Production-grade: Larger TDX VM (4 vCPU) with custom description:**
 ```powershell
-./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "prod-tdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC4es_v6" -description "Production TDX workload"
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "prodtdx" -osType "Ubuntu" -region "westeurope" -vmsize "Standard_DC4es_v6" -description "Production TDX workload"
 ```
 
 ### AMD SEV-SNP CVM
@@ -193,7 +193,7 @@ AMD SEV-SNP SKUs (`DCa*`/`ECa*`) available in: northeurope, eastus, koreacentral
 
 **Production-grade: Larger SEV-SNP VM (4 vCPU) with custom description:**
 ```powershell
-./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "prod-snp" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC4as_v5" -description "Production SEV-SNP workload"
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "prodsnp" -osType "Ubuntu" -region "northeurope" -vmsize "Standard_DC4as_v5" -description "Production SEV-SNP workload"
 ```
 
 **Advanced: Fully isolated CVM (no outbound internet, no Bastion):**
@@ -248,6 +248,51 @@ Get-AzComputeResourceSku -Location westeurope |
     Where-Object { $_.Name -match '^Standard_(DC|EC)\d+e' -and $_.ResourceType -eq 'virtualMachines' } |
     Select-Object Name, @{N='Restrictions';E={ $_.Restrictions.ReasonCode -join ',' }}
 ```
+
+## AMD SEV-SNP v6 CVMs — Widely Available, Production-Proven
+
+AMD SEV-SNP (Secure Encrypted Virtualization - Secure Nested Paging) v6 provides **memory encryption at the CPU level**, preventing the hypervisor and Azure fabric from reading VM memory. This is the **most widely available Confidential VM option** across Azure regions and has been production-deployed since 2023.
+
+### Key Features
+
+- **Memory Encryption**: All guest VM memory encrypted with per-VM keys that never leave the processor package
+- **Attestation**: Remote attestation proves the VM is running on genuine AMD EPYC hardware with SEV-SNP enabled
+- **Regional Availability**: `DCa*`/`ECa*` SKUs available in **30+ regions** including: northeurope, eastus, westus, southcentralus, koreacentral, australiaeast, ukwest, and others
+- **SKU Families**:
+  - `DCasv5` / `ECasv5`: Single-socket with up to 32 vCPU per VM (e.g., `Standard_DC2as_v5`, `Standard_DC32as_v5`)
+  - `DCadsv5` / `ECadsv5`: Dual-socket with up to 64 vCPU per VM (e.g., `Standard_DC2ads_v5`, `Standard_DC64ads_v5`)
+
+### Verify SEV-SNP v6 Availability in Your Region
+
+```powershell
+# List all SEV-SNP v5 SKUs available in a region
+Get-AzComputeResourceSku -Location northeurope |
+    Where-Object { $_.ResourceType -eq 'virtualMachines' -and $_.Name -match '^Standard_(DC|EC)\d+a' } |
+    Select-Object Name, @{N='Restrictions';E={if($_.Restrictions.Count -eq 0) { 'Available' } else { $_.Restrictions[0].ReasonCode }}} |
+    Sort-Object Name
+
+# Check quota for SEV-SNP family in a region
+Get-AzVMUsage -Location northeurope | 
+    Where-Object { $_.Name.Value -match 'DCASv5|ECASv5|cores' } | 
+    Format-Table Name, CurrentValue, Limit
+```
+
+### Use Cases & Benefits
+
+| Use Case | Why SEV-SNP v6 | Example |
+|----------|---|---|
+| **Compliance & Data Protection** | Memory encryption + Confidential OS disk encryption with CMK meets strict regulatory requirements (PCI-DSS, HIPAA, SOC 2) | Regulated financial processing, healthcare data analytics |
+| **Multi-Cloud & Hybrid** | Attestation-bound key release ensures keys only unlock on genuine AMD TEE | Key management across on-premises EPYC and Azure CVMs |
+| **High-Performance Computing (HPC)** | Dual-socket SKUs with up to 64 vCPU support memory-intensive workloads with encryption | Molecular simulation, genomics analysis, scientific computing |
+| **Database & Cache Encryption** | Encrypt sensitive data structures in memory without losing performance | Redis, PostgreSQL, MySQL with customer-owned encryption keys |
+| **Mature & Battle-Tested** | Production-deployed across thousands of customer workloads since 2023 | Production SLAs: 99.95% availability with committed uptime |
+
+### Documentation & Resources
+
+- **Official AMD SEV-SNP Overview**: [Microsoft Docs - Confidential VM Overview](https://learn.microsoft.com/azure/confidential-computing/confidential-vm-overview)
+- **Attestation for SEV-SNP**: [Attestation Claims and Report Format](https://learn.microsoft.com/azure/confidential-computing/confidential-vm-overview#attestation)
+- **Hands-On Quickstart**: [Create and attest a Confidential VM (Azure CLI)](https://learn.microsoft.com/azure/confidential-computing/quick-create-confidential-vm-azure-cli)
+- **Advanced Topics**: [SEV-SNP Firmware Reference (AMD)](https://www.amd.com/system/files/TechDocs/SEV-SNP-strengthening-vm-isolation-with-integrity-protection-and-more.pdf), [Azure Confidential Computing Docs Hub](https://aka.ms/accdocs)
 
 The script automatically tags the resource group with:
 - **owner**: Your Azure user principal name
