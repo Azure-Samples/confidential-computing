@@ -87,7 +87,8 @@ Before running `BuildRandomCVM.ps1`, ensure you have the following:
 - Install hooks once per clone with `./scripts/Install-PreCommitHook.ps1` from repo root.
 - `pre-commit` performs secret scanning.
 - `pre-push` runs `scripts/validate-cvm.ps1` and blocks push on failures.
-- On successful local validation, `pre-push` posts validation output as a comment to the active PR when `gh` CLI is installed/authenticated and a PR exists for the branch.
+- Run `./scripts/post-validation-comment.ps1` from repo root to execute the 4-way CVM matrix (parallel by default) and post results as a comment on the active PR.
+- Use `-NoPostToPr` with `post-validation-comment.ps1` when you want a local-only run without posting a PR comment.
 - GitHub Actions currently runs secret scan + syntax/parameter checks only; cloud CVM matrix validation is temporarily disabled until service principal secrets are configured.
 
 ### Pre-flight checks (before any resources are created)
