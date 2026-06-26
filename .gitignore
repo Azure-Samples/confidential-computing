@@ -256,6 +256,34 @@ ServiceFabricBackup/
 *.ldf
 *.ndf
 
+# Local sample video staging (must not be committed)
+/automotive-machine-vision/sample-video-local/
+
+# Local Let's Encrypt artifacts (must not be committed)
+/automotive-machine-vision/certs/live/
+/automotive-machine-vision/certs/work/
+/automotive-machine-vision/certs/logs/
+/automotive-machine-vision/certs/*.pem
+/automotive-machine-vision/certs/*.key
+/automotive-machine-vision/certs/*.crt
+/automotive-machine-vision/acr-config.json
+/automotive-machine-vision/deployment-params.json
+/automotive-machine-vision/deployment-template.json
+
+# Local secrets and certificates
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.pem
+*.key
+*.p12
+*.crt
+*.cer
+*.secret
+*.secrets
+
 # Business Intelligence projects
 *.rdl.data
 *.bim.layout

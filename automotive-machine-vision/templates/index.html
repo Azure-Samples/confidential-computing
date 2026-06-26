@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contoso Cars Automagic Vision</title>
+    <style>
+        :root {
+            --bg: #f2f6fb;
+            --text: #1a1a1a;
+            --card-bg: #fff;
+            --card-shadow: rgba(0,0,0,0.08);
+            --muted: #4b5d70;
+            --heading: #005fb8;
+            --button-bg: #005fb8;
+            --button-text: #fff;
+            --button-disabled: #93a1b0;
+            --border-soft: #dbe7f5;
+            --row-border: #e8edf4;
+            --tile-bg: #f3f8ff;
+            --tile-border: #cfe2ff;
+            --tile-label: #32506f;
+            --tile-value: #0f2f4d;
+            --route-bg: #f9fbff;
+            --claim-bg: #0f1720;
+            --claim-fg: #d6f1ff;
+            --surface-strong: #101820;
+            --surface-strong-fg: #dbf2ff;
+            --input-bg: #fff;
+            --input-border: #c6d8ee;
+            --ok: #0a8a1f;
+            --bad: #b81f26;
+        }
+        body[data-theme="dark"] {
+            --bg: #0f1623;
+            --text: #e8eef8;
+            --card-bg: #172130;
+            --card-shadow: rgba(0,0,0,0.35);
+            --muted: #afc0d8;
+            --heading: #7dc4ff;
+            --button-bg: #2a78d1;
+            --button-text: #f5f9ff;
+            --button-disabled: #4f5d74;
+            --border-soft: #334760;
+            --row-border: #2f4056;
+            --tile-bg: #213147;
+            --tile-border: #3f5a79;
+            --tile-label: #8fb9df;
+            --tile-value: #d6ecff;
+            --route-bg: #1d2b3e;
+            --claim-bg: #0e141d;
+            --claim-fg: #d6f1ff;
+            --surface-strong: #0d141d;
+            --surface-strong-fg: #dbf2ff;
+            --input-bg: #132032;
+            --input-border: #36506e;
+            --ok: #3ed46e;
+            --bad: #ff7f87;
+        }
+        body { font-family: Segoe UI, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+        .wrap { max-width: 1100px; margin: 24px auto; padding: 16px; }
+        .card { background: var(--card-bg); border-radius: 10px; padding: 18px; margin-bottom: 16px; box-shadow: 0 4px 18px var(--card-shadow); }
+        h1, h2 { margin-top: 0; color: var(--heading); }
+        button { background: var(--button-bg); color: var(--button-text); border: none; border-radius: 6px; padding: 10px 16px; cursor: pointer; margin-right: 8px; }
+        button[disabled] { background: var(--button-disabled); cursor: not-allowed; }
+        input[type=file] { margin: 10px 0; }
+        .ok { color: var(--ok); font-weight: 600; }
+        .bad { color: var(--bad); font-weight: 600; }
+        .muted { color: var(--muted); }
+        #uploadProgressBar { width: 100%; height: 14px; margin-top: 8px; }
+        #progressBar { width: 100%; height: 20px; }
+        .worker-progress-grid { display: grid; gap: 10px; margin-top: 12px; }
+        .worker-progress-row { display: grid; grid-template-columns: 100px 1fr auto; gap: 10px; align-items: center; }
+        .worker-progress-row label { color: var(--muted); font-size: 13px; }
+        .worker-progress-row progress { width: 100%; height: 14px; }
+        .worker-progress-value { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 58px; text-align: right; }
+        .controls { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        #timeline { flex: 1; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border-bottom: 1px solid var(--row-border); text-align: left; padding: 8px; vertical-align: top; }
+        .attest-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 12px; margin-bottom: 12px; }
+        .summary-tile { background: var(--tile-bg); border: 1px solid var(--tile-border); border-radius: 8px; padding: 10px; }
+        .summary-label { font-size: 12px; color: var(--tile-label); text-transform: uppercase; letter-spacing: 0.04em; }
+        .summary-value { font-size: 14px; color: var(--tile-value); font-weight: 600; margin-top: 4px; word-break: break-word; }
+        .claimValue { margin: 0; padding: 8px; background: var(--claim-bg); color: var(--claim-fg); border-radius: 6px; white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow: auto; font-size: 12px; line-height: 1.35; }
+        .claims-scroll { max-height: 420px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 8px; }
+        .summary-tile.pass { background: #edf9f0; border-color: #9ddab0; }
+        .summary-tile.pass .summary-label { color: #1f6e35; }
+        .summary-tile.pass .summary-value { color: #1f6e35; }
+        .summary-tile.fail { background: #fff0f0; border-color: #f2b8b8; }
+        .summary-tile.fail .summary-label { color: #8a1f1f; }
+        .summary-tile.fail .summary-value { color: #8a1f1f; }
+        .route-box { border: 1px solid var(--border-soft); border-radius: 8px; padding: 10px; background: var(--route-bg); margin-top: 10px; }
+        .inline-field { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+        select { padding: 8px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--input-bg); color: var(--text); }
+        .header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        #themeToggle { margin-right: 0; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="card">
+        <div class="header-row">
+            <h1>Contoso Cars Automagic Vision</h1>
+            <button id="themeToggle" type="button">Switch to Dark</button>
+        </div>
+        <p>This app runs in a confidential Azure Container Instance (AMD SEV-SNP) and enforces a CCE policy that only permits the approved image and blocks interactive access (<code>--disable-stdio</code>).</p>
+        <p class="muted">Security flow: attestation check → claim review → user proceed/abort decision → HTTPS upload → in-container machine vision processing.</p>
+    </div>
+
+    <div class="card">
+        <h2>1) Attestation Gate</h2>
+        <button id="btnAttest">Run Attestation Check</button>
+        <button id="btnProceed" disabled>Proceed with Processing</button>
+        <button id="btnAbort" disabled>Abort</button>
+        <p id="attestStatus" class="muted">Upload is blocked until attestation succeeds and you explicitly proceed.</p>
+        <div id="attestSummary" class="attest-summary" style="display:none;"></div>
+        <div id="claimsScroll" class="claims-scroll" style="display:none; margin-top: 12px;">
+            <table id="claimsTable">
+                <thead><tr><th>Claim</th><th>Value</th><th>What it means</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>2) Upload & Process (.mp4 over TLS)</h2>
+        <div class="inline-field">
+            <label for="profileSelect">Processing profile:</label>
+            <select id="profileSelect">
+                <option value="balanced" selected>Balanced</option>
+                <option value="fast">Fast</option>
+                <option value="max">Max Throughput</option>
+            </select>
+        </div>
+        <div class="inline-field" style="margin-top: 10px; gap: 10px; flex-wrap: wrap; align-items: center;">
+            <label for="plateHoldFramesInput">Plate hold frames:</label>
+            <input id="plateHoldFramesInput" type="number" min="0" max="45" step="1" value="18" style="width: 90px;">
+            <label for="plateMatchIouInput">Plate match IoU:</label>
+            <input id="plateMatchIouInput" type="number" min="0.05" max="0.90" step="0.01" value="0.20" style="width: 90px;">
+            <button id="btnSavePlateSettings" type="button">Save Plate Tracking</button>
+        </div>
+        <p id="plateSettingsStatus" class="muted">Tune plate blur retention for temporary detection dropouts (for example, taillight flashes).</p>
+        <input type="file" id="videoFile" accept=".mp4" disabled>
+        <button id="btnUpload" disabled>Upload and Process</button>
+        <p id="uploadStatus" class="muted">The upload endpoint enforces HTTPS.</p>
+        <progress id="uploadProgressBar" value="0" max="100"></progress>
+        <p id="uploadProgressText" class="muted">Upload progress will appear here.</p>
+        <progress id="progressBar" value="0" max="100"></progress>
+        <p id="progressSummary" class="muted">Upload in progress. Status polling will start once the server accepts the file.</p>
+        <div id="workerProgressGrid" class="worker-progress-grid"></div>
+    </div>
+
+    <div class="card">
+        <h2>3) Processed Video Playback</h2>
+        <video id="player" width="100%" controls></video>
+        <p class="muted" style="margin-top: 10px;">
+            This playback is the output from in-container privacy transforms: faces and license plates are blurred,
+            and object-detection overlay boxes are disabled in the output video.
+        </p>
+        <p class="muted" style="margin-top: 8px;">
+            Running this pipeline inside the confidential TEE is more privacy-preserving because attestation and CCE policy checks
+            verify the approved workload, interactive shell/exec access is blocked, and uploads are protected in transit over HTTPS.
+        </p>
+        <p id="playbackHint" class="muted" style="margin-top: 8px;">Playback controls are disabled until video processing completes.</p>
+        <div class="controls">
+            <button id="playPause" disabled>Play/Pause</button>
+            <button id="rewind" disabled>Rewind 10s</button>
+            <button id="forward" disabled>Fast Forward 10s</button>
+            <input type="range" id="timeline" min="0" max="100" value="0" disabled>
+            <span id="timeLabel">00:00 / 00:00</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>How confidential computing + CCE protect this workflow</h2>
+        <ul>
+            <li>Remote attestation provides cryptographic evidence of platform integrity before video upload is allowed.</li>
+            <li>CCE policy measurements are checked by ACI so the workload must match the approved container image.</li>
+            <li>Policy generation uses <code>az confcom acipolicygen --disable-stdio</code> to block interactive shell/exec access.</li>
+            <li>TLS (HTTPS) protects video data while in transit from browser to container.</li>
+            <li>Machine vision processing runs server-side in the confidential container, not in browser JavaScript.</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+let currentJob = null;
+let statusTimer = null;
+
+const btnAttest = document.getElementById('btnAttest');
+const btnProceed = document.getElementById('btnProceed');
+const btnAbort = document.getElementById('btnAbort');
+const themeToggle = document.getElementById('themeToggle');
+const btnUpload = document.getElementById('btnUpload');
+const videoFile = document.getElementById('videoFile');
+const profileSelect = document.getElementById('profileSelect');
+const plateHoldFramesInput = document.getElementById('plateHoldFramesInput');
+const plateMatchIouInput = document.getElementById('plateMatchIouInput');
+const btnSavePlateSettings = document.getElementById('btnSavePlateSettings');
+const plateSettingsStatus = document.getElementById('plateSettingsStatus');
+const attestStatus = document.getElementById('attestStatus');
+const uploadStatus = document.getElementById('uploadStatus');
+const uploadProgressBar = document.getElementById('uploadProgressBar');
+const uploadProgressText = document.getElementById('uploadProgressText');
+const attestSummary = document.getElementById('attestSummary');
+const claimsScroll = document.getElementById('claimsScroll');
+const claimsTable = document.getElementById('claimsTable');
+const claimsBody = claimsTable.querySelector('tbody');
+const progressBar = document.getElementById('progressBar');
+const progressSummary = document.getElementById('progressSummary');
+const workerProgressGrid = document.getElementById('workerProgressGrid');
+const playbackHint = document.getElementById('playbackHint');
+const player = document.getElementById('player');
+const playPauseBtn = document.getElementById('playPause');
+const rewindBtn = document.getElementById('rewind');
+const forwardBtn = document.getElementById('forward');
+const timeline = document.getElementById('timeline');
+const timeLabel = document.getElementById('timeLabel');
+let playbackDiagnostics = '';
+
+const MEDIA_ERROR_CODES = {
+    1: 'MEDIA_ERR_ABORTED',
+    2: 'MEDIA_ERR_NETWORK',
+    3: 'MEDIA_ERR_DECODE',
+    4: 'MEDIA_ERR_SRC_NOT_SUPPORTED'
+};
+
+function safe(s) {
+    return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+        value /= 1024;
+        idx += 1;
+    }
+    return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function setPlaybackControlsEnabled(enabled) {
+    playPauseBtn.disabled = !enabled;
+    rewindBtn.disabled = !enabled;
+    forwardBtn.disabled = !enabled;
+    timeline.disabled = !enabled;
+    playbackHint.textContent = enabled
+        ? 'Processing is complete. Playback controls are enabled.'
+        : 'Playback controls are disabled until video processing completes.';
+}
+
+async function loadPlateTrackingSettings() {
+    try {
+        const res = await fetch('/api/settings/plate-tracking', { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'ok' || !data.settings) {
+            throw new Error(data.message || 'Could not load plate tracking settings.');
+        }
+        plateHoldFramesInput.value = Number(data.settings.holdFrames ?? 18);
+        plateMatchIouInput.value = Number(data.settings.matchIou ?? 0.2).toFixed(2);
+        plateSettingsStatus.innerHTML = `<span class="ok">Current settings loaded.</span> Hold=${safe(plateHoldFramesInput.value)} frames, IoU=${safe(plateMatchIouInput.value)}.`;
+    } catch (err) {
+        plateSettingsStatus.innerHTML = `<span class="bad">${safe(err?.message || 'Failed to load settings.')}</span>`;
+    }
+}
+
+btnSavePlateSettings.onclick = async () => {
+    const holdFrames = Number(plateHoldFramesInput.value);
+    const matchIou = Number(plateMatchIouInput.value);
+
+    if (!Number.isInteger(holdFrames) || holdFrames < 0 || holdFrames > 45) {
+        plateSettingsStatus.innerHTML = '<span class="bad">Plate hold frames must be an integer from 0 to 45.</span>';
+        return;
+    }
+    if (!Number.isFinite(matchIou) || matchIou < 0.05 || matchIou > 0.9) {
+        plateSettingsStatus.innerHTML = '<span class="bad">Plate match IoU must be between 0.05 and 0.90.</span>';
+        return;
+    }
+
+    btnSavePlateSettings.disabled = true;
+    plateSettingsStatus.textContent = 'Saving plate tracking settings...';
+
+    try {
+        const res = await fetch('/api/settings/plate-tracking', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ holdFrames, matchIou })
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'ok' || !data.settings) {
+            throw new Error(data.message || 'Failed to save settings.');
+        }
+        plateHoldFramesInput.value = Number(data.settings.holdFrames);
+        plateMatchIouInput.value = Number(data.settings.matchIou).toFixed(2);
+        plateSettingsStatus.innerHTML = `<span class="ok">Saved.</span> Hold=${safe(plateHoldFramesInput.value)} frames, IoU=${safe(plateMatchIouInput.value)}.`;
+    } catch (err) {
+        plateSettingsStatus.innerHTML = `<span class="bad">${safe(err?.message || 'Save failed.')}</span>`;
+    } finally {
+        btnSavePlateSettings.disabled = false;
+    }
+};
+
+function renderWorkerProgress(workerProgress, totalFrames) {
+    const progressValues = Array.isArray(workerProgress) ? workerProgress : [];
+    if (!progressValues.length) {
+        workerProgressGrid.innerHTML = '';
+        return;
+    }
+
+    const safeTotalFrames = Number(totalFrames) > 0 ? Number(totalFrames) : 0;
+    const workerShare = safeTotalFrames > 0 ? safeTotalFrames / progressValues.length : 0;
+    workerProgressGrid.innerHTML = progressValues.map((processedFrames, index) => {
+        const maxFrames = workerShare > 0 ? Math.max(1, Math.ceil(workerShare)) : Math.max(1, Number(processedFrames) || 0);
+        const normalizedFrames = Math.max(0, Math.min(maxFrames, Number(processedFrames) || 0));
+        const percent = workerShare > 0 ? Math.min(100, (normalizedFrames / maxFrames) * 100) : 0;
+        return `
+            <div class="worker-progress-row">
+                <label>Worker ${index + 1}</label>
+                <progress value="${normalizedFrames}" max="${maxFrames}"></progress>
+                <span class="worker-progress-value">${percent.toFixed(0)}%</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function uploadFileWithProgress(formData) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/process');
+        xhr.responseType = 'text';
+
+        xhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable) {
+                uploadProgressText.textContent = `Uploaded ${formatBytes(event.loaded)} (total size unknown)`;
+                return;
+            }
+            const percent = (event.loaded / event.total) * 100;
+            uploadProgressBar.value = percent;
+            uploadProgressText.textContent = `Uploaded ${formatBytes(event.loaded)} / ${formatBytes(event.total)} (${percent.toFixed(1)}%)`;
+        };
+
+        xhr.onload = () => {
+            resolve({ status: xhr.status, raw: xhr.responseText || '' });
+        };
+
+        xhr.onerror = () => reject(new Error('Network error during upload.'));
+        xhr.onabort = () => reject(new Error('Upload was aborted.'));
+
+        xhr.send(formData);
+    });
+}
+
+function applyTheme(theme) {
+    const resolved = theme === 'dark' ? 'dark' : 'light';
+    document.body.setAttribute('data-theme', resolved);
+    themeToggle.textContent = resolved === 'dark' ? 'Switch to Light' : 'Switch to Dark';
+    localStorage.setItem('amv-theme', resolved);
+}
+
+themeToggle.onclick = () => {
+    const current = document.body.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+};
+
+applyTheme(localStorage.getItem('amv-theme') || 'dark');
+
+const importantClaims = [
+    'x-ms-attestation-type',
+    'x-ms-compliance-status',
+    'x-ms-sevsnpvm-is-debuggable',
+    'x-ms-policy-hash',
+    'iss',
+    'iat',
+    'exp'
+];
+
+function renderClaimValue(value) {
+    try {
+        const parsed = JSON.parse(value);
+        if (typeof parsed === 'object' && parsed !== null) {
+            return JSON.stringify(parsed, null, 2);
+        }
+    } catch {
+    }
+    return value;
+}
+
+function buildAttestationSummary(claimMap) {
+    const tiles = [
+        { label: 'Attestation Type', value: claimMap['x-ms-attestation-type'] || 'n/a' },
+        { label: 'Compliance', value: claimMap['x-ms-compliance-status'] || 'n/a' },
+        { label: 'Debuggable', value: claimMap['x-ms-sevsnpvm-is-debuggable'] || 'n/a' },
+        { label: 'Policy Hash', value: claimMap['x-ms-policy-hash'] || 'n/a' }
+    ];
+
+    attestSummary.innerHTML = '';
+    tiles.forEach(tile => {
+        const block = document.createElement('div');
+        block.className = 'summary-tile';
+        if (tile.label === 'Compliance') {
+            const compliance = String(tile.value || '').toLowerCase();
+            if (compliance === 'azure-compliant-uvm') {
+                block.classList.add('pass');
+            } else {
+                block.classList.add('fail');
+            }
+        }
+        block.innerHTML = `<div class="summary-label">${safe(tile.label)}</div><div class="summary-value">${safe(tile.value)}</div>`;
+        attestSummary.appendChild(block);
+    });
+    attestSummary.style.display = 'grid';
+}
+
+btnAttest.onclick = async () => {
+    attestStatus.textContent = 'Running attestation...';
+    const res = await fetch('/api/attestation/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    const data = await res.json();
+    if (!res.ok || data.status !== 'ok') {
+        attestStatus.innerHTML = `<span class="bad">Attestation failed.</span> ${safe(data.message || 'Unknown error')}`;
+        return;
+    }
+
+    attestStatus.innerHTML = `<span class="ok">Attestation passed.</span> Review claims, then choose Proceed or Abort.`;
+    const claimMap = {};
+    (data.claims || []).forEach(c => {
+        claimMap[c.claim] = c.value;
+    });
+    buildAttestationSummary(claimMap);
+
+    const orderedClaims = [...(data.claims || [])].sort((a, b) => {
+        const ai = importantClaims.indexOf(a.claim);
+        const bi = importantClaims.indexOf(b.claim);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.claim.localeCompare(b.claim);
+    });
+
+    claimsBody.innerHTML = '';
+    orderedClaims.forEach(c => {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td>${safe(c.claim)}</td><td><pre class="claimValue">${safe(renderClaimValue(c.value))}</pre></td><td>${safe(c.meaning)}</td>`;
+        claimsBody.appendChild(row);
+    });
+    claimsScroll.style.display = 'block';
+    btnProceed.disabled = false;
+    btnAbort.disabled = false;
+
+    const complianceStatus = String(claimMap['x-ms-compliance-status'] || '').toLowerCase();
+    if (complianceStatus === 'azure-compliant-uvm') {
+        const proceedRes = await fetch('/api/attestation/decision', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ decision: 'proceed' })
+        });
+        const proceedData = await proceedRes.json();
+        if (proceedRes.ok && proceedData.status === 'ok') {
+            videoFile.disabled = false;
+            btnUpload.disabled = false;
+            btnProceed.disabled = true;
+            attestStatus.innerHTML = '<span class="ok">Attestation passed and compliance is azure-compliant-uvm.</span> Processing has been enabled automatically.';
+        }
+    }
+};
+
+btnProceed.onclick = async () => {
+    const res = await fetch('/api/attestation/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: 'proceed' }) });
+    const data = await res.json();
+    if (!res.ok) {
+        attestStatus.innerHTML = `<span class="bad">${safe(data.message || 'Unable to proceed')}</span>`;
+        return;
+    }
+    attestStatus.innerHTML = '<span class="ok">Proceed confirmed.</span> Upload is now enabled.';
+    videoFile.disabled = false;
+    btnUpload.disabled = false;
+};
+
+btnAbort.onclick = async () => {
+    await fetch('/api/attestation/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: 'abort' }) });
+    videoFile.disabled = true;
+    btnUpload.disabled = true;
+    attestStatus.innerHTML = '<span class="bad">Operation aborted by user.</span>';
+};
+
+btnUpload.onclick = async () => {
+    const file = videoFile.files[0];
+    if (!file) {
+        uploadStatus.innerHTML = '<span class="bad">Select an .mp4 file first.</span>';
+        return;
+    }
+    if (!file.name.toLowerCase().endsWith('.mp4')) {
+        uploadStatus.innerHTML = '<span class="bad">Only .mp4 files are accepted.</span>';
+        return;
+    }
+
+    const form = new FormData();
+    form.append('video', file);
+    form.append('profile', profileSelect.value || 'balanced');
+    setPlaybackControlsEnabled(false);
+    btnUpload.disabled = true;
+    uploadStatus.innerHTML = '<span class="muted">Uploading file securely over HTTPS...</span>';
+    uploadProgressBar.value = 0;
+    uploadProgressText.textContent = `Uploaded 0 B / ${formatBytes(file.size)} (0.0%)`;
+    progressSummary.textContent = 'Upload in progress. Status polling will start once the server accepts the file.';
+    renderWorkerProgress([], 0);
+
+    try {
+        const uploadResponse = await uploadFileWithProgress(form);
+        const resStatus = uploadResponse.status;
+        const raw = uploadResponse.raw;
+        let data;
+        try {
+            data = raw ? JSON.parse(raw) : {};
+        } catch {
+            data = { message: raw || 'Unexpected non-JSON response from server.' };
+        }
+
+        if (resStatus < 200 || resStatus >= 300 || data.status !== 'ok') {
+            uploadStatus.innerHTML = `<span class="bad">${safe(data.message || 'Upload failed')}</span>`;
+            uploadProgressText.textContent = 'Upload failed before server acceptance.';
+            btnUpload.disabled = false;
+            return;
+        }
+
+        currentJob = data.jobId;
+        uploadProgressBar.value = 100;
+        uploadProgressText.textContent = `Uploaded ${formatBytes(file.size)} / ${formatBytes(file.size)} (100.0%)`;
+        uploadStatus.innerHTML = '<span class="ok">Upload accepted. Processing started inside confidential container.</span>';
+        progressSummary.textContent = 'Polling processing status every 5 seconds...';
+        progressBar.value = 0;
+
+        if (statusTimer) clearInterval(statusTimer);
+        let statusErrorCount = 0;
+        const fetchStatus = async () => {
+            try {
+                const sRes = await fetch(`/api/status/${currentJob}`, { cache: 'no-store' });
+                const statusRaw = await sRes.text();
+                let sData;
+                try {
+                    sData = statusRaw ? JSON.parse(statusRaw) : {};
+                } catch {
+                    sData = { status: 'failed', message: statusRaw || 'Malformed status response.' };
+                }
+
+                if (!sRes.ok || sData.status !== 'ok') {
+                    throw new Error(sData.message || `Status request failed (${sRes.status})`);
+                }
+
+                statusErrorCount = 0;
+                const job = sData.job;
+                const percent = Number(job.progress || 0);
+                progressBar.value = percent;
+                const fpsSuffix = Number.isFinite(Number(job.processingFps)) ? ` | ${Number(job.processingFps).toFixed(2)} fps` : '';
+                const etaSuffix = Number.isFinite(Number(job.etaSeconds)) && Number(job.etaSeconds) >= 0
+                    ? ` | ETA ${String(Math.floor(Number(job.etaSeconds) / 60)).padStart(2, '0')}:${String(Math.floor(Number(job.etaSeconds) % 60)).padStart(2, '0')}`
+                    : '';
+                progressSummary.textContent = `${job.message} (${percent.toFixed(2)}%)${fpsSuffix}${etaSuffix}`;
+                renderWorkerProgress(job.workerProgress, job.totalFrames);
+
+                if (job.state === 'completed' && job.outputUrl) {
+                    clearInterval(statusTimer);
+                    player.src = job.outputUrl;
+                    player.load();
+                    setPlaybackControlsEnabled(true);
+                    renderWorkerProgress(job.workerProgress, job.totalFrames);
+                    const codecSuffix = job.outputCodec ? ` Output codec: ${safe(job.outputCodec)}.` : '';
+                    const normalizedSuffix = job.normalizedForBrowser
+                        ? ' Normalized for browser playback.'
+                        : (job.normalizationError ? ` Normalization warning: ${safe(job.normalizationError)}.` : '');
+                    playbackDiagnostics = `${codecSuffix}${normalizedSuffix}`;
+                    uploadStatus.innerHTML = `<span class="ok">Processing complete. Use playback controls below.</span>${playbackDiagnostics}`;
+                    btnUpload.disabled = false;
+                }
+                if (job.state === 'failed') {
+                    clearInterval(statusTimer);
+                    setPlaybackControlsEnabled(false);
+                    progressSummary.textContent = job.message || 'Processing failed.';
+                    uploadStatus.innerHTML = `<span class="bad">${safe(job.message || 'Processing failed')}</span>`;
+                    btnUpload.disabled = false;
+                }
+            } catch (err) {
+                statusErrorCount += 1;
+                if (statusErrorCount <= 3 || statusErrorCount % 5 === 0) {
+                    progressSummary.textContent = `Status retry ${statusErrorCount} (${safe(err?.message || 'status error')})`;
+                }
+                return;
+            }
+        };
+
+        await fetchStatus();
+        statusTimer = setInterval(fetchStatus, 5000);
+    } catch (err) {
+        uploadStatus.innerHTML = `<span class="bad">${safe(err?.message || 'Upload request failed.')}</span>`;
+        progressSummary.textContent = 'Upload failed before the server accepted the file. Check network/proxy and retry.';
+        renderWorkerProgress([], 0);
+        uploadProgressText.textContent = 'Upload failed before server acceptance.';
+        btnUpload.disabled = false;
+    }
+};
+
+function formatTime(v) {
+    const mm = String(Math.floor(v / 60)).padStart(2, '0');
+    const ss = String(Math.floor(v % 60)).padStart(2, '0');
+    return `${mm}:${ss}`;
+}
+
+player.addEventListener('timeupdate', () => {
+    const duration = player.duration || 0;
+    const current = player.currentTime || 0;
+    timeline.value = duration ? (current / duration) * 100 : 0;
+    timeLabel.textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+});
+
+player.addEventListener('error', () => {
+    const mediaError = player.error;
+    const code = mediaError ? Number(mediaError.code || 0) : 0;
+    const codeLabel = MEDIA_ERROR_CODES[code] || 'UNKNOWN_MEDIA_ERROR';
+    const source = player.currentSrc || player.src || 'n/a';
+    const runtime = ` code=${codeLabel} readyState=${player.readyState} networkState=${player.networkState} src=${safe(source)}`;
+    uploadStatus.innerHTML = `<span class="bad">Playback failed in this browser.</span>${playbackDiagnostics} ${runtime}`;
+});
+
+player.addEventListener('loadedmetadata', () => {
+    const duration = player.duration || 0;
+    timeline.value = 0;
+    timeLabel.textContent = `${formatTime(0)} / ${formatTime(duration)}`;
+});
+
+playPauseBtn.onclick = () => player.paused ? player.play() : player.pause();
+rewindBtn.onclick = () => player.currentTime = Math.max(0, player.currentTime - 10);
+forwardBtn.onclick = () => player.currentTime = Math.min(player.duration || 0, player.currentTime + 10);
+timeline.addEventListener('input', () => {
+    const duration = player.duration || 0;
+    player.currentTime = duration * (timeline.value / 100);
+});
+
+setPlaybackControlsEnabled(false);
+loadPlateTrackingSettings();
+</script>
+</body>
+</html>

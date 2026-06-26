@@ -48,6 +48,7 @@ Scripts and samples for creating Confidential Azure Container Instances (ACIs) u
 | [Visual Attestation Demo](visual-attestation-demo/README.md) | Interactive web application demonstrating remote attestation via Microsoft Azure Attestation (MAA) using the SKR sidecar |
 | [Visual Attestation Demo v2](visual-attestation-demo-v2/README.md) 🆕 | Simplified ACI port that calls MAA **directly** from the Flask app via the upstream `get-snp-report` tool (no SKR sidecar). Side-by-side Confidential vs Standard SKU deployment to demonstrate falsifiability. |
 | [App + PostgreSQL Finance Demo](app-and-postgreSQL-demo/README.md) 🆕 | Confidential ACI with DCa/ECa AMD PostgreSQL, 5,000 financial transactions, Application Gateway, and 9 threat scenarios |
+| [Automotive Machine Vision](../automotive-machine-vision/README.md) 🆕 | Attestation-gated HTTPS `.mp4` upload with consistent plate/sign redaction and rounded overlays for cars, trucks, pedestrians, and street signs under CCE policy enforcement |
 | [Sealed Container](sealed-container/README.md) 🆕 | Production-shaped sealed container: hand-authored restrictive CCE policy (no exec, no stdio, no logging), SKR-released AES key that unwraps an encrypted data bundle into tmpfs inside the TEE, signed SBOM + Trivy scan + cosign signatures over every artifact, signed top-level manifest with checksums. |
 
 ## New in Sealed Container (June 2026)
