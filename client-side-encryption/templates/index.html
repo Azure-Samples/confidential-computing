@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Client-side Encryption Demo</title>
+  <style>
+    :root {
+      --bg1: #f7f3ea;
+      --bg2: #f0efe9;
+      --panel: #ffffff;
+      --ink: #1e1f1c;
+      --muted: #666b61;
+      --accent: #1f6f6a;
+      --accent2: #e07a5f;
+      --border: #d9d5ca;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Segoe UI", "Gill Sans", sans-serif;
+      background: radial-gradient(circle at 10% 0%, var(--bg1), var(--bg2));
+    }
+    .wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(1.6rem, 3.8vw, 2.6rem);
+      letter-spacing: 0.02em;
+    }
+    .sub {
+      margin: 0 0 16px;
+      color: var(--muted);
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 14px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 16px;
+      cursor: pointer;
+      color: #fff;
+      background: var(--accent);
+      font-weight: 600;
+    }
+    button.secondary { background: var(--accent2); }
+    input[type="text"] {
+      flex: 1;
+      min-width: 220px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: inherit;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f5f4ef;
+      border: 1px solid #e6e3d9;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid #ece9df;
+      padding: 8px;
+    }
+    th {
+      background: #f8f7f2;
+      position: sticky;
+      top: 0;
+    }
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    .ok { color: #1f6f6a; }
+    .err { color: #a13434; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Client-side Encryption on Confidential ACI</h1>
+    <p class="sub">Secure Key Release -> Encrypt data -> Store in Blob/Table/Queue -> Decrypt for verification.</p>
+
+    <section class="panel">
+      <div class="row">
+        <button id="getSecretBtn">get secret data</button>
+        <input id="recordInput" type="text" placeholder="Type a string to encrypt and add" />
+        <button class="secondary" id="addBtn">add record</button>
+      </div>
+      <div id="status" class="status">Ready.</div>
+    </section>
+
+    <section class="panel">
+      <h3>Process Trace</h3>
+      <pre id="processOutput">{}</pre>
+    </section>
+
+    <section class="panel">
+      <h3>Key Info</h3>
+      <pre id="keyOutput">{}</pre>
+    </section>
+
+    <section class="panel">
+      <h3>Encrypted vs Decrypted Records</h3>
+      <div style="overflow:auto; max-height: 460px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Store</th>
+              <th>Record Id</th>
+              <th>Encrypted Raw Payload</th>
+              <th>Decrypted Value</th>
+              <th>Key Used</th>
+            </tr>
+          </thead>
+          <tbody id="recordsBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const processEl = document.getElementById('processOutput');
+    const keyEl = document.getElementById('keyOutput');
+    const bodyEl = document.getElementById('recordsBody');
+    const recordInput = document.getElementById('recordInput');
+
+    function setStatus(text, ok = true) {
+      statusEl.textContent = text;
+      statusEl.className = ok ? 'status ok' : 'status err';
+    }
+
+    function renderRecords(records) {
+      bodyEl.innerHTML = '';
+      if (!records || records.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="5">No records found yet.</td>';
+        bodyEl.appendChild(tr);
+        return;
+      }
+      records.forEach((r) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${r.store || ''}</td>
+          <td>${r.id || ''}<br><small>${r.createdAt || ''}</small></td>
+          <td><pre>${(r.encrypted || '').replace(/</g, '&lt;')}</pre></td>
+          <td>${r.decrypted ? r.decrypted : ('<span style="color:#a13434">' + (r.decryptError || 'Unable to decrypt') + '</span>')}</td>
+          <td>${r.keyId || ''}</td>
+        `;
+        bodyEl.appendChild(tr);
+      });
+    }
+
+    async function fetchSecretData() {
+      setStatus('Running secure key release and reading stores...');
+      try {
+        const res = await fetch('/api/get-secret-data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        processEl.textContent = JSON.stringify(data.process || data, null, 2);
+        keyEl.textContent = JSON.stringify(data.key || {}, null, 2);
+        renderRecords(data.records || []);
+        if (!res.ok || !data.ok) {
+          setStatus(data.error || 'get secret data failed.', false);
+          return;
+        }
+        setStatus('Completed secure key release and data read.');
+      } catch (err) {
+        setStatus('Request failed: ' + err.message, false);
+      }
+    }
+
+    async function addRecord() {
+      const value = recordInput.value.trim();
+      if (!value) {
+        setStatus('Enter a value first.', false);
+        return;
+      }
+      setStatus('Encrypting and adding a record...');
+      try {
+        const res = await fetch('/api/add-record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value })
+        });
+        const data = await res.json();
+        keyEl.textContent = JSON.stringify(data.key || {}, null, 2);
+        renderRecords(data.records || []);
+        if (!res.ok || !data.ok) {
+          setStatus(data.error || 'add record failed.', false);
+          return;
+        }
+        recordInput.value = '';
+        setStatus('Record added and encrypted successfully.');
+      } catch (err) {
+        setStatus('Request failed: ' + err.message, false);
+      }
+    }
+
+    document.getElementById('getSecretBtn').addEventListener('click', fetchSecretData);
+    document.getElementById('addBtn').addEventListener('click', addRecord);
+  </script>
+</body>
+</html>
