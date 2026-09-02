@@ -444,7 +444,11 @@ switch ($osType) {
     }
     "Ubuntu" { # updated to use Ubuntu 24.04 LTS
         $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Linux -ComputerName $vmname -Credential $cred;
-        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer 'ubuntu-24_04-lts' -Skus 'cvm' -Version "latest";
+        if ($GPU) {
+            $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer '0001-com-ubuntu-confidential-vm-jammy' -Skus '22_04-lts-cvm' -Version "latest";
+        } else {
+            $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer 'ubuntu-24_04-lts' -Skus 'cvm' -Version "latest";
+        }
         $VMIsLinux = $true
     }
     "RHEL" {
@@ -559,258 +563,135 @@ if (-not $DisableBastion) {
     write-host "VM is only accessible via private network connectivity (VPN, ExpressRoute, or peered networks)"
 }
 
-#---------GPU mode: install NVIDIA open-kernel driver + nvtrust local GPU verifier and run a GPU CC-mode attestation--
-# Only runs when -GPU was specified. The H100 SKU exposes a GPU running in CC (confidential
-# compute) mode; the NVIDIA local GPU verifier (nvtrust) talks to the GPU's RoT, fetches an
-# attestation report, validates it against NVIDIA's reference values, and prints a verdict.
-# This block is intentionally separate from the CPU SEV-SNP attestation below: with -GPU we
-# do *both* a GPU and a CPU attestation, so the caller sees end-to-end runtime evidence for
-# both the AMD SEV-SNP TEE and the NVIDIA H100 in CC mode.
+#---------GPU mode: run the checksum-pinned Azure H100 onboarding release and GPU attestation--------------------
 if ($GPU) {
-    write-host "----------------------------------------------------------------------------------------------------------------"
-    write-host "GPU step 1/3: installing Canonical-signed NVIDIA kernel module + nvtrust local GPU verifier inside the VM..." -ForegroundColor Magenta
-    $gpuInstallScript = @'
-#!/bin/bash
-set -e
-export DEBIAN_FRONTEND=noninteractive
+    function Invoke-GpuRunCommand {
+        param(
+            [Parameter(Mandatory)] [string] $Label,
+            [Parameter(Mandatory)] [string] $Script,
+            [Parameter(Mandatory)] [string] $SuccessMarker
+        )
 
-echo "--- secure boot state (signed modules required if enabled) ---"
-mokutil --sb-state 2>&1 || echo "(mokutil not installed)"
-echo "--- kernel ---"
-uname -r
-
-echo "--- apt-get update + base deps ---"
-apt-get update -y
-apt-get install -y python3-pip python3-venv git curl jq unzip mokutil ca-certificates dkms
-
-# Strategy: use Canonical-signed prebuilt NVIDIA kernel modules from the Ubuntu archive
-# instead of building NVIDIA's CUDA-repo DKMS package on top.
-KREL=$(uname -r)
-KFLAV=$(echo "$KREL" | sed -E 's/^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-//')
-KBASE=${KFLAV%-fde}
-echo "kernel release: $KREL"
-echo "kernel flavor:  $KFLAV"
-echo "kernel base:    $KBASE"
-
-echo "--- all linux-modules-nvidia-* matching kernel flavor '$KFLAV' ---"
-apt-cache search "^linux-modules-nvidia-.*${KFLAV}" | sed 's/^/  /' || true
-
-echo "--- preferring 'open' variants (required for H100 CC mode) ---"
-CAND=$(apt-cache search "^linux-modules-nvidia-.*${KFLAV}" | awk '{print $1}' | grep -- '-open' | sort -V)
-if [ -z "$CAND" ]; then
-    if [ "$KBASE" != "$KFLAV" ]; then
-        echo "WARNING: no -open package for flavor $KFLAV; trying base flavor $KBASE"
-        CAND=$(apt-cache search "^linux-modules-nvidia-.*${KBASE}" | awk '{print $1}' | grep -- '-open' | sort -V)
-    fi
-fi
-if [ -z "$CAND" ]; then
-    echo "WARNING: no -open variant found for flavor $KFLAV; falling back to non-open prebuilt (may not support H100 CC)"
-    CAND=$(apt-cache search "^linux-modules-nvidia-.*${KFLAV}" | awk '{print $1}' | sort -V)
-fi
-if [ -z "$CAND" -a "$KBASE" != "$KFLAV" ]; then
-    echo "WARNING: no package found for flavor $KFLAV; trying non-open base flavor $KBASE"
-    CAND=$(apt-cache search "^linux-modules-nvidia-.*${KBASE}" | awk '{print $1}' | sort -V)
-fi
-echo "$CAND" | sed 's/^/  /'
-
-if [ -z "$CAND" ]; then
-    echo "ERROR: no signed prebuilt NVIDIA module package available for kernel flavor '$KFLAV'."
-    echo "       All linux-modules-nvidia-* in the archive (any flavor):"
-    apt-cache search '^linux-modules-nvidia-' | sed 's/^/  /' | head -40
-    exit 1
-fi
-
-PKG=$(echo "$CAND" | tail -1)
-BRANCH=$(echo "$PKG" | sed -E 's/^linux-modules-nvidia-([0-9]+).*$/\1/')
-echo "selected kernel module package: $PKG (branch $BRANCH)"
-
-echo "--- installing $PKG (Canonical-signed prebuilt module) ---"
-apt-get install -y "$PKG"
-
-if ! find /lib/modules/${KREL}/ -name 'nvidia*.ko*' -print -quit | grep -q .; then
-    echo "WARNING: no nvidia modules found under /lib/modules/${KREL} after installing $PKG"
-    if [ "$KBASE" != "$KFLAV" ]; then
-        ALT=$(apt-cache search "^linux-modules-nvidia-.*${KBASE}" | awk '{print $1}' | grep -- '-open' | sort -V | tail -1)
-        if [ -n "$ALT" ] && [ "$ALT" != "$PKG" ]; then
-            echo "Attempting alternate package for base flavor: $ALT"
-            apt-get install -y "$ALT" || true
-        fi
-    fi
-fi
-
-if ! find /lib/modules/${KREL}/ -name 'nvidia*.ko*' -print -quit | grep -q .; then
-    echo "WARNING: current kernel ${KREL} still has no NVIDIA modules."
-    echo "Installing Azure FDE LTS kernel + matching NVIDIA meta package so next boot uses a compatible kernel/module set..."
-
-    # On some images, the VM boots a newer edge kernel (for example 6.17) while NVIDIA prebuilt
-    # modules are only published for the LTS azure-fde kernel track (for example 6.8).
-    apt-get install -y linux-image-azure-fde-lts-24.04 linux-headers-azure-fde-lts-24.04 || true
-
-    META="linux-modules-nvidia-${BRANCH}-server-open-azure-fde-lts-24.04"
-    if apt-cache show "$META" >/dev/null 2>&1; then
-        apt-get install -y "$META" || true
-    else
-        META="linux-modules-nvidia-${BRANCH}-open-azure-fde-lts-24.04"
-        if apt-cache show "$META" >/dev/null 2>&1; then
-            apt-get install -y "$META" || true
-        fi
-    fi
-
-    echo "--- installed kernels after fallback ---"
-    dpkg -l | grep -E '^ii\s+linux-image-[0-9]|^ii\s+linux-image-azure-fde' | awk '{print $2, $3}' || true
-    echo "--- available nvidia modules under /lib/modules ---"
-    find /lib/modules -path '*/kernel/drivers/*' -name 'nvidia*.ko*' 2>/dev/null | head -50 || true
-fi
-
-if ! find /lib/modules/${KREL}/ -name 'nvidia*.ko*' -print -quit | grep -q .; then
-    TARGET_KREL=$(for d in /lib/modules/*; do
-        k=$(basename "$d")
-        if find "$d" -name 'nvidia*.ko*' -print -quit | grep -q .; then
-            echo "$k"
-        fi
-    done | sort -V | tail -1)
-
-    if [ -n "$TARGET_KREL" ] && [ "$TARGET_KREL" != "$KREL" ]; then
-        echo "No NVIDIA module for running kernel ${KREL}; target kernel with module is ${TARGET_KREL}."
-        echo "Removing current edge kernel package so next reboot lands on the module-compatible kernel."
-        apt-get purge -y "linux-image-${KREL}" "linux-modules-${KREL}" || true
-        update-grub || true
-    fi
-fi
-
-echo "--- installing matching userspace: nvidia-utils-${BRANCH}-server (headless) ---"
-apt-get install -y "nvidia-utils-${BRANCH}-server" || apt-get install -y "nvidia-utils-${BRANCH}"
-
-echo "--- post-install verification ---"
-echo ">>> dpkg -l matching nvidia/linux-modules-nvidia"
-dpkg -l 2>/dev/null | grep -E 'nvidia|linux-modules-nvidia' || echo "(none)"
-echo ">>> built kernel modules for ${KREL}"
-find /lib/modules/${KREL}/ -name 'nvidia*.ko*' 2>/dev/null | head -20 || echo "(none)"
-echo ">>> module signers (Canonical key expected for SB-trusted load)"
-for f in $(find /lib/modules/${KREL}/ -name 'nvidia*.ko*' 2>/dev/null); do
-    echo "  $f -> $(modinfo -F signer "$f" 2>/dev/null | head -1)"
-done
-
-echo "--- cloning NVIDIA nvtrust (local GPU verifier) ---"
-rm -rf /opt/nvtrust
-git clone --depth 1 https://github.com/NVIDIA/nvtrust.git /opt/nvtrust 2>&1 | tail -5
-
-echo "--- creating venv and installing local_gpu_verifier ---"
-python3 -m venv /opt/gpu-verifier-venv
-/opt/gpu-verifier-venv/bin/pip install --quiet --upgrade pip
-/opt/gpu-verifier-venv/bin/pip install --quiet -e /opt/nvtrust/guest_tools/gpu_verifiers/local_gpu_verifier 2>&1 | tail -5 || true
-
-echo "--- driver/verifier install complete; the VM will now be rebooted to load the new NVIDIA kernel module ---"
-'@
-    try {
-        $gpuInstallOut = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunShellScript' -ScriptString $gpuInstallScript -ErrorAction Stop
-        foreach ($entry in $gpuInstallOut.Value) { if ($entry.Message) { write-host $entry.Message } }
-    } catch {
-        throw "GPU step 1/3 failed: $($_.Exception.Message)"
-    }
-
-    write-host "----------------------------------------------------------------------------------------------------------------"
-    write-host "GPU step 2/3: rebooting VM to load NVIDIA open-kernel module..." -ForegroundColor Magenta
-    Restart-AzVM -ResourceGroupName $resgrp -Name $vmname | Out-Null
-    write-host "Waiting 60s after reboot for the OS + run-command extension to come back up..."
-    Start-Sleep -Seconds 60
-
-    write-host "----------------------------------------------------------------------------------------------------------------"
-    write-host "GPU step 3/3: running NVIDIA local GPU verifier (verifier.cc_admin) for H100 CC-mode attestation..." -ForegroundColor Magenta
-    $gpuAttestScript = @'
-#!/bin/bash
-set -e
-
-# Poll nvidia-smi until the driver is loaded. After reboot, the NVIDIA kernel module can
-# take a couple of minutes to initialize. Without this wait, nvmlInit() inside the verifier
-# returns DriverNotLoaded and attestation fails spuriously.
-echo "--- waiting for nvidia-smi to respond (driver readiness probe) ---"
-DRIVER_READY=0
-for i in $(seq 1 30); do
-    depmod -a >/dev/null 2>&1 || true
-    modprobe nvidia >/dev/null 2>&1 || true
-    modprobe nvidia_uvm >/dev/null 2>&1 || true
-    modprobe nvidia_modeset >/dev/null 2>&1 || true
-
-    if nvidia-smi >/dev/null 2>&1; then
-        echo "nvidia driver ready (attempt $i)."
-        DRIVER_READY=1
-        break
-    fi
-    if [ "$i" -eq 30 ]; then
-        echo "WARNING: nvidia-smi still not responding after 5 minutes."
-        echo "--- mokutil --sb-state ---"
-        mokutil --sb-state 2>&1 || echo "(mokutil not installed)"
-        echo "--- dkms status ---"
-        dkms status 2>&1 || true
-        echo "--- built nvidia .ko under /lib/modules/$(uname -r) ---"
-        find /lib/modules/$(uname -r)/ -name 'nvidia*.ko*' 2>/dev/null | head -20 || echo "(none)"
-        echo "--- modprobe -v nvidia (manual load attempt) ---"
-        modprobe -v nvidia 2>&1 | head -20 || true
-        echo "--- journalctl -b | grep -iE 'nvidia|dkms|secure' (tail) ---"
-        journalctl -b 2>/dev/null | grep -iE 'nvidia|dkms|secure' | tail -50 || true
-        echo "--- dmesg | grep -i nvidia (tail) ---"
-        dmesg 2>/dev/null | grep -i nvidia | tail -50 || true
-        echo "--- lsmod | grep nvidia ---"
-        lsmod | grep -i nvidia || echo "(no nvidia kernel modules loaded)"
-    else
-        sleep 10
-    fi
-done
-
-if [ "$DRIVER_READY" -ne 1 ]; then
-    echo "ERROR: NVIDIA driver did not load; refusing to run GPU verifier."
-    exit 1
-fi
-
-echo "--- nvidia-smi ---"
-nvidia-smi
-
-echo ""
-echo "--- /opt/nvtrust/.../local_gpu_verifier : verifier.cc_admin ---"
-if [ -x /opt/gpu-verifier-venv/bin/python3 ] && [ -d /opt/nvtrust/guest_tools/gpu_verifiers/local_gpu_verifier ]; then
-    cd /opt/nvtrust/guest_tools/gpu_verifiers/local_gpu_verifier
-    /opt/gpu-verifier-venv/bin/python3 -m verifier.cc_admin 2>&1
-else
-    echo "Local GPU verifier was not installed in step 1/3; failing."
-    exit 1
-fi
-'@
-    $gpuOutput = $null
-    for ($attempt = 1; $attempt -le 6; $attempt++) {
-        try {
-            write-host "GPU verifier run-command attempt $attempt of 6..." -ForegroundColor Cyan
-            $gpuOutput = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunShellScript' -ScriptString $gpuAttestScript -ErrorAction Stop
-            break
-        } catch {
-            $msg = $_.Exception.Message
-            if ($attempt -lt 6 -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*' -or $msg -like '*not ready*')) {
-                write-host "Run-command extension busy/not ready; waiting 30s..." -ForegroundColor Yellow
-                Start-Sleep -Seconds 30
-            } else {
+        for ($attempt = 1; $attempt -le 10; $attempt++) {
+            try {
+                write-host "$Label run-command attempt $attempt of 10..." -ForegroundColor Cyan
+                $result = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunShellScript' -ScriptString $Script -ErrorAction Stop
+                $text = ($result.Value | ForEach-Object { $_.Message }) -join "`n"
+                foreach ($entry in $result.Value) {
+                    if ($entry.Message) { write-host $entry.Message }
+                }
+                if ($text -notmatch [regex]::Escape($SuccessMarker)) {
+                    throw "$Label did not produce success marker '$SuccessMarker'."
+                }
+                return $text
+            } catch {
+                $message = $_.Exception.Message
+                $isTransient = $message -match 'Conflict|in progress|409|not ready|OperationPreempted|preempted|Canceled|ResourceNotFound|was not found'
+                if ($attempt -lt 10 -and $isTransient) {
+                    write-host "$Label endpoint busy/not ready; waiting 45s..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds 45
+                    continue
+                }
                 throw
             }
         }
     }
 
     write-host "----------------------------------------------------------------------------------------------------------------"
-    write-host "--------------Output from NVIDIA local GPU verifier (H100 CC-mode attestation)--------------" -ForegroundColor Magenta
-    $gpuOutputText = ""
-    if ($gpuOutput) {
-        foreach ($entry in $gpuOutput.Value) {
-            if ($entry.Message) {
-                write-host $entry.Message
-                $gpuOutputText += $entry.Message
-            }
+    write-host "GPU step 1/5: preparing the supported Azure FDE kernel with Azure CGPU onboarding V4.3.3..." -ForegroundColor Magenta
+    $gpuKernelScript = @'
+#!/bin/bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+cloud-init status --wait 2>/dev/null || true
+PACKAGE=/tmp/cgpu-onboarding-package.tar.gz
+INSTALL_DIR=/opt/cgpu-onboarding
+URL=https://github.com/Azure/az-cgpu-onboarding/releases/download/V4.3.3/cgpu-onboarding-package.tar.gz
+SHA256=297a9ebbb2228a4ef26c0e9d3b7917a0d9e90bfb52bcb4713c50cd6a3658d8f3
+
+curl -fsSL --retry 5 --retry-connrefused --retry-delay 10 "$URL" -o "$PACKAGE"
+echo "$SHA256  $PACKAGE" | sha256sum --check --strict
+rm -rf "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
+tar -xzf "$PACKAGE" -C "$INSTALL_DIR"
+cd "$INSTALL_DIR/cgpu-onboarding-package"
+test -f step-0-prepare-kernel.sh
+sed '/^[[:space:]]*sudo reboot[[:space:]]*$/d' step-0-prepare-kernel.sh > step-0-prepare-kernel-no-reboot.sh
+bash ./step-0-prepare-kernel-no-reboot.sh --enable-snapshot 20260615T120000Z
+echo "Running kernel before required reboot: $(uname -r)"
+echo "Newest installed kernel: $(find /lib/modules -mindepth 1 -maxdepth 1 -printf '%f\n' | sort -V | tail -1)"
+echo "GPU_KERNEL_PREPARED=1"
+'@
+    Invoke-GpuRunCommand -Label 'GPU kernel preparation' -Script $gpuKernelScript -SuccessMarker 'GPU_KERNEL_PREPARED=1' | Out-Null
+
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "GPU step 2/5: rebooting into the supported kernel..." -ForegroundColor Magenta
+    Restart-AzVM -ResourceGroupName $resgrp -Name $vmname | Out-Null
+    Start-Sleep -Seconds 90
+
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "GPU step 3/5: installing the NVIDIA 595 open driver from Azure CGPU onboarding V4.3.3..." -ForegroundColor Magenta
+    $gpuDriverScript = @'
+#!/bin/bash
+set -euo pipefail
+cd /opt/cgpu-onboarding/cgpu-onboarding-package
+test -f step-1-install-gpu-driver.sh
+echo "Running kernel: $(uname -r)"
+printf '%s\n%s\n' '6.8.0-1025-azure' "$(uname -r)" | sort --check=quiet --version-sort
+bash ./step-1-install-gpu-driver.sh
+nvidia-smi
+echo "GPU_DRIVER_INSTALLED=1"
+'@
+    Invoke-GpuRunCommand -Label 'GPU driver installation' -Script $gpuDriverScript -SuccessMarker 'GPU_DRIVER_INSTALLED=1' | Out-Null
+
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "GPU step 4/5: rebooting after NVIDIA driver installation..." -ForegroundColor Magenta
+    Restart-AzVM -ResourceGroupName $resgrp -Name $vmname | Out-Null
+    Start-Sleep -Seconds 90
+
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "GPU step 5/5: validating H100 CC mode and running GPU attestation..." -ForegroundColor Magenta
+    $gpuAttestScript = @'
+#!/bin/bash
+set -euo pipefail
+cd /opt/cgpu-onboarding/cgpu-onboarding-package
+
+for attempt in $(seq 1 30); do
+    if nvidia-smi >/dev/null 2>&1; then break; fi
+    if [ "$attempt" -eq 30 ]; then
+        echo "ERROR: nvidia-smi did not become ready."
+        journalctl -b 2>/dev/null | grep -iE 'nvidia|secure|pci' | tail -100 || true
+        exit 1
+    fi
+    sleep 10
+done
+
+echo "GPU_KERNEL=$(uname -r)"
+nvidia-smi
+CC_STATUS=$(nvidia-smi conf-compute -f)
+CC_ENVIRONMENT=$(nvidia-smi conf-compute -e)
+echo "$CC_STATUS"
+echo "$CC_ENVIRONMENT"
+test "$CC_STATUS" = 'CC status: ON'
+test "$CC_ENVIRONMENT" = 'CC Environment: PRODUCTION'
+
+set +e
+bash ./step-2-attestation.sh --gpu-only 2>&1 | tee /tmp/gpu-attestation.log
+ATTEST_EXIT=${PIPESTATUS[0]}
+set -e
+test "$ATTEST_EXIT" -eq 0
+grep -F 'GPU Attestation is Successful.' /tmp/gpu-attestation.log
+echo "$CC_STATUS"
+echo "$CC_ENVIRONMENT"
+echo "GPU_ATTEST_EXIT=0"
+'@
+    $gpuOutputText = Invoke-GpuRunCommand -Label 'GPU attestation' -Script $gpuAttestScript -SuccessMarker 'GPU_ATTEST_EXIT=0'
+    foreach ($requiredGpuEvidence in @('CC status: ON', 'CC Environment: PRODUCTION', 'GPU Attestation is Successful.')) {
+        if ($gpuOutputText -notmatch [regex]::Escape($requiredGpuEvidence)) {
+            throw "GPU attestation output did not contain '$requiredGpuEvidence'."
         }
-    } else {
-        write-host "(no GPU verifier output was captured)" -ForegroundColor Yellow
     }
-
-    if ($gpuOutputText -match 'ERROR:\s+NVIDIA driver did not load|NVIDIA-SMI has failed|Driver Not Loaded|Attestation Failed|verifier\.cc_admin exited with code\s+[1-9]|no nvidia kernel modules loaded') {
-        throw "GPU attestation failed inside the VM. See NVIDIA verifier output above."
-    }
-
     write-host "----------------------------------------------------------------------------------------------------------------"
 }
 
@@ -910,6 +791,7 @@ echo "--------- attest --c $attestConfig ---------"
 ATTEST_EXIT=`${PIPESTATUS[0]}
 if [ `$ATTEST_EXIT -ne 0 ]; then
     echo "attest exited with code `$ATTEST_EXIT"
+    exit `$ATTEST_EXIT
 fi
 
 # Extract JWT (a single token of the form xxx.yyy.zzz with base64url chars)
@@ -927,8 +809,15 @@ if [ -n "`$JWT" ] && command -v jq >/dev/null 2>&1; then
     b64d "`$P" | jq .
     echo "--- key MAA claims ---"
     b64d "`$P" | jq '{iss, "x-ms-attestation-type", "x-ms-compliance-status", "x-ms-isolation-tee": ."x-ms-isolation-tee"."x-ms-attestation-type", "x-ms-runtime-vm-configuration-secure-boot": ."x-ms-runtime"."vm-configuration"."secure-boot", "x-ms-runtime-vm-configuration-tpm-enabled": ."x-ms-runtime"."vm-configuration"."tpm-enabled"}'
+    COMPLIANCE=`$(b64d "`$P" | jq -r '."x-ms-compliance-status"')
+    if [ "`$COMPLIANCE" != "azure-compliant-cvm" ]; then
+        echo "ERROR: unexpected x-ms-compliance-status: `$COMPLIANCE"
+        exit 1
+    fi
+    echo "CPU_ATTEST_COMPLIANCE=azure-compliant-cvm"
 else
     echo "(no JWT found in attest output to decode, or jq unavailable)"
+    exit 1
 fi
 
 cd /
@@ -1099,7 +988,7 @@ Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
             break
         } catch {
             $msg = $_.Exception.Message
-            if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*')) {
+            if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*' -or $msg -like '*OperationPreempted*' -or $msg -like '*preempted*' -or $msg -like '*Canceled*')) {
                 write-host "Run-command extension busy (409); waiting 60s before retry..." -ForegroundColor Yellow
                 Start-Sleep -Seconds 60
             } elseif ($attempt -lt $maxAttempts -and ($msg -like '*ResourceNotFound*' -or $msg -like '*was not found*')) {
@@ -1125,6 +1014,9 @@ Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
     if ($attestationText -match 'Failed to download attest-win\.zip|Failed to download attest-lin\.zip|No zip extractor available|attest\.exe exited with code\s+[1-9]|attest exited with code\s+[1-9]') {
         write-host "Attestation failed inside the VM. See output above for details." -ForegroundColor Red
         throw "In-VM attestation failed"
+    }
+    if ($VMisLinux -and $attestationText -notmatch 'CPU_ATTEST_COMPLIANCE=azure-compliant-cvm') {
+        throw "In-VM attestation did not produce the expected azure-compliant-cvm claim"
     }
     write-host "----------------------------------------------------------------------------------------------------------------"
     write-host "Build and attestation complete." -ForegroundColor Green

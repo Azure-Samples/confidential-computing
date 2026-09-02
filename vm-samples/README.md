@@ -1,6 +1,6 @@
 # Confidential Virtual Machines
 
-**Last Updated:** June 2026
+**Last Updated:** September 2026
 
 ## Overview
 
@@ -43,7 +43,7 @@ Deploy Confidential Virtual Machines (CVMs) with AMD SEV-SNP or Intel TDX hardwa
 
 | Script | Description | Status |
 |--------|-------------|--------|
-| `BuildRandomCVM.ps1` | Deploy CVM with Confidential OS disk encryption + CMK and Bastion. Pass `-GPU` for an H100 confidential GPU VM with NVIDIA driver install + GPU CC-mode attestation. | **Stable** (CPU paths) / **Draft** (GPU path) |
+| `BuildRandomCVM.ps1` | Deploy CVM with Confidential OS disk encryption + CMK and Bastion. Pass `-GPU` for an H100 confidential GPU VM with NVIDIA driver install + GPU CC-mode attestation. | **Stable** |
 | `BuildRandomSQLCVM.ps1` | SQL Server 2022 on Confidential VM | **Stable** |
 
 ---
@@ -163,14 +163,12 @@ The `-GPU` switch builds an NVIDIA H100 SEV-SNP confidential GPU VM (`Standard_N
 3. **Switches the Ubuntu image** from the default Ubuntu 24.04 CVM (`Canonical/ubuntu-24_04-lts/cvm`) to the documented Ubuntu 22.04 CVM base for NCC H100 v5 (`Canonical/0001-com-ubuntu-confidential-vm-jammy/22_04-lts-cvm`).
 4. **Switches the default region** from `northeurope` to `eastus2` (one of the regions where the H100 CVM SKU is offered without a subscription restriction; `westeurope` is also supported — set `-region westeurope` if you prefer).
 5. **Pre-flight checks the SKU and quota** the same way as the SEV-SNP / TDX path: the script will fail fast if `Standard_NCC40ads_H100_v5` is not offered in the region or the `StandardNCCads2023Family` vCPU quota is below 40 vCPUs.
-6. **Installs NVIDIA components inside the VM** via `Invoke-AzVMRunCommand`:
-   - Canonical-signed `linux-modules-nvidia-*` open-kernel driver packages (required for H100 CC mode — the proprietary driver does **not** support CC mode)
-   - `git`, `python3-venv`, and supporting tooling
-   - clones [`NVIDIA/nvtrust`](https://github.com/NVIDIA/nvtrust) and pip-installs the **local GPU verifier** (`guest_tools/gpu_verifiers/local_gpu_verifier`) into a venv
-7. **Converges kernel + module compatibility before reboot**: if the currently running kernel does not have an available NVIDIA module, the script installs the Azure FDE LTS kernel track and matching NVIDIA meta package, then removes the incompatible edge kernel package so the next boot lands on a module-compatible kernel.
-8. **Reboots the VM** so the selected NVIDIA kernel module can load on the active kernel.
-9. **Runs the GPU CC-mode attestation** (`python3 -m verifier.cc_admin`) and prints the verifier verdict back to the caller. This produces a hardware-rooted attestation report that the H100 is in CC mode, fetched from the GPU's RoT and validated against NVIDIA's reference values.
-10. **Then runs the normal SEV-SNP CPU attestation** with `cvm-attestation-tools` and prints the MAA JWT + decoded claims, exactly like a non-GPU run.
+6. **Downloads and verifies Microsoft Azure CGPU onboarding V4.3.3** from [`Azure/az-cgpu-onboarding`](https://github.com/Azure/az-cgpu-onboarding/releases/tag/V4.3.3). The script pins `cgpu-onboarding-package.tar.gz` to SHA-256 `297a9ebbb2228a4ef26c0e9d3b7917a0d9e90bfb52bcb4713c50cd6a3658d8f3` before executing it.
+7. **Prepares the kernel and reboots** using the release's `step-0-prepare-kernel.sh` with the `20260615T120000Z` Ubuntu snapshot. Current NVIDIA 595 packages require kernel `6.8.0-1025-azure` or newer. The host controls the reboot so it can require a positive completion marker first.
+8. **Installs the NVIDIA driver and reboots again** using `step-1-install-gpu-driver.sh`. This installs the Canonical-signed NVIDIA 595 server open module, configures the persistence daemon, creates the NVIDIA device nodes, and verifies `nvidia-smi` before the second reboot.
+9. **Validates GPU confidential-compute state** by requiring exact output from `nvidia-smi conf-compute -f` and `-e`: `CC status: ON` and `CC Environment: PRODUCTION`.
+10. **Runs GPU attestation** with the release's `step-2-attestation.sh --gpu-only`. Success requires exit code zero and the exact verdict `GPU Attestation is Successful.` The verifier checks the report certificate chain and revocation status, nonce, report signature, driver and VBIOS RIMs, and runtime measurements against NVIDIA golden measurements.
+11. **Runs the normal SEV-SNP CPU attestation** with `cvm-attestation-tools`, decodes the MAA JWT, and requires `x-ms-compliance-status=azure-compliant-cvm`.
 
 > Note: `-GPU` requires outbound internet access to install the NVIDIA verifier tooling, so it cannot be combined with `-NoInternetAccess`.
 
@@ -202,7 +200,44 @@ Reference: [Azure NCCads H100 v5-series](https://learn.microsoft.com/azure/virtu
 ./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "h100eu" -osType "Ubuntu" -GPU -region "westeurope" -smoketest -DisableBastion
 ```
 
-> Note: this path takes substantially longer than a normal CVM run because NVIDIA driver install, kernel/module convergence checks, reboot, and nvtrust verifier setup can add 10–20 minutes on top of the base CVM build time.
+> Note: this path takes substantially longer than a normal CVM run because the supported flow includes a kernel dist-upgrade, two reboots, NVIDIA driver installation, and GPU and CPU attestation.
+
+### Validated West Europe smoke test (September 2, 2026)
+
+The example above was validated end to end in West Europe with `-smoketest -DisableBastion`. The VM had no public IP and used a NAT Gateway for outbound package, RIM, certificate, and attestation access.
+
+| Property | Validated value |
+|---|---|
+| VM SKU / quota family | `Standard_NCC40ads_H100_v5` / `StandardNCCads2023Family` (40 vCPUs) |
+| Image | `Canonical:0001-com-ubuntu-confidential-vm-jammy:22_04-lts-cvm:22.04.202608270` |
+| VM security | `ConfidentialVM`, Secure Boot enabled, vTPM enabled |
+| Confidential OS disk | `DiskWithVMGuestState`, CMK-backed Disk Encryption Set |
+| Guest kernel | `6.8.0-1064-azure-fde` |
+| GPU | NVIDIA H100 NVL, 95,830 MiB, VBIOS `96.00.9F.00.04` |
+| NVIDIA driver | `595.71.05`, signer `Canonical Ltd. Kernel Module Signing` |
+| GPU CC state | `CC status: ON`; `CC Environment: PRODUCTION` |
+| GPU attestation | `GPU Attestation is Successful.`; certificate, nonce, signature, RIM, and runtime measurements passed |
+| CPU attestation | `x-ms-attestation-type=sevsnpvm`; `x-ms-compliance-status=azure-compliant-cvm`; issuer `https://sharedweu.weu.attest.azure.net` |
+
+The successful GPU verifier output ended with:
+
+```text
+GPU is in expected state.
+GPU 0 ... verified successfully.
+GPU Attestation is Successful.
+CC status: ON
+CC Environment: PRODUCTION
+GPU_ATTEST_EXIT=0
+```
+
+The successful CPU attestation output ended with:
+
+```text
+Attestation Type: sevsnpvm
+Status: azure-compliant-cvm
+Attested Platform Successfully!!
+CPU_ATTEST_COMPLIANCE=azure-compliant-cvm
+```
 
 ## Quickstart
 
