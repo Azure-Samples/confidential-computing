@@ -618,7 +618,7 @@ tar -xzf "$PACKAGE" -C "$INSTALL_DIR"
 cd "$INSTALL_DIR/cgpu-onboarding-package"
 test -f step-0-prepare-kernel.sh
 sed '/^[[:space:]]*sudo reboot[[:space:]]*$/d' step-0-prepare-kernel.sh > step-0-prepare-kernel-no-reboot.sh
-bash ./step-0-prepare-kernel-no-reboot.sh --enable-snapshot 20260615T120000Z
+bash ./step-0-prepare-kernel-no-reboot.sh --enable-snapshot 20260827T120000Z
 echo "Running kernel before required reboot: $(uname -r)"
 echo "Newest installed kernel: $(find /lib/modules -mindepth 1 -maxdepth 1 -printf '%f\n' | sort -V | tail -1)"
 echo "GPU_KERNEL_PREPARED=1"
@@ -1060,11 +1060,14 @@ if ($smoketest) {
     } else {
         write-host "`nProceeding with resource deletion..."
         try {
-            Remove-AzResourceGroup -Name $resgrp -Force -AsJob
-            write-host "Resource group deletion initiated successfully (running in background)"
-            write-host "All resources in resource group '$resgrp' are being removed"
+            Remove-AzResourceGroup -Name $resgrp -Force -ErrorAction Stop | Out-Null
+            if (Get-AzResourceGroup -Name $resgrp -ErrorAction SilentlyContinue) {
+                throw "Resource group '$resgrp' still exists after deletion completed."
+            }
+            write-host "Resource group '$resgrp' deleted successfully"
         } catch {
             write-host "Error removing resource group: $($_.Exception.Message)" -ForegroundColor Red
+            throw
         }
     }
 } else {

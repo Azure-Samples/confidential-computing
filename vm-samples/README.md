@@ -164,7 +164,7 @@ The `-GPU` switch builds an NVIDIA H100 SEV-SNP confidential GPU VM (`Standard_N
 4. **Switches the default region** from `northeurope` to `eastus2` (one of the regions where the H100 CVM SKU is offered without a subscription restriction; `westeurope` is also supported — set `-region westeurope` if you prefer).
 5. **Pre-flight checks the SKU and quota** the same way as the SEV-SNP / TDX path: the script will fail fast if `Standard_NCC40ads_H100_v5` is not offered in the region or the `StandardNCCads2023Family` vCPU quota is below 40 vCPUs.
 6. **Downloads and verifies Microsoft Azure CGPU onboarding V4.3.3** from [`Azure/az-cgpu-onboarding`](https://github.com/Azure/az-cgpu-onboarding/releases/tag/V4.3.3). The script pins `cgpu-onboarding-package.tar.gz` to SHA-256 `297a9ebbb2228a4ef26c0e9d3b7917a0d9e90bfb52bcb4713c50cd6a3658d8f3` before executing it.
-7. **Prepares the kernel and reboots** using the release's `step-0-prepare-kernel.sh` with the `20260615T120000Z` Ubuntu snapshot. Current NVIDIA 595 packages require kernel `6.8.0-1025-azure` or newer. The host controls the reboot so it can require a positive completion marker first.
+7. **Prepares the kernel and reboots** using the release's `step-0-prepare-kernel.sh` with the `20260827T120000Z` Ubuntu snapshot, matching the validated CVM image's package baseline. Current NVIDIA 595 packages require kernel `6.8.0-1025-azure` or newer. The host controls the reboot so it can require a positive completion marker first.
 8. **Installs the NVIDIA driver and reboots again** using `step-1-install-gpu-driver.sh`. This installs the Canonical-signed NVIDIA 595 server open module, configures the persistence daemon, creates the NVIDIA device nodes, and verifies `nvidia-smi` before the second reboot.
 9. **Validates GPU confidential-compute state** by requiring exact output from `nvidia-smi conf-compute -f` and `-e`: `CC status: ON` and `CC Environment: PRODUCTION`.
 10. **Runs GPU attestation** with the release's `step-2-attestation.sh --gpu-only`. Success requires exit code zero and the exact verdict `GPU Attestation is Successful.` The verifier checks the report certificate chain and revocation status, nonce, report signature, driver and VBIOS RIMs, and runtime measurements against NVIDIA golden measurements.
@@ -202,7 +202,7 @@ Reference: [Azure NCCads H100 v5-series](https://learn.microsoft.com/azure/virtu
 
 > Note: this path takes substantially longer than a normal CVM run because the supported flow includes a kernel dist-upgrade, two reboots, NVIDIA driver installation, and GPU and CPU attestation.
 
-### Validated West Europe smoke test (September 2, 2026)
+### Validated West Europe smoke test (September 3, 2026)
 
 The example above was validated end to end in West Europe with `-smoketest -DisableBastion`. The VM had no public IP and used a NAT Gateway for outbound package, RIM, certificate, and attestation access.
 
