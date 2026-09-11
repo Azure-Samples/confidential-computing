@@ -10,21 +10,6 @@ Confidential VM, yet it produces a Microsoft Azure Attestation (MAA) token that 
 > conforms to the expected structure and claims, independent of the compute type. See
 > [Azure Key Vault secure key release policy grammar](https://learn.microsoft.com/azure/key-vault/keys/policy-grammar).
 
-## CVM vs. Trusted Launch — what actually differs
-
-| | Confidential VM (`Deploy-SKRExample.ps1`) | Trusted Launch (this example) |
-|---|---|---|
-| Hardware | AMD SEV-SNP / Intel TDX | Gen2 VM with Secure Boot + vTPM |
-| MAA claims used in policy | `x-ms-isolation-tee.x-ms-compliance-status`, `x-ms-isolation-tee.x-ms-attestation-type` | `secureboot`, `x-ms-azurevm-attested-pcr-values.pcrN` |
-| Protects asset from the **subscription owner** | Yes | Yes |
-| Protects asset from the **host / hypervisor** | Yes (memory encryption) | No (accepted risk) |
-| SKU / GPU / region breadth | Narrower (confidential SKUs + quota) | Broad (any Gen2 SKU) |
-| Confidential OS disk (DES/CMK) | Required | Not used |
-
-Choose Trusted Launch when your threat model is the VM/subscription owner and you need broad SKU,
-GPU, and region availability at standard cost. Choose a Confidential VM when the host itself must
-be distrusted (memory encryption).
-
 ## What it does
 
 ```
@@ -133,7 +118,7 @@ The **mismatch key** in this example pins a deliberately-wrong `pcr4` to show th
 
 ```
 1. VM boots as Trusted Launch (Secure Boot measures the boot chain into vTPM PCRs)
-2. Script SSHs in and builds AzureAttestSKR (cvm-securekey-release-app)
+2. deploy-skr-trusted-launch.sh SSHs in and builds AzureAttestSKR (cvm-securekey-release-app)
 3. AzureAttestSKR obtains an MAA token via the vTPM (contains secureboot + PCR claims)
 4. It calls AKV /keys/{name}/release with the MAA token + managed-identity bearer token
 5. AKV HSM validates the token signature, authority, and claims against the release policy
