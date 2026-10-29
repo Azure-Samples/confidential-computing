@@ -104,6 +104,65 @@ abandoned, not silently consumed. Receive timeout is two minutes. Failed sends c
 have ambiguous delivery; don't blindly rerun against a queue with leftover messages.
 Successful runs remove the three sample messages by completing them.
 
+### Manually send and verify a message in the Azure portal
+
+Use the portal's built-in **Service Bus Explorer**, not the standalone desktop
+application. See Microsoft's
+[Service Bus Explorer guide](https://learn.microsoft.com/en-us/azure/service-bus-messaging/explorer).
+
+Before starting, stop any SDK receivers and use a dedicated, empty demo queue.
+Do not run the automated round-trip script while manual messages remain: it
+intentionally rejects messages from a different run.
+
+1. Sign in to the [Azure portal](https://portal.azure.com) as the identity given
+   **Azure Service Bus Data Sender** and **Azure Service Bus Data Receiver** by
+   the deployment. A different portal user needs equivalent data-plane permissions;
+   subscription Owner alone does not grant message send/receive access. Allow
+   several minutes for new role assignments to propagate.
+2. Open your deployed namespace, select **Queues**, open the queue printed by the
+   script, and select **Service Bus Explorer**. Use **Microsoft Entra**
+   authentication if prompted to select an authentication method. Do not enable
+   local/SAS authentication or use an access key.
+3. Select **Send messages**, choose **Application/Json** as the content type, and
+   paste this fictional payload into **Message body**:
+
+   ```json
+   {
+     "orderId": "MANUAL-1001",
+     "product": "Confidential widget",
+     "quantity": 2
+   }
+   ```
+
+4. Under **Broker properties**, set **Message ID** to `manual-order-1001` and
+   **Correlation ID** to `manual-check-1001`. Leave scheduled enqueue unset and
+   **Repeat send** off, then select **Send** once. Use new IDs for subsequent tests.
+5. Select **Peek Mode**, select the **Queue / Subscription** subqueue (not
+   **DeadLetter**), and select **Peek from start**. Open the message and verify:
+   - The body has exactly the three fields and values above.
+   - **Message Properties** shows Message ID `manual-order-1001`, Correlation ID
+     `manual-check-1001`, and content type `application/json`.
+   - Peeking again still shows the message: **peek does not consume it**.
+6. Select **Receive Mode**, then **Receive messages**. Choose **PeekLock**, request
+   **1** message, set a wait time such as **10 seconds**, and select **Receive**.
+   Do not choose **ReceiveAndDelete**, which removes the message before you verify it.
+7. Open the received message and compare its complete JSON body, Message ID,
+   Correlation ID, and content type with the values you sent. If they match,
+   select that message in the grid and choose **Complete**. The sample queue's lock
+   lasts one minute: finish verification and completion before it expires. If the
+   lock expires, receive again and recheck before completing. If the payload does
+   not match, use **Abandon lock**, investigate, and do not complete it.
+8. Return to **Peek Mode** and choose **Peek from start** again. The completed
+   message should be absent. Refresh the queue counts; for an otherwise empty
+   queue, **Active Messages** and **Dead-lettered Messages** should both be zero
+   after the counts update. A further receive should return no message.
+
+Successful verification means the matching message was sent, inspected, received,
+and explicitly completed, not merely that the portal accepted a send request.
+If a message is missing, check the selected namespace/queue and subqueue, whether
+another receiver consumed it, and whether its TTL expired. For authorization
+failures, check the portal identity and data roles; do not switch to SAS as a workaround.
+
 ## Cost, security, and cleanup
 
 **Premium messaging units incur ongoing charges even when idle.** This sample uses
@@ -160,3 +219,4 @@ in the cost, security, and cleanup section with your deployment's resource group
 - [Service Bus JavaScript SDK](https://learn.microsoft.com/javascript/api/overview/azure/service-bus-readme)
 - [Azure PowerShell credential](https://learn.microsoft.com/javascript/api/@azure/identity/azurepowershellcredential)
 - [Service Bus Entra authentication and built-in roles](https://learn.microsoft.com/azure/service-bus-messaging/authenticate-application)
+- [Service Bus Explorer: send, peek, receive, and complete messages](https://learn.microsoft.com/en-us/azure/service-bus-messaging/explorer)
