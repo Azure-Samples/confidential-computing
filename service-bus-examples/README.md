@@ -141,9 +141,6 @@ but do not call Azure.
 
 Live deployment and messaging succeeded in **Korea Central**:
 
-- Resource group: `rg-servicebus-confidential-demo-20261029-1719`.
-- Namespace: `sbcc-20261029-1719-koreacentral.servicebus.windows.net`.
-- Queue: `sample-orders`.
 - Azure reports Premium, confidential compute Enabled, and local authentication disabled.
 - Both namespace-scoped Sender and Receiver assignments were verified.
 - Three sample orders were sent, read back with exact payload verification, and
@@ -154,12 +151,8 @@ of Azure PowerShell's empty-string validation success result. Local checks pass:
 10 Node tests, 10 regional error classifications, and eight mocked deployment
 scenarios, including the empty-string regression and built-in role ID assertions.
 These are historical validation results, not a guarantee that the demo resources
-still exist. While retained, they incur Premium charges. To remove
-this dedicated demo:
-
-```powershell
-Remove-AzResourceGroup -Name 'rg-servicebus-confidential-demo-20261029-1719'
-```
+still exist. While retained, they incur Premium charges. Use the cleanup command
+in the cost, security, and cleanup section with your deployment's resource group.
 
 ## References
 
