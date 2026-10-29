@@ -178,6 +178,12 @@ Azure Kubernetes Service with AMD SEV-SNP confidential computing:
 Microsoft Azure Attestation (MAA) provider management:
 - **createPrivateMAA.ps1** - Create private Azure Attestation provider for custom attestation policies
 
+### [Service Bus Examples](service-bus-examples/README.md)
+Deploy a confidential-computing-enabled Azure Service Bus Premium namespace, send
+three sample JSON messages, and verify them on read-back using passwordless Entra
+authentication. Tries Korea Central first, then UAE North on regional
+availability failures.
+
 ### Utility Snippets
 Reusable PowerShell snippets for common confidential computing tasks:
 - `snippet-createDES.ps1` - Create Disk Encryption Set for Confidential VMs
