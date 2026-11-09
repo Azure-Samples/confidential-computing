@@ -1,0 +1,79 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": { "type": "string", "defaultValue": "uaenorth", "allowedValues": ["uaenorth"] },
+    "vnetName": { "type": "string", "metadata": { "description": "Existing sibling sample VNet in this resource group." } },
+    "storageAccountId": { "type": "string" },
+    "endpointName": { "type": "string", "defaultValue": "pe-functions-host-blob" },
+    "subnetName": { "type": "string", "defaultValue": "functions-host-storage" },
+    "subnetPrefix": { "type": "string", "defaultValue": "10.42.2.0/24", "metadata": { "description": "Unused prefix within the sibling VNet, outside its delegated infrastructure subnet." } }
+  },
+  "variables": {
+    "zoneName": "privatelink.blob.core.windows.net"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "apiVersion": "2024-05-01",
+      "name": "[concat(parameters('vnetName'), '/', parameters('subnetName'))]",
+      "properties": {
+        "addressPrefix": "[parameters('subnetPrefix')]",
+        "privateEndpointNetworkPolicies": "Disabled"
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones",
+      "apiVersion": "2024-06-01",
+      "name": "[variables('zoneName')]",
+      "location": "global"
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "apiVersion": "2024-06-01",
+      "name": "[concat(variables('zoneName'), '/', parameters('vnetName'))]",
+      "location": "global",
+      "dependsOn": ["[resourceId('Microsoft.Network/privateDnsZones', variables('zoneName'))]"],
+      "properties": {
+        "registrationEnabled": false,
+        "virtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]" }
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateEndpoints",
+      "apiVersion": "2024-05-01",
+      "name": "[parameters('endpointName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": ["[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), parameters('subnetName'))]"],
+      "properties": {
+        "subnet": { "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), parameters('subnetName'))]" },
+        "privateLinkServiceConnections": [
+          {
+            "name": "host-blob",
+            "properties": {
+              "privateLinkServiceId": "[parameters('storageAccountId')]",
+              "groupIds": ["blob"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+      "apiVersion": "2024-05-01",
+      "name": "[concat(parameters('endpointName'), '/default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateEndpoints', parameters('endpointName'))]",
+        "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneName'))]"
+      ],
+      "properties": {
+        "privateDnsZoneConfigs": [
+          {
+            "name": "host-blob",
+            "properties": { "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneName'))]" }
+          }
+        ]
+      }
+    }
+  ]
+}

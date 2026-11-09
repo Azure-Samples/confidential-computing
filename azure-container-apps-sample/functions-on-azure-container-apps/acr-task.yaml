@@ -1,0 +1,6 @@
+version: v1.1.0
+steps:
+  - build: >-
+      --pull --no-cache -t {{.Run.Registry}}/functions-hello:{{.Run.ID}} .
+  - push:
+      - "{{.Run.Registry}}/functions-hello:{{.Run.ID}}"

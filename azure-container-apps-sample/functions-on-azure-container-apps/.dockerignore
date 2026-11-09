@@ -1,0 +1,10 @@
+node_modules
+local.settings*.json
+.git
+.azure
+.azurite
+test
+README.md
+main.json
+*.log
+.azurite

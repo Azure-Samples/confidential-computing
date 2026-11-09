@@ -1,0 +1,69 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": { "type": "string", "defaultValue": "uaenorth", "allowedValues": ["uaenorth"] },
+    "appName": { "type": "string", "defaultValue": "ca-functions-hello", "minLength": 2, "maxLength": 32 },
+    "environmentId": { "type": "string", "metadata": { "description": "Existing UAE North Container Apps environment resource ID." } },
+    "workloadProfileName": { "type": "string", "defaultValue": "confidential", "minLength": 1 },
+    "image": { "type": "string", "metadata": { "description": "Fully qualified image in the private ACR, preferably pinned by digest." } },
+    "registryServer": { "type": "string" },
+    "identityId": { "type": "string", "metadata": { "description": "User-assigned identity resource ID with AcrPull and host storage permissions." } },
+    "identityClientId": { "type": "string" },
+    "storageAccountName": { "type": "string", "minLength": 3, "maxLength": 24 }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2025-07-01",
+      "name": "[parameters('appName')]",
+      "location": "[parameters('location')]",
+      "kind": "functionapp",
+      "tags": { "sample": "functions-on-azure-container-apps" },
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": { "[parameters('identityId')]": {} }
+      },
+      "properties": {
+        "environmentId": "[parameters('environmentId')]",
+        "workloadProfileName": "[parameters('workloadProfileName')]",
+        "configuration": {
+          "activeRevisionsMode": "Single",
+          "registries": [
+            { "server": "[parameters('registryServer')]", "identity": "[parameters('identityId')]" }
+          ],
+          "ingress": {
+            "external": true,
+            "targetPort": 80,
+            "transport": "auto",
+            "allowInsecure": false,
+            "traffic": [{ "latestRevision": true, "weight": 100 }]
+          }
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "hello",
+              "image": "[parameters('image')]",
+              "resources": { "cpu": 0.5, "memory": "1Gi" },
+              "env": [
+                { "name": "FUNCTIONS_WORKER_RUNTIME", "value": "node" },
+                { "name": "AzureWebJobsStorage__accountName", "value": "[parameters('storageAccountName')]" },
+                { "name": "AzureWebJobsStorage__credential", "value": "managedidentity" },
+                { "name": "AzureWebJobsStorage__clientId", "value": "[parameters('identityClientId')]" }
+              ]
+            }
+          ],
+          "scale": { "minReplicas": 1, "maxReplicas": 1 }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "appId": { "type": "string", "value": "[resourceId('Microsoft.App/containerApps', parameters('appName'))]" },
+    "helloUrl": {
+      "type": "string",
+      "value": "[concat('https://', reference(resourceId('Microsoft.App/containerApps', parameters('appName')), '2025-07-01').configuration.ingress.fqdn, '/api/hello')]"
+    }
+  }
+}
