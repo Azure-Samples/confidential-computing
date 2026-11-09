@@ -1,0 +1,135 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "uaenorth",
+      "allowedValues": ["uaenorth"],
+      "metadata": { "description": "Region documented for confidential Container Apps. No regional fallback." }
+    },
+    "environmentName": {
+      "type": "string",
+      "defaultValue": "cae-acc-hello",
+      "minLength": 2,
+      "maxLength": 32
+    },
+    "appName": {
+      "type": "string",
+      "defaultValue": "ca-acc-hello",
+      "minLength": 2,
+      "maxLength": 32
+    }
+  },
+  "variables": {
+    "profileName": "confidential",
+    "vnetName": "[concat(parameters('environmentName'), '-vnet')]",
+    "nsgName": "[concat(parameters('environmentName'), '-nsg')]",
+    "tags": { "sample": "container-apps-acc" }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('nsgName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": { "securityRules": [] }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('vnetName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "dependsOn": ["[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"],
+      "properties": {
+        "addressSpace": { "addressPrefixes": ["10.42.0.0/16"] },
+        "subnets": [
+          {
+            "name": "infrastructure",
+            "properties": {
+              "addressPrefix": "10.42.0.0/23",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+              },
+              "delegations": [
+                { "name": "container-apps", "properties": { "serviceName": "Microsoft.App/environments" } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2025-07-01",
+      "name": "[parameters('environmentName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "dependsOn": ["[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"],
+      "properties": {
+        "publicNetworkAccess": "Enabled",
+        "vnetConfiguration": {
+          "infrastructureSubnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'infrastructure')]",
+          "internal": false
+        },
+        "appLogsConfiguration": { "destination": "" },
+        "workloadProfiles": [
+          {
+            "name": "[variables('profileName')]",
+            "workloadProfileType": "DC4",
+            "minimumCount": 1,
+            "maximumCount": 1
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2025-07-01",
+      "name": "[parameters('appName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "dependsOn": ["[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]"],
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]",
+        "workloadProfileName": "[variables('profileName')]",
+        "configuration": {
+          "activeRevisionsMode": "Single",
+          "ingress": {
+            "external": true,
+            "targetPort": 80,
+            "transport": "auto",
+            "allowInsecure": false,
+            "traffic": [{ "latestRevision": true, "weight": 100 }]
+          }
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "hello-world",
+              "image": "mcr.microsoft.com/k8se/quickstart:latest",
+              "resources": { "cpu": 0.5, "memory": "1Gi" }
+            }
+          ],
+          "scale": { "minReplicas": 1, "maxReplicas": 1 }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "environmentId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]"
+    },
+    "appId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.App/containerApps', parameters('appName'))]"
+    },
+    "appUrl": {
+      "type": "string",
+      "value": "[concat('https://', reference(resourceId('Microsoft.App/containerApps', parameters('appName')), '2025-07-01').configuration.ingress.fqdn)]"
+    }
+  }
+}

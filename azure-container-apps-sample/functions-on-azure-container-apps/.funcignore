@@ -1,0 +1,8 @@
+.git*
+.azure
+node_modules
+local.settings*.json
+test
+Dockerfile
+README.md
+main.json

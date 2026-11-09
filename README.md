@@ -184,6 +184,13 @@ three sample JSON messages, and verify them on read-back using passwordless Entr
 authentication. Tries Korea Central first, then UAE North on regional
 availability failures.
 
+### [Azure Container Apps Samples](azure-container-apps-sample/README.md)
+Deploy Microsoft's hello-world container with HTTPS ingress on an explicitly
+selected **DC4 confidential workload profile** in **UAE North**. Includes ARM
+infrastructure, PowerShell deployment and placement checks, and customer setup
+instructions. Also includes a Node.js Functions-on-Container-Apps hello-world
+example and a placeholder for a future App Services example.
+
 ### Utility Snippets
 Reusable PowerShell snippets for common confidential computing tasks:
 - `snippet-createDES.ps1` - Create Disk Encryption Set for Confidential VMs
