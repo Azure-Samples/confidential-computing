@@ -21,7 +21,7 @@ urlFragment: confidential-computing-samples
 
 ![MIT license badge](https://img.shields.io/badge/license-MIT-green.svg)
 
-**Last Updated:** September 2026
+**Last Updated:** November 2026
 
 > **Heads up — this is the new home for Azure Confidential Computing samples.**
 > [`https://aka.ms/accsamples`](https://aka.ms/accsamples) now redirects here.
@@ -47,7 +47,13 @@ Confidential computing is the protection of data-in-use through isolating comput
   - Any data processed using these samples
 - **AI-Assisted Content:** Several samples in this repository were created with significant assistance from AI coding tools, primarily [GitHub Copilot](https://github.com/features/copilot) inside [Visual Studio Code](https://code.visualstudio.com/), to showcase modern AI-assisted development. While functional, AI-assisted code should always be reviewed by qualified security professionals before use in sensitive scenarios.
 
-## 🆕 What's New (September 2026)
+## What's New (November 2026)
+
+| Addition | Description |
+|---|---|
+| **[Confidential Azure Container Apps samples](azure-container-apps-sample/README.md)** | UAE North DC4 hello world and a tested [native Azure Functions walkthrough](azure-container-apps-sample/functions-on-azure-container-apps/README.md#start-here) with Node.js 24, fresh ACR builds, managed identity, private Blob host storage, placement/health verification, and portal/API access instructions. Resources are retained until explicitly cleaned up. |
+
+### Previously (September 2026)
 
 | Addition | Description |
 |---|---|
@@ -78,6 +84,13 @@ Confidential computing is the protection of data-in-use through isolating comput
 
 ## Prerequisites
 
+Requirements vary by sample; follow the selected guide rather than installing
+every tool below. The [Container Apps quickstart](azure-container-apps-sample/container-apps-acc/README.md#prerequisites)
+uses PowerShell and Az modules without Docker, Python or `confcom`. The
+[Functions walkthrough](azure-container-apps-sample/functions-on-azure-container-apps/README.md#2-prepare-azure-prerequisites)
+adds Azure CLI and role-assignment permissions; local development uses Node.js
+24 and Azurite, and remote ACR builds avoid a local Docker requirement.
+
 - [Azure subscription](https://azure.microsoft.com/free/)
 - [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest) (v2.60+) with `confcom` extension
 - [Azure PowerShell](https://learn.microsoft.com/en-us/powershell/azure/install-azure-powershell?view=azps-latest) (Az module 12.0+)
@@ -97,6 +110,25 @@ az confcom --version
 ## Sample Categories
 
 This repository is organized by Azure service type and deployment method:
+
+### [Azure Container Apps Samples](azure-container-apps-sample/README.md)
+
+- **[Confidential hello world](azure-container-apps-sample/container-apps-acc/README.md)** - Deploy a public quickstart container on a dedicated DC4 confidential workload profile in UAE North.
+- **[Functions on confidential Container Apps](azure-container-apps-sample/functions-on-azure-container-apps/README.md#start-here)** - End-to-end native Functions HTTP sample, including local testing, identity/scoped roles, private host-storage networking, fresh Node.js 24 image builds, ARM deployment, verification, portal/API links, and cleanup.
+
+Start with the HTML quickstart, then optionally add Functions to the same
+confidential environment and dedicated group. Both were tested in UAE North on
+9 November 2026; check current regional availability, quota and organizational
+policy before deployment. Both expose anonymous public endpoints and retain
+billable resources until explicitly cleaned up. Functions additionally verifies
+private host-storage connectivity; HTTP 200 alone is not proof of host health.
+These are configuration/functional checks, not independent hardware attestation.
+No Azure App Service deployment is included.
+
+For explicit evidence, use the [confidential-compute validation steps](azure-container-apps-sample/README.md#validate-confidential-compute-placement)
+for each app. They show the app-to-environment-to-DC4 binding, check revision
+running/health states, provide portal cross-checks, and distinguish Azure-reported
+configuration from independent cryptographic attestation.
 
 ### [ACI Samples](/aci-samples/README.md)
 Azure Container Instances with AMD SEV-SNP confidential computing:

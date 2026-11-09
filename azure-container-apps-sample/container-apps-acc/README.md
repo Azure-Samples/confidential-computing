@@ -1,5 +1,7 @@
 # Hello world on confidential Azure Container Apps
 
+[All Container Apps samples](../README.md) | [Repository overview](../../README.md)
+
 Deploy Microsoft's hello-world container to **Azure Container Apps** in **UAE
 North**, using a dedicated **DC4 confidential workload profile**. Then verify the
 app's Azure-reported placement and open its public HTTPS page.
@@ -15,10 +17,25 @@ policies still need checking in your own subscription.
 
 For an application-code example, continue with
 [Functions on Azure Container Apps](../functions-on-azure-container-apps/README.md).
-It uses the native Functions integration and the latest supported Node.js major
-with a fresh runtime-image pull on each build; see its runtime-update policy.
+It uses the native Functions integration with Node.js 24, a fresh runtime-image
+pull on each build, managed identity, and private Blob host storage; see its
+runtime-update policy.
 The original test deployment is not a shared live demo; this README describes how
 to create your own resources, not a retained public demo.
+
+## Start here
+
+1. Review [resources and cost](#resources-and-cost) and [prerequisites](#prerequisites).
+2. [Sign in and select the subscription](#1-sign-in-and-select-the-subscription).
+3. [Validate, then deploy](#2-validate-then-deploy) into a new dedicated group.
+4. [Verify again](#3-verify-again-without-deploying) without creating resources.
+5. Optionally [add the Functions sample](#next-step-add-a-function), or use
+   [optional cleanup](#optional-cleanup-only-when-you-choose) when finished.
+
+This sample serves an HTML hello-world page from a public quickstart image.
+The [Functions sample](../functions-on-azure-container-apps/README.md#start-here)
+instead runs your JavaScript code and serves JSON at `GET /api/hello`.
+Neither sample silently substitutes ordinary compute when DC4 is unavailable.
 
 ## What makes this confidential?
 
@@ -145,6 +162,10 @@ Success produces `AppUrl` and `PortalUrl`, both fully qualified HTTPS links, plu
 resource IDs and the verified profile. The page is Microsoft's Container Apps
 hello-world/quickstart page.
 
+Use `$result.PortalUrl` to open the deployed app's Azure portal resource.
+Use `$result.AppUrl` for its public HTML page; use the links returned by your
+own deployment rather than an earlier test deployment's address.
+
 For safety, deployment refuses existing populated or unrelated groups. It can
 reuse only an **empty** group tagged `sample=container-apps-acc`, such as the one
 created by `-ValidateOnly`. After deploying, use verification rather than running
@@ -179,6 +200,38 @@ Azure may also add its default `Consumption` profile to the environment. Its
 presence does not change this app's explicit binding to `confidential`; the
 verification checks the app's selected profile, not merely available profiles.
 
+### Show explicit confidential-compute evidence
+
+Follow the [read-only placement verification](../README.md#validate-confidential-compute-placement)
+from the repository root. Set `$appName = 'ca-acc-hello'` and use the subscription,
+group and environment from your deployment (including any customized names).
+The procedure prints the live app/environment IDs, assigned profile name,
+**DC4 profile type**, latest ready revision, running/health states and timestamp.
+It fails rather than reporting success for ordinary compute or an unhealthy
+revision. The same section provides a portal cross-check and explains the
+limits of control-plane evidence.
+
+For this example, retain both that output and the result of
+[Test-ContainerApp.ps1](Test-ContainerApp.ps1): the former makes the placement
+evidence visible, while the latter additionally validates the HTML endpoint.
+An HTTP 200 page by itself is not confidential-computing verification.
+
+## Next step: add a function
+
+Keep the environment and follow the
+[Functions deployment walkthrough](../functions-on-azure-container-apps/README.md#start-here).
+Use this deployment's subscription, resource group and environment name there.
+The Functions app explicitly selects the same `confidential` DC4 profile and
+can share its existing node with the quickstart app.
+
+The Functions guide adds a registry, user-assigned identity, scoped role
+assignments, host storage and private Blob networking. Unlike this quickstart,
+it requires permission to create role assignments. Its additional subnet
+defaults to `10.42.2.0/24`; preserve that subnet if you later modify the VNet.
+Do not rerun this sample's deployment script against the now-populated group.
+Verify both app placement and Functions host-storage health using the
+respective guides; a successful hello-world response alone is insufficient.
+
 ## Troubleshooting
 
 | Symptom | Action |
@@ -195,6 +248,9 @@ verification checks the app's selected profile, not merely available profiles.
 
 **This deletes the selected group and everything inside it.** First confirm the
 subscription and inventory. Do not use a shared group.
+If you added the Functions sample to this group, group deletion also removes
+its app, registry, identity, storage, private endpoint and DNS resources.
+Deleting only an app does not stop charges for the retained DC4 environment.
 
 ```powershell
 Set-AzContext -SubscriptionId $subscriptionId

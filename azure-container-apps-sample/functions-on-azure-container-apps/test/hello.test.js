@@ -89,7 +89,11 @@ test('container uses the Functions runtime, locked production dependencies, and 
 test('deployment instructions require a fresh base image and describe runtime upgrade boundaries', () => {
     const readme = read('README.md');
     assert.match(readme, /docker build --pull --no-cache/);
-    assert.match(readme, /az acr build .*--no-cache/);
+    assert.match(readme, /az acr run .*--file acr-task\.yaml/);
+    const task = read('acr-task.yaml');
+    assert.match(task, /--pull --no-cache/);
+    assert.match(task, /functions-hello:\{\{\.Run\.ID\}\}/);
+    assert.match(task, /- push:/);
     assert.match(readme, /before \*\*every deployment\*\*/);
     assert.match(readme, /Running containers \*\*do not update themselves\*\*/);
 });
@@ -100,4 +104,26 @@ test('local development uses the storage emulator, never a cloud connection stri
     assert.match(JSON.parse(read('package.json')).scripts.storage, /^azurite /);
     assert.match(read('.gitignore'), /\.azurite/);
     assert.match(read('.dockerignore'), /\.azurite/);
+});
+
+test('private host storage uses a separate subnet and VNet-linked blob DNS', () => {
+    const network = JSON.parse(read('host-storage-network.json'));
+    assert.equal(network.resources.length, 5);
+    const subnet = network.resources.find(({ type }) => type === 'Microsoft.Network/virtualNetworks/subnets');
+    assert.equal(network.parameters.subnetPrefix.defaultValue, '10.42.2.0/24');
+    assert.equal(subnet.properties.privateEndpointNetworkPolicies, 'Disabled');
+    assert.equal(subnet.properties.delegations, undefined);
+    assert.equal(network.resources.some(({ type }) => type === 'Microsoft.Network/virtualNetworks'), false);
+    const endpoint = network.resources.find(({ type }) => type === 'Microsoft.Network/privateEndpoints');
+    const connection = endpoint.properties.privateLinkServiceConnections[0].properties;
+    assert.deepEqual(connection.groupIds, ['blob']);
+    assert.equal(connection.privateLinkServiceId, "[parameters('storageAccountId')]");
+    assert.equal(network.variables.zoneName, 'privatelink.blob.core.windows.net');
+    const link = network.resources.find(({ type }) => type === 'Microsoft.Network/privateDnsZones/virtualNetworkLinks');
+    assert.equal(link.properties.registrationEnabled, false);
+    assert.equal(link.properties.virtualNetwork.id, "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]");
+    const group = network.resources.find(({ type }) => type === 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups');
+    assert.equal(group.properties.privateDnsZoneConfigs[0].properties.privateDnsZoneId,
+        "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneName'))]");
+    assert.match(read('README.md'), /--public-network-access Disabled/);
 });
