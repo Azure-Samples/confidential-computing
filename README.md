@@ -7,11 +7,15 @@ languages:
 - C++
 - PowerShell
 - AzureCLI
+- javascript
 products:
 - azure-confidential-computing
 - azure-kubernetes-service
 - azure-attestation-service
 - azure-container-instances
+- azure-container-apps
+- azure-functions
+- azure-service-bus
 - azure-virtual-machines
 description: "Azure Confidential Computing Samples"
 urlFragment: confidential-computing-samples
@@ -33,6 +37,31 @@ Confidential computing is the protection of data-in-use through isolating comput
 
 > 📚 **Want to learn more?** See the official Azure Confidential Computing documentation at [`https://aka.ms/accdocs`](https://aka.ms/accdocs).
 
+## Start here: choose a sample
+
+Follow the selected guide's prerequisites, deployment, verification, and cleanup
+steps. Not every sample requires every tool listed below.
+
+| I want to... | Start with | What to expect |
+|---|---|---|
+| Deploy a simple web container on confidential managed compute | [Container Apps hello world](azure-container-apps-sample/container-apps-acc/README.md#start-here) | Public HTML endpoint on a dedicated DC4 workload profile in UAE North; no image build required. |
+| Run an HTTP-triggered function on confidential compute | [Native Functions on Container Apps](azure-container-apps-sample/functions-on-azure-container-apps/README.md#start-here) | Node.js 24 JSON API, managed identity, fresh ACR builds, and private Blob host storage; start by deploying the sibling confidential environment. |
+| Check that those Container Apps actually select confidential compute | [DC4 placement verification](azure-container-apps-sample/README.md#validate-confidential-compute-placement) | Read-only PowerShell and portal checks for each app's environment/profile binding and revision health; not independent hardware attestation. |
+| Send and receive messages through a confidential managed service | [Service Bus Premium](service-bus-examples/README.md) | New confidential-enabled namespace, passwordless messaging, and exact message read-back checks. |
+| Explore attestation in a container | [Visual attestation v2 on ACI](aci-samples/visual-attestation-demo-v2/README.md) | Direct Microsoft Azure Attestation calls and a Confidential-versus-Standard comparison. |
+| Deploy a confidential VM or H100 confidential GPU VM | [VM samples](vm-samples/README.md) | AMD SEV-SNP, Intel TDX, and H100 paths with sample-specific attestation and prerequisites. |
+| Keep partner datasets separate while computing shared results | [Federated multi-party analytics](multi-party-samples/advanced-app-federated/README.md) | Each partner processes its own data in its own TEE and returns aggregates. |
+| Explore confidential video processing | [Automotive machine vision](automotive-machine-vision/README.md) | Confidential ACI video redaction with HTTPS, CCE policy, and an attestation gate. |
+
+For the full catalog, see [Sample Categories](#sample-categories). To understand
+validation and CI, see [Validation Automation](docs/VALIDATION-AUTOMATION.md).
+
+**Before deploying:** check regional support, quota, permissions, and your
+organization's policies. Samples can create billable resources. Cleanup behavior
+varies: the Container Apps examples retain resources until you explicitly remove
+them, whereas some other demos automatically clean up. Public demo endpoints
+must not be used to send sensitive data.
+
 ## ⚠️ Disclaimer
 
 **IMPORTANT:** This repository contains sample code for educational and demonstration purposes only. 
@@ -51,7 +80,15 @@ Confidential computing is the protection of data-in-use through isolating comput
 
 | Addition | Description |
 |---|---|
-| **[Confidential Azure Container Apps samples](azure-container-apps-sample/README.md)** | UAE North DC4 hello world and a tested [native Azure Functions walkthrough](azure-container-apps-sample/functions-on-azure-container-apps/README.md#start-here) with Node.js 24, fresh ACR builds, managed identity, private Blob host storage, placement/health verification, and portal/API access instructions. Resources are retained until explicitly cleaned up. |
+| **[Confidential Container Apps hello world](azure-container-apps-sample/container-apps-acc/README.md#start-here)** | Deploy Microsoft's HTML quickstart using ARM and PowerShell, explicitly bound to a dedicated DC4 confidential workload profile in UAE North. |
+| **[Native Azure Functions on confidential Container Apps](azure-container-apps-sample/functions-on-azure-container-apps/README.md#start-here)** | Tested Node.js 24 `GET /api/hello` JSON endpoint with fresh ACR builds, immutable image deployment, managed identity, and private Blob host storage. Includes local Azurite testing, host-health checks, and portal/API access instructions. |
+| **[Explicit confidential-compute validation](azure-container-apps-sample/README.md#validate-confidential-compute-placement)** | Read live app/environment resources, match the selected profile to DC4, and check active/healthy revisions. Includes expected output and portal cross-checks, with a clear distinction from cryptographic attestation. |
+
+### Previously (October 2026)
+
+| Addition | Description |
+|---|---|
+| **[Confidential Service Bus Premium](service-bus-examples/README.md)** | Deploy a new confidential-enabled Premium namespace and queue, assign scoped Sender/Receiver roles, and verify three JSON messages using passwordless Entra authentication. The guide covers Korea Central/UAE North availability, configuration evidence, and cleanup. |
 
 ### Previously (September 2026)
 
@@ -97,7 +134,11 @@ adds Azure CLI and role-assignment permissions; local development uses Node.js
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for confidential container policy generation)
 - [Python 3.11+](https://www.python.org/downloads/) (for local development/testing)
 
-### Quick Setup
+### ACI policy tooling setup
+
+Only follow this setup if your selected sample requires the Azure CLI `confcom`
+extension for confidential container policy generation. It is not a prerequisite
+for the Container Apps or Service Bus examples.
 
 ```powershell
 # Install required Azure CLI extension
@@ -216,13 +257,6 @@ three sample JSON messages, and verify them on read-back using passwordless Entr
 authentication. Tries Korea Central first, then UAE North on regional
 availability failures.
 
-### [Azure Container Apps Samples](azure-container-apps-sample/README.md)
-Deploy Microsoft's hello-world container with HTTPS ingress on an explicitly
-selected **DC4 confidential workload profile** in **UAE North**. Includes ARM
-infrastructure, PowerShell deployment and placement checks, and customer setup
-instructions. Also includes a Node.js Functions-on-Container-Apps hello-world
-example and a placeholder for a future App Services example.
-
 ### Utility Snippets
 Reusable PowerShell snippets for common confidential computing tasks:
 - `snippet-createDES.ps1` - Create Disk Encryption Set for Confidential VMs
@@ -231,7 +265,7 @@ Reusable PowerShell snippets for common confidential computing tasks:
 ### [Sovereign Examples](/sov-examples/README.md) 🆕
 Confidential VM deployments with data-sovereignty and compliance focus:
 - **[Citizen Registry](sov-examples/README.md)** - Full-stack sovereign data demo: Confidential ACI container with SQL Server on a Confidential VM, connected through a private VNet with Application Gateway. Features remote attestation, Secure Key Release, ephemeral credentials, and API-based citizen record seeding.
-- **[CVM with Azure Backup](sov-examples/cvm-backup/README.md)** - Windows CVM with Azure Backup (Recovery Services Vault), Customer Managed Keys, and confidential disk encryption
+- **[CVM with Azure Backup](cvm-backup/README.md)** - Windows CVM with Azure Backup (Recovery Services Vault), Customer Managed Keys, and confidential disk encryption
 
 ### [SKR Examples](/skr-examples/README.md) 🆕
 Standalone Secure Key Release demonstration:
