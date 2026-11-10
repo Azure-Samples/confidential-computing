@@ -3,6 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][guid]$SubscriptionId,
+    [ValidateSet('uaenorth', 'westeurope')][string]$Location = 'uaenorth',
     [ValidatePattern('^[a-zA-Z0-9._()-]{1,90}$')]
     [string]$ResourceGroupName = "rg-container-apps-acc-$([guid]::NewGuid().ToString('N').Substring(0, 8))",
     [ValidatePattern('^[a-z][a-z0-9-]{0,30}[a-z0-9]$')][string]$EnvironmentName = 'cae-acc-hello',
@@ -21,20 +22,19 @@ $context = Set-AzContext -SubscriptionId $SubscriptionId -TenantId $currentConte
 if ($context.Environment.Name -ne 'AzureCloud') {
     throw 'This sample supports Azure public cloud only.'
 }
-Write-Host "Subscription: $SubscriptionId; tenant: $($context.Tenant.Id); region: uaenorth"
+Write-Host "Subscription: $SubscriptionId; tenant: $($context.Tenant.Id); region: $Location"
 Write-Host "Resource group: $ResourceGroupName; environment: $EnvironmentName; app: $AppName"
 Write-Warning 'One dedicated DC4 node will incur ongoing charges. Nothing is automatically deleted, including on failure.'
-
 foreach ($namespace in @('Microsoft.App', 'Microsoft.Network')) {
     $provider = Get-ArmJson -Path "/subscriptions/$SubscriptionId/providers/${namespace}?api-version=2021-04-01"
     if ($provider.registrationState -ne 'Registered') {
         throw "Register $namespace with Register-AzResourceProvider -ProviderNamespace $namespace and wait for Registered, then retry."
     }
 }
-$regionalBase = "/subscriptions/$SubscriptionId/providers/Microsoft.App/locations/uaenorth"
+$regionalBase = "/subscriptions/$SubscriptionId/providers/Microsoft.App/locations/$Location"
 $types = Get-ArmJson -Path "${regionalBase}/availableManagedEnvironmentsWorkloadProfileTypes?api-version=2025-07-01"
 if (-not ($types.value | Where-Object name -eq 'DC4')) {
-    throw 'UAE North does not advertise DC4 for this subscription. No other compute or region will be used.'
+    throw "$Location does not advertise DC4 for this subscription. No other compute or region will be used."
 }
 $usage = Get-ArmJson -Path "${regionalBase}/usages?api-version=2025-07-01"
 $quota = @($usage.value | Where-Object { $_.name.value -eq 'ManagedEnvironmentCount' })
@@ -42,7 +42,7 @@ if ($quota.Count -ne 1 -or $null -eq $quota[0].currentValue -or $null -eq $quota
     throw 'Could not determine the regional managed-environment quota. Check Azure quota before retrying.'
 }
 if ($quota[0].currentValue -ge $quota[0].limit) {
-    throw "UAE North managed-environment quota exhausted ($($quota[0].currentValue)/$($quota[0].limit)). Request quota; no fallback is permitted."
+    throw "$Location managed-environment quota exhausted ($($quota[0].currentValue)/$($quota[0].limit)). Request quota; no fallback is permitted."
 }
 
 $group = Get-AzResourceGroup -ErrorAction Stop | Where-Object ResourceGroupName -eq $ResourceGroupName
@@ -53,7 +53,7 @@ if ($group) {
     }
 }
 else {
-    $null = New-AzResourceGroup -Name $ResourceGroupName -Location uaenorth `
+    $null = New-AzResourceGroup -Name $ResourceGroupName -Location $Location `
         -Tag @{ sample = 'container-apps-acc' } -ErrorAction Stop
 }
 
@@ -61,7 +61,7 @@ $parameters = @{
     ResourceGroupName = $ResourceGroupName
     TemplateFile = Join-Path $PSScriptRoot 'main.json'
     TemplateParameterObject = @{
-        location = 'uaenorth'
+        location = $Location
         environmentName = $EnvironmentName
         appName = $AppName
     }
@@ -83,7 +83,7 @@ try {
         throw "Deployment '$deploymentName' did not succeed: $($deployment.ProvisioningState)"
     }
     & (Join-Path $PSScriptRoot 'Test-ContainerApp.ps1') -SubscriptionId $SubscriptionId `
-        -ResourceGroupName $ResourceGroupName -EnvironmentName $EnvironmentName -AppName $AppName
+        -ResourceGroupName $ResourceGroupName -EnvironmentName $EnvironmentName -AppName $AppName -Location $Location
 }
 catch {
     Write-Warning "Validation, deployment or verification failed. Resources are retained in '$ResourceGroupName'. Inspect deployment '$deploymentName' and any partial resources; this is NOT a successful confidential deployment."

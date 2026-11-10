@@ -5,8 +5,8 @@
     "location": {
       "type": "string",
       "defaultValue": "uaenorth",
-      "allowedValues": ["uaenorth"],
-      "metadata": { "description": "Region documented for confidential Container Apps. No regional fallback." }
+      "allowedValues": ["uaenorth", "westeurope"],
+      "metadata": { "description": "Explicit deployment region. West Europe requires live DC4 availability checks; no regional fallback." }
     },
     "environmentName": {
       "type": "string",

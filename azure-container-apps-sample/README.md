@@ -3,12 +3,14 @@
 [Repository overview](../README.md)
 
 Two implemented examples demonstrate explicit binding to a **confidential DC4
-workload profile in UAE North**. Choose a guide based on the endpoint and
+workload profile in UAE North**. The HTML quickstart also offers explicit
+region selection for West Europe; the Functions workflow remains UAE
+North-specific. Choose a guide based on the endpoint and
 prerequisites you need:
 
 | Sample | Status |
 | --- | --- |
-| [Confidential hello world](container-apps-acc/README.md) | ARM template and PowerShell deployment using a DC4 confidential workload profile in UAE North |
+| [Confidential hello world](container-apps-acc/README.md) | ARM template and PowerShell deployment using DC4 in UAE North by default, with explicit region selection for West Europe |
 | [Functions on Azure Container Apps](functions-on-azure-container-apps/README.md) | Tested native Functions hello world on confidential DC4 in UAE North: Node.js 24, fresh ACR builds, managed identity, private Blob host storage, deployment and verification |
 
 Start with **Confidential hello world**. It uses Microsoft's public quickstart
@@ -59,13 +61,14 @@ $subscriptionId = '<your-subscription-id>'
 $resourceGroup = '<your-dedicated-demo-resource-group>'
 $environmentName = 'cae-acc-hello'
 $appName = 'ca-acc-hello'
+$location = 'uaenorth' # Use 'westeurope' only for the HTML quickstart.
 
 Connect-AzAccount -Subscription $subscriptionId
 . .\azure-container-apps-sample\container-apps-acc\DeploymentHelpers.ps1
 $resourceBase = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.App"
 $app = Get-ArmJson -Path "$resourceBase/containerApps/${appName}?api-version=2025-07-01"
 $environment = Get-ArmJson -Path "$resourceBase/managedEnvironments/${environmentName}?api-version=2025-07-01"
-$appUrl = Assert-ConfidentialContainerApp -App $app -Environment $environment
+$appUrl = Assert-ConfidentialContainerApp -App $app -Environment $environment -Location $location
 $assignedProfile = @($environment.properties.workloadProfiles |
     Where-Object name -eq $app.properties.workloadProfileName)
 $revisionName = $app.properties.latestReadyRevisionName
@@ -96,7 +99,7 @@ if ($revision.properties.active -ne $true -or
 ```
 
 The shared guard **throws** unless the app references the expected environment,
-both resources report `Succeeded` in UAE North, the assigned profile is
+both resources report `Succeeded` in the explicitly expected region, the assigned profile is
 `confidential` with type `DC4` and minimum/maximum one node, and the latest
 revision is ready. It also checks the examples' HTTPS ingress settings. The
 additional revision read requires an active revision, at least one replica,
