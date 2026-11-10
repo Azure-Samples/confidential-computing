@@ -52,7 +52,7 @@ Deploy Confidential Virtual Machines (CVMs) with AMD SEV-SNP or Intel TDX hardwa
 
 Builds a CVM with **Confidential OS disk encryption bound to a Customer Managed Key** (see [What is Confidential OS disk encryption?](#what-is-confidential-os-disk-encryption-with-cmk) below) and a private VNet (no public IP). By default, the script attaches a NAT Gateway to the VM subnet so the VM can reach the internet without exposing a public IP, and it optionally deploys Azure Bastion for remote access. If you pass `-NoInternetAccess`, the subnet remains fully isolated and the attestation download step is skipped. Otherwise, the script downloads the latest pre-built `attest` binary from [Azure/cvm-attestation-tools](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the VM, runs it against the matching SNP/TDX config, and streams the attestation JWT and claims back to the caller via `Invoke-AzVMRunCommand` (with a 60s backoff retry loop to absorb the transient 409 Conflict that the run-command extension can return immediately after VM provisioning).
 
-Supported images: Windows Server 2022, Windows Server 2019, Windows 11 Enterprise, Ubuntu 24.04 LTS, and RHEL 9.5 CVM. The script tags the resource group with the GitHub repo URL (auto-detected from git remote) for traceability.
+Supported images: Windows Server 2022, Windows Server 2019, Windows 11 Enterprise, Ubuntu 24.04 LTS, Ubuntu 26.04 LTS, and RHEL 9.5 CVM. The script tags the resource group with the GitHub repo URL (auto-detected from git remote) for traceability.
 
 For Windows Server 2022 deployments, use the refreshed Marketplace offer published under `windowsserver2022` rather than the legacy `windowsserver` offer. Microsoft announced that the legacy Windows Server 2022 images are being deprecated; the refreshed offer is the supported path for new deployments and reimages.
 
@@ -136,7 +136,7 @@ Basename is a prefix assigned to all resources created by the script and will be
 The script will generate a random complex password and output it to the terminal once; make sure you copy it if you want to login to the CVM.
 
 ```powershell
-./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-vmsize <VM SIZE SKU>] [-policyFilePath <PATH>] [-DisableBastion] [-NoInternetAccess] [-GPU]
+./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|Ubuntu2604|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-vmsize <VM SIZE SKU>] [-policyFilePath <PATH>] [-DisableBastion] [-NoInternetAccess] [-GPU]
 ```
 
 ## Parameters:
@@ -157,7 +157,26 @@ The script will generate a random complex password and output it to the terminal
 - **Windows2019**: Windows Server 2019 Datacenter (RDP via Bastion)
 - **Windows11**: Windows 11 Enterprise 24H2 (RDP via Bastion)
 - **Ubuntu**: Ubuntu 24.04 LTS CVM (SSH via Bastion)
+- **Ubuntu2604**: Ubuntu 26.04 LTS CVM (SSH via Bastion), using `Canonical:ubuntu-26_04-lts:server-cvm:latest`
 - **RHEL**: Red Hat Enterprise Linux 9.5 CVM (SSH via Bastion)
+
+The `Ubuntu` option continues to deploy 24.04. Use `Ubuntu2604` to select 26.04 explicitly. The Ubuntu 26.04 image uses the `server-cvm` SKU, not the `cvm` SKU used by 24.04; see [Canonical's image reference](https://documentation.ubuntu.com/azure/azure-how-to/instances/find-ubuntu-images/). Image and VM size availability depend on the target region.
+
+**Ubuntu 26.04 with AMD SEV-SNP and Bastion:**
+```powershell
+./BuildRandomCVM.ps1 -subsID "YOUR-SUBSCRIPTION-ID" -basename "u2604" -osType "Ubuntu2604" -region "northeurope" -vmsize "Standard_DC2as_v5"
+```
+
+Use an Intel TDX size such as `Standard_DC2es_v6` in a supported region to select the existing TDX attestation flow instead. Ubuntu 26.04 uses the same Linux deployment path, Confidential OS disk encryption with CMK, Secure Boot, and vTPM as Ubuntu 24.04.
+
+Live-tested Ubuntu 26.04 configurations (image version `26.04.202610210`, guest Ubuntu 26.04.1 LTS):
+
+| VM size | Region | Isolation | Attestation result |
+|---------|--------|-----------|--------------------|
+| `Standard_DC2as_v5` | `northeurope` | AMD SEV-SNP | `sevsnpvm`, `azure-compliant-cvm` |
+| `Standard_DC2es_v6` | `westeurope` | Intel TDX | `tdxvm`, `azure-compliant-cvm` |
+
+Both deployments completed with Bastion, NAT egress, Secure Boot, vTPM, and customer-managed confidential OS disk encryption enabled. Availability and subscription quota must still be checked for each deployment.
 
 ## GPU mode — H100 confidential GPU VM
 
