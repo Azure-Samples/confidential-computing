@@ -25,10 +25,6 @@ if ($context.Environment.Name -ne 'AzureCloud') {
 Write-Host "Subscription: $SubscriptionId; tenant: $($context.Tenant.Id); region: $Location"
 Write-Host "Resource group: $ResourceGroupName; environment: $EnvironmentName; app: $AppName"
 Write-Warning 'One dedicated DC4 node will incur ongoing charges. Nothing is automatically deleted, including on failure.'
-if ($Location -eq 'westeurope') {
-    Write-Warning 'EXPERIMENTAL regional deployment: public documentation currently lists only UAE North. DC4 advertisement is not a guarantee of West Europe support or capacity.'
-}
-
 foreach ($namespace in @('Microsoft.App', 'Microsoft.Network')) {
     $provider = Get-ArmJson -Path "/subscriptions/$SubscriptionId/providers/${namespace}?api-version=2021-04-01"
     if ($provider.registrationState -ne 'Registered') {

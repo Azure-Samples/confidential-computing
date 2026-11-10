@@ -3,14 +3,14 @@
 [Repository overview](../README.md)
 
 Two implemented examples demonstrate explicit binding to a **confidential DC4
-workload profile in UAE North**. The HTML quickstart also offers an explicitly
-experimental West Europe option; the Functions workflow remains UAE
+workload profile in UAE North**. The HTML quickstart also offers explicit
+region selection for West Europe; the Functions workflow remains UAE
 North-specific. Choose a guide based on the endpoint and
 prerequisites you need:
 
 | Sample | Status |
 | --- | --- |
-| [Confidential hello world](container-apps-acc/README.md) | ARM template and PowerShell deployment using DC4 in UAE North by default, with an explicit experimental West Europe option |
+| [Confidential hello world](container-apps-acc/README.md) | ARM template and PowerShell deployment using DC4 in UAE North by default, with explicit region selection for West Europe |
 | [Functions on Azure Container Apps](functions-on-azure-container-apps/README.md) | Tested native Functions hello world on confidential DC4 in UAE North: Node.js 24, fresh ACR builds, managed identity, private Blob host storage, deployment and verification |
 
 Start with **Confidential hello world**. It uses Microsoft's public quickstart
@@ -61,7 +61,7 @@ $subscriptionId = '<your-subscription-id>'
 $resourceGroup = '<your-dedicated-demo-resource-group>'
 $environmentName = 'cae-acc-hello'
 $appName = 'ca-acc-hello'
-$location = 'uaenorth' # Use 'westeurope' only for the HTML quickstart experiment.
+$location = 'uaenorth' # Use 'westeurope' only for the HTML quickstart.
 
 Connect-AzAccount -Subscription $subscriptionId
 . .\azure-container-apps-sample\container-apps-acc\DeploymentHelpers.ps1
