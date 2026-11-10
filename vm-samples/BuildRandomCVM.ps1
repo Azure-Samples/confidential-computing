@@ -10,7 +10,7 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|Ubuntu2604|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion] [-NoInternetAccess] [-SkipSkuPreflight]
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|Ubuntu2604|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion] [-NoInternetAccess] [-SkipSkuPreflight] [-GPU]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
 # osType specifies which OS to deploy: Windows (Server 2022), Windows11 (Windows 11 Enterprise), Windows2019 (Server 2019), Ubuntu (24.04), Ubuntu2604 (26.04), or RHEL (9.5)
@@ -20,6 +20,7 @@
 # policyFilePath is an optional parameter that specifies the path to a custom policy file for key vault key creation
 # DisableBastion is an optional switch that skips the creation of Azure Bastion (VM will only be accessible via private network)
 # NoInternetAccess is an optional switch that blocks outbound internet access from the CVM subnet by not attaching NAT Gateway egress
+# GPU is an optional switch that provisions an NVIDIA H100 confidential GPU VM with Ubuntu 22.04 CVM, installs the NVIDIA open-kernel driver and nvtrust verifier inside the VM, and runs both GPU CC-mode and CPU SEV-SNP attestation.
 #
 # You'll need to have the latest Azure PowerShell module installed as older versions don't have the parameters for AKV & ACC (update-module -force)
 #
@@ -37,17 +38,42 @@ param (
     [Parameter(Mandatory=$false)]$description = "",
     [Parameter(Mandatory=$false)][switch]$smoketest,
     [Parameter(Mandatory=$false)]$region = "northeurope",
-    [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v5",
+    [Parameter(Mandatory=$false)]$vmsize = "Standard_DC2as_v6",
     [Parameter(Mandatory=$false)]$policyFilePath = "",
     [Parameter(Mandatory=$false)][switch]$DisableBastion,
     [Parameter(Mandatory=$false)][switch]$NoInternetAccess,
-    [Parameter(Mandatory=$false)][switch]$SkipSkuPreflight
+    [Parameter(Mandatory=$false)][switch]$SkipSkuPreflight,
+    [Parameter(Mandatory=$false)][switch]$GPU
 )
 
 if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
     write-host "You must enter a subscription ID, basename, and OS type (Windows, Windows11, Windows2019, Ubuntu, Ubuntu2604, or RHEL)"
     exit
 }# exit if any of the parameters are empty
+
+if ($GPU -and $NoInternetAccess) {
+    throw "-GPU requires outbound internet access to install the NVIDIA driver and nvtrust verifier, so it cannot be combined with -NoInternetAccess."
+}
+
+if ($GPU) {
+    $h100Sku = 'Standard_NCC40ads_H100_v5'
+    $supportedH100Regions = @('eastus2', 'westeurope', 'southcentralus', 'westus3', 'swedencentral', 'centraluseuap')
+
+    if ($vmsize -ne $h100Sku) {
+        write-host "-GPU was specified: overriding -vmsize '$vmsize' with '$h100Sku' (NVIDIA H100 SEV-SNP CVM)." -ForegroundColor Yellow
+        $vmsize = $h100Sku
+    }
+
+    if ($osType -ne 'Ubuntu') {
+        write-host "-GPU was specified: overriding -osType '$osType' with 'Ubuntu' (NVIDIA H100 CC mode is Linux-only on Azure)." -ForegroundColor Yellow
+        $osType = 'Ubuntu'
+    }
+
+    if ($supportedH100Regions -notcontains $region) {
+        write-host "-GPU was specified: region '$region' does not offer '$h100Sku'. Switching to 'eastus2'. Pass -region with one of: $($supportedH100Regions -join ', ') to override." -ForegroundColor Yellow
+        $region = 'eastus2'
+    }
+}
 
 #---------Prerequisite Checks: PowerShell version and required Az modules-----------------------------------------------
 function Test-PrerequisitesInstalled {
@@ -250,8 +276,9 @@ if ($vmSize -match '^Standard_DC\d+s_v[23]$') {
 }
 
 # Warn (but don't fail) if the SKU doesn't look like a known CVM SKU naming pattern.
-if ($vmSize -notmatch '^Standard_(DC|EC)\d+[a-z]+_v\d+$' -or $vmSize -notmatch '_(DC|EC)\d+(a|e)') {
-    write-host "Warning: '$vmSize' does not match a known Confidential VM SKU pattern (DCa*/ECa* for SEV-SNP, DCe*/ECe* for TDX). Continuing, but deployment may fail if this is not a CVM SKU." -ForegroundColor Yellow
+$isKnownCvmSku = ($vmSize -match '^Standard_(DC|EC)\d+[a-z]+_v\d+$' -and $vmSize -match '_(DC|EC)\d+(a|e)') -or ($vmSize -match '^Standard_NCC\d+ads_H100_v\d+$')
+if (-not $isKnownCvmSku) {
+    write-host "Warning: '$vmSize' does not match a known Confidential VM SKU pattern (DCa*/ECa* for SEV-SNP, DCe*/ECe* for TDX, NCCads_H100 for confidential GPU). Continuing, but deployment may fail if this is not a CVM SKU." -ForegroundColor Yellow
 }
 
 $skuInfo = $null
@@ -418,7 +445,11 @@ switch ($osType) {
     }
     "Ubuntu" { # updated to use Ubuntu 24.04 LTS
         $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Linux -ComputerName $vmname -Credential $cred;
-        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer 'ubuntu-24_04-lts' -Skus 'cvm' -Version "latest";
+        if ($GPU) {
+            $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer '0001-com-ubuntu-confidential-vm-jammy' -Skus '22_04-lts-cvm' -Version "latest";
+        } else {
+            $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer 'ubuntu-24_04-lts' -Skus 'cvm' -Version "latest";
+        }
         $VMIsLinux = $true
     }
     "Ubuntu2604" {
@@ -540,6 +571,138 @@ if (-not $DisableBastion) {
     write-host "VM is only accessible via private network connectivity (VPN, ExpressRoute, or peered networks)"
 }
 
+#---------GPU mode: run the checksum-pinned Azure H100 onboarding release and GPU attestation--------------------
+if ($GPU) {
+    function Invoke-GpuRunCommand {
+        param(
+            [Parameter(Mandatory)] [string] $Label,
+            [Parameter(Mandatory)] [string] $Script,
+            [Parameter(Mandatory)] [string] $SuccessMarker
+        )
+
+        for ($attempt = 1; $attempt -le 10; $attempt++) {
+            try {
+                write-host "$Label run-command attempt $attempt of 10..." -ForegroundColor Cyan
+                $result = Invoke-AzVMRunCommand -Name $vmname -ResourceGroupName $resgrp -CommandId 'RunShellScript' -ScriptString $Script -ErrorAction Stop
+                $text = ($result.Value | ForEach-Object { $_.Message }) -join "`n"
+                foreach ($entry in $result.Value) {
+                    if ($entry.Message) { write-host $entry.Message }
+                }
+                if ($text -notmatch [regex]::Escape($SuccessMarker)) {
+                    throw "$Label did not produce success marker '$SuccessMarker'."
+                }
+                return $text
+            } catch {
+                $message = $_.Exception.Message
+                $isTransient = $message -match 'Conflict|in progress|409|not ready|OperationPreempted|preempted|Canceled|ResourceNotFound|was not found'
+                if ($attempt -lt 10 -and $isTransient) {
+                    write-host "$Label endpoint busy/not ready; waiting 45s..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds 45
+                    continue
+                }
+                throw
+            }
+        }
+    }
+
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "GPU step 1/5: preparing the supported Azure FDE kernel with Azure CGPU onboarding V4.3.3..." -ForegroundColor Magenta
+    $gpuKernelScript = @'
+#!/bin/bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+cloud-init status --wait 2>/dev/null || true
+PACKAGE=/tmp/cgpu-onboarding-package.tar.gz
+INSTALL_DIR=/opt/cgpu-onboarding
+URL=https://github.com/Azure/az-cgpu-onboarding/releases/download/V4.3.3/cgpu-onboarding-package.tar.gz
+SHA256=297a9ebbb2228a4ef26c0e9d3b7917a0d9e90bfb52bcb4713c50cd6a3658d8f3
+
+curl -fsSL --retry 5 --retry-connrefused --retry-delay 10 "$URL" -o "$PACKAGE"
+echo "$SHA256  $PACKAGE" | sha256sum --check --strict
+rm -rf "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
+tar -xzf "$PACKAGE" -C "$INSTALL_DIR"
+cd "$INSTALL_DIR/cgpu-onboarding-package"
+test -f step-0-prepare-kernel.sh
+sed '/^[[:space:]]*sudo reboot[[:space:]]*$/d' step-0-prepare-kernel.sh > step-0-prepare-kernel-no-reboot.sh
+bash ./step-0-prepare-kernel-no-reboot.sh --enable-snapshot 20260827T120000Z
+echo "Running kernel before required reboot: $(uname -r)"
+echo "Newest installed kernel: $(find /lib/modules -mindepth 1 -maxdepth 1 -printf '%f\n' | sort -V | tail -1)"
+echo "GPU_KERNEL_PREPARED=1"
+'@
+    Invoke-GpuRunCommand -Label 'GPU kernel preparation' -Script $gpuKernelScript -SuccessMarker 'GPU_KERNEL_PREPARED=1' | Out-Null
+
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "GPU step 2/5: rebooting into the supported kernel..." -ForegroundColor Magenta
+    Restart-AzVM -ResourceGroupName $resgrp -Name $vmname | Out-Null
+    Start-Sleep -Seconds 90
+
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "GPU step 3/5: installing the NVIDIA 595 open driver from Azure CGPU onboarding V4.3.3..." -ForegroundColor Magenta
+    $gpuDriverScript = @'
+#!/bin/bash
+set -euo pipefail
+cd /opt/cgpu-onboarding/cgpu-onboarding-package
+test -f step-1-install-gpu-driver.sh
+echo "Running kernel: $(uname -r)"
+printf '%s\n%s\n' '6.8.0-1025-azure' "$(uname -r)" | sort --check=quiet --version-sort
+bash ./step-1-install-gpu-driver.sh
+nvidia-smi
+echo "GPU_DRIVER_INSTALLED=1"
+'@
+    Invoke-GpuRunCommand -Label 'GPU driver installation' -Script $gpuDriverScript -SuccessMarker 'GPU_DRIVER_INSTALLED=1' | Out-Null
+
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "GPU step 4/5: rebooting after NVIDIA driver installation..." -ForegroundColor Magenta
+    Restart-AzVM -ResourceGroupName $resgrp -Name $vmname | Out-Null
+    Start-Sleep -Seconds 90
+
+    write-host "----------------------------------------------------------------------------------------------------------------"
+    write-host "GPU step 5/5: validating H100 CC mode and running GPU attestation..." -ForegroundColor Magenta
+    $gpuAttestScript = @'
+#!/bin/bash
+set -euo pipefail
+cd /opt/cgpu-onboarding/cgpu-onboarding-package
+
+for attempt in $(seq 1 30); do
+    if nvidia-smi >/dev/null 2>&1; then break; fi
+    if [ "$attempt" -eq 30 ]; then
+        echo "ERROR: nvidia-smi did not become ready."
+        journalctl -b 2>/dev/null | grep -iE 'nvidia|secure|pci' | tail -100 || true
+        exit 1
+    fi
+    sleep 10
+done
+
+echo "GPU_KERNEL=$(uname -r)"
+nvidia-smi
+CC_STATUS=$(nvidia-smi conf-compute -f)
+CC_ENVIRONMENT=$(nvidia-smi conf-compute -e)
+echo "$CC_STATUS"
+echo "$CC_ENVIRONMENT"
+test "$CC_STATUS" = 'CC status: ON'
+test "$CC_ENVIRONMENT" = 'CC Environment: PRODUCTION'
+
+set +e
+bash ./step-2-attestation.sh --gpu-only 2>&1 | tee /tmp/gpu-attestation.log
+ATTEST_EXIT=${PIPESTATUS[0]}
+set -e
+test "$ATTEST_EXIT" -eq 0
+grep -F 'GPU Attestation is Successful.' /tmp/gpu-attestation.log
+echo "$CC_STATUS"
+echo "$CC_ENVIRONMENT"
+echo "GPU_ATTEST_EXIT=0"
+'@
+    $gpuOutputText = Invoke-GpuRunCommand -Label 'GPU attestation' -Script $gpuAttestScript -SuccessMarker 'GPU_ATTEST_EXIT=0'
+    foreach ($requiredGpuEvidence in @('CC status: ON', 'CC Environment: PRODUCTION', 'GPU Attestation is Successful.')) {
+        if ($gpuOutputText -notmatch [regex]::Escape($requiredGpuEvidence)) {
+            throw "GPU attestation output did not contain '$requiredGpuEvidence'."
+        }
+    }
+    write-host "----------------------------------------------------------------------------------------------------------------"
+}
+
 #---------Do attestation check inside the VM using Azure/cvm-attestation-tools-----------------------------------
 # Downloads the latest pre-built attest CLI release from https://github.com/Azure/cvm-attestation-tools/releases
 # and runs it inside the freshly deployed CVM, returning the output to the caller.
@@ -636,6 +799,7 @@ echo "--------- attest --c $attestConfig ---------"
 ATTEST_EXIT=`${PIPESTATUS[0]}
 if [ `$ATTEST_EXIT -ne 0 ]; then
     echo "attest exited with code `$ATTEST_EXIT"
+    exit `$ATTEST_EXIT
 fi
 
 # Extract JWT (a single token of the form xxx.yyy.zzz with base64url chars)
@@ -653,8 +817,15 @@ if [ -n "`$JWT" ] && command -v jq >/dev/null 2>&1; then
     b64d "`$P" | jq .
     echo "--- key MAA claims ---"
     b64d "`$P" | jq '{iss, "x-ms-attestation-type", "x-ms-compliance-status", "x-ms-isolation-tee": ."x-ms-isolation-tee"."x-ms-attestation-type", "x-ms-runtime-vm-configuration-secure-boot": ."x-ms-runtime"."vm-configuration"."secure-boot", "x-ms-runtime-vm-configuration-tpm-enabled": ."x-ms-runtime"."vm-configuration"."tpm-enabled"}'
+    COMPLIANCE=`$(b64d "`$P" | jq -r '."x-ms-compliance-status"')
+    if [ "`$COMPLIANCE" != "azure-compliant-cvm" ]; then
+        echo "ERROR: unexpected x-ms-compliance-status: `$COMPLIANCE"
+        exit 1
+    fi
+    echo "CPU_ATTEST_COMPLIANCE=azure-compliant-cvm"
 else
     echo "(no JWT found in attest output to decode, or jq unavailable)"
+    exit 1
 fi
 
 cd /
@@ -825,7 +996,7 @@ Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
             break
         } catch {
             $msg = $_.Exception.Message
-            if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*')) {
+            if ($attempt -lt $maxAttempts -and ($msg -like '*Conflict*' -or $msg -like '*in progress*' -or $msg -like '*409*' -or $msg -like '*OperationPreempted*' -or $msg -like '*preempted*' -or $msg -like '*Canceled*')) {
                 write-host "Run-command extension busy (409); waiting 60s before retry..." -ForegroundColor Yellow
                 Start-Sleep -Seconds 60
             } elseif ($attempt -lt $maxAttempts -and ($msg -like '*ResourceNotFound*' -or $msg -like '*was not found*')) {
@@ -851,6 +1022,9 @@ Remove-Item -Recurse -Force `$work -ErrorAction SilentlyContinue
     if ($attestationText -match 'Failed to download attest-win\.zip|Failed to download attest-lin\.zip|No zip extractor available|attest\.exe exited with code\s+[1-9]|attest exited with code\s+[1-9]') {
         write-host "Attestation failed inside the VM. See output above for details." -ForegroundColor Red
         throw "In-VM attestation failed"
+    }
+    if ($VMisLinux -and $attestationText -notmatch 'CPU_ATTEST_COMPLIANCE=azure-compliant-cvm') {
+        throw "In-VM attestation did not produce the expected azure-compliant-cvm claim"
     }
     write-host "----------------------------------------------------------------------------------------------------------------"
     write-host "Build and attestation complete." -ForegroundColor Green
@@ -894,11 +1068,14 @@ if ($smoketest) {
     } else {
         write-host "`nProceeding with resource deletion..."
         try {
-            Remove-AzResourceGroup -Name $resgrp -Force -AsJob
-            write-host "Resource group deletion initiated successfully (running in background)"
-            write-host "All resources in resource group '$resgrp' are being removed"
+            Remove-AzResourceGroup -Name $resgrp -Force -ErrorAction Stop | Out-Null
+            if (Get-AzResourceGroup -Name $resgrp -ErrorAction SilentlyContinue) {
+                throw "Resource group '$resgrp' still exists after deletion completed."
+            }
+            write-host "Resource group '$resgrp' deleted successfully"
         } catch {
             write-host "Error removing resource group: $($_.Exception.Message)" -ForegroundColor Red
+            throw
         }
     }
 } else {

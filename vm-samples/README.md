@@ -1,6 +1,6 @@
 # Confidential Virtual Machines
 
-**Last Updated:** June 2026
+**Last Updated:** September 2026
 
 ## Overview
 
@@ -43,7 +43,7 @@ Deploy Confidential Virtual Machines (CVMs) with AMD SEV-SNP or Intel TDX hardwa
 
 | Script | Description | Status |
 |--------|-------------|--------|
-| `BuildRandomCVM.ps1` | Deploy CVM with Confidential OS disk encryption + CMK and Bastion | **Stable** |
+| `BuildRandomCVM.ps1` | Deploy CVM with Confidential OS disk encryption + CMK and Bastion. Pass `-GPU` for an H100 confidential GPU VM with NVIDIA driver install + GPU CC-mode attestation. | **Stable** |
 | `BuildRandomSQLCVM.ps1` | SQL Server 2022 on Confidential VM | **Stable** |
 
 ---
@@ -136,7 +136,7 @@ Basename is a prefix assigned to all resources created by the script and will be
 The script will generate a random complex password and output it to the terminal once; make sure you copy it if you want to login to the CVM.
 
 ```powershell
-./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|Ubuntu2604|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-vmsize <VM SIZE SKU>] [-policyFilePath <PATH>] [-DisableBastion] [-NoInternetAccess]
+./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|Ubuntu2604|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-vmsize <VM SIZE SKU>] [-policyFilePath <PATH>] [-DisableBastion] [-NoInternetAccess] [-GPU]
 ```
 
 ## Parameters:
@@ -145,11 +145,12 @@ The script will generate a random complex password and output it to the terminal
 - **osType**: The operating system to deploy (required)
 - **description**: Optional description added as a tag to the resource group
 - **smoketest**: Optional switch that automatically removes all resources after completion (useful for testing)
-- **region**: Optional Azure region (defaults to `northeurope`)
-- **vmsize**: Optional VM size SKU (defaults to `Standard_DC2as_v5`). Use SEV-SNP SKUs like `Standard_DC4as_v5` or Intel TDX SKUs like `Standard_DC2es_v6` — the script picks the matching attestation config automatically.
+- **region**: Optional Azure region (defaults to `northeurope`; auto-switches to `eastus2` when `-GPU` is set)
+- **vmsize**: Optional VM size SKU (defaults to `Standard_DC2as_v6`). Use SEV-SNP SKUs like `Standard_DC4as_v5` or Intel TDX SKUs like `Standard_DC2es_v6` — the script picks the matching attestation config automatically.
 - **policyFilePath**: Optional path to a custom key release policy JSON (defaults to `-UseDefaultCVMPolicy`)
 - **DisableBastion**: Optional switch that skips Azure Bastion creation; the VM will only be reachable via private network connectivity (VPN, ExpressRoute, peering)
 - **NoInternetAccess**: Optional switch that skips NAT Gateway setup and keeps the CVM subnet fully offline; attestation download is skipped
+- **GPU**: Optional switch that builds an NVIDIA H100 confidential GPU VM (`Standard_NCC40ads_H100_v5`, AMD SEV-SNP CPU TEE + H100 in CC mode). Overrides `-vmsize`, forces `-osType Ubuntu`, and switches to the Ubuntu 22.04 CVM image. The script then installs the NVIDIA open-kernel driver and the NVIDIA `nvtrust` local GPU verifier inside the VM and runs **two** attestations: a GPU CC-mode attestation (`verifier.cc_admin`) and the normal SEV-SNP CPU attestation. See [GPU mode](#gpu-mode--h100-confidential-gpu-vm) below.
 
 ## OS Type Options:
 - **Windows**: Windows Server 2022 Datacenter using the refreshed `windowsserver2022` Marketplace offer (RDP via Bastion)
@@ -176,6 +177,91 @@ Live-tested Ubuntu 26.04 configurations (image version `26.04.202610210`, guest 
 | `Standard_DC2es_v6` | `westeurope` | Intel TDX | `tdxvm`, `azure-compliant-cvm` |
 
 Both deployments completed with Bastion, NAT egress, Secure Boot, vTPM, and customer-managed confidential OS disk encryption enabled. Availability and subscription quota must still be checked for each deployment.
+
+## GPU mode — H100 confidential GPU VM
+
+The `-GPU` switch builds an NVIDIA H100 SEV-SNP confidential GPU VM (`Standard_NCC40ads_H100_v5`, family `StandardNCCads2023Family`, 40 vCPUs / 1xH100). When `-GPU` is set the script:
+
+1. **Overrides `-vmsize`** with `Standard_NCC40ads_H100_v5`.
+2. **Forces `-osType Ubuntu`** (H100 CC mode is Linux-only on Azure today). Any other value is ignored with a yellow warning.
+3. **Switches the Ubuntu image** from the default Ubuntu 24.04 CVM (`Canonical/ubuntu-24_04-lts/cvm`) to the documented Ubuntu 22.04 CVM base for NCC H100 v5 (`Canonical/0001-com-ubuntu-confidential-vm-jammy/22_04-lts-cvm`).
+4. **Switches the default region** from `northeurope` to `eastus2` (one of the regions where the H100 CVM SKU is offered without a subscription restriction; `westeurope` is also supported — set `-region westeurope` if you prefer).
+5. **Pre-flight checks the SKU and quota** the same way as the SEV-SNP / TDX path: the script will fail fast if `Standard_NCC40ads_H100_v5` is not offered in the region or the `StandardNCCads2023Family` vCPU quota is below 40 vCPUs.
+6. **Downloads and verifies Microsoft Azure CGPU onboarding V4.3.3** from [`Azure/az-cgpu-onboarding`](https://github.com/Azure/az-cgpu-onboarding/releases/tag/V4.3.3). The script pins `cgpu-onboarding-package.tar.gz` to SHA-256 `297a9ebbb2228a4ef26c0e9d3b7917a0d9e90bfb52bcb4713c50cd6a3658d8f3` before executing it.
+7. **Prepares the kernel and reboots** using the release's `step-0-prepare-kernel.sh` with the `20260827T120000Z` Ubuntu snapshot, matching the validated CVM image's package baseline. Current NVIDIA 595 packages require kernel `6.8.0-1025-azure` or newer. The host controls the reboot so it can require a positive completion marker first.
+8. **Installs the NVIDIA driver and reboots again** using `step-1-install-gpu-driver.sh`. This installs the Canonical-signed NVIDIA 595 server open module, configures the persistence daemon, creates the NVIDIA device nodes, and verifies `nvidia-smi` before the second reboot.
+9. **Validates GPU confidential-compute state** by requiring exact output from `nvidia-smi conf-compute -f` and `-e`: `CC status: ON` and `CC Environment: PRODUCTION`.
+10. **Runs GPU attestation** with the release's `step-2-attestation.sh --gpu-only`. Success requires exit code zero and the exact verdict `GPU Attestation is Successful.` The verifier checks the report certificate chain and revocation status, nonce, report signature, driver and VBIOS RIMs, and runtime measurements against NVIDIA golden measurements.
+11. **Runs the normal SEV-SNP CPU attestation** with `cvm-attestation-tools`, decodes the MAA JWT, and requires `x-ms-compliance-status=azure-compliant-cvm`.
+
+> Note: `-GPU` requires outbound internet access to install the NVIDIA verifier tooling, so it cannot be combined with `-NoInternetAccess`.
+
+### GPU quota requirement
+
+`Standard_NCC40ads_H100_v5` is one VM = 40 vCPUs in the `StandardNCCads2023Family` quota bucket. Most subscriptions start with `0/0` quota in this family in **every** region and the Microsoft.Quota auto-approval API will reject the request with `QuotaNotAvailableForResource`. You must file a regular Azure support ticket to request an H100 GPU CVM quota increase. Until the quota is granted the pre-flight check in this script will fail fast with a clear error and a copy-pasteable `Get-AzVMUsage` command.
+
+Quick quota check:
+
+```powershell
+# Is the H100 CVM SKU offered in your subscription, and where?
+Get-AzComputeResourceSku |
+  Where-Object { $_.ResourceType -eq 'virtualMachines' -and $_.Name -eq 'Standard_NCC40ads_H100_v5' } |
+  Select-Object Name, Family, @{n='Locations';e={$_.Locations -join ','}}, @{n='Restricted';e={if($_.Restrictions){($_.Restrictions | ForEach-Object {$_.ReasonCode}) -join ';'}else{'no'}}}
+
+# Current vCPU usage / limit for the H100 family in a given region
+Get-AzVMUsage -Location 'eastus2' | Where-Object { $_.Name.Value -eq 'StandardNCCads2023Family' } | Format-Table -AutoSize
+```
+
+Reference: [Azure NCCads H100 v5-series](https://learn.microsoft.com/azure/virtual-machines/sizes/gpu-accelerated/nccadsh100v5-series), [NVIDIA H100 confidential computing on Azure](https://learn.microsoft.com/azure/confidential-computing/confidential-vm-overview-gpu) and [`NVIDIA/nvtrust`](https://github.com/NVIDIA/nvtrust). For the up-to-date list of regions that offer `Standard_NCC40ads_H100_v5` see the [Azure products by region](https://azure.microsoft.com/en-gb/explore/global-infrastructure/products-by-region/table) page (filter for *NCCads H100 v5*).
+
+### Examples
+
+```powershell
+# Build an H100 confidential GPU VM and run both GPU and CPU attestations (resources remain)
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "h100" -osType "Ubuntu" -GPU
+
+# Same, but in West Europe and tear down at the end
+./BuildRandomCVM.ps1 -subsID "your-subscription-id" -basename "h100eu" -osType "Ubuntu" -GPU -region "westeurope" -smoketest -DisableBastion
+```
+
+> Note: this path takes substantially longer than a normal CVM run because the supported flow includes a kernel dist-upgrade, two reboots, NVIDIA driver installation, and GPU and CPU attestation.
+
+### Validated West Europe smoke test (September 3, 2026)
+
+The example above was validated end to end in West Europe with `-smoketest -DisableBastion`. The VM had no public IP and used a NAT Gateway for outbound package, RIM, certificate, and attestation access.
+
+| Property | Validated value |
+|---|---|
+| VM SKU / quota family | `Standard_NCC40ads_H100_v5` / `StandardNCCads2023Family` (40 vCPUs) |
+| Image | `Canonical:0001-com-ubuntu-confidential-vm-jammy:22_04-lts-cvm:22.04.202608270` |
+| VM security | `ConfidentialVM`, Secure Boot enabled, vTPM enabled |
+| Confidential OS disk | `DiskWithVMGuestState`, CMK-backed Disk Encryption Set |
+| Guest kernel | `6.8.0-1064-azure-fde` |
+| GPU | NVIDIA H100 NVL, 95,830 MiB, VBIOS `96.00.9F.00.04` |
+| NVIDIA driver | `595.71.05`, signer `Canonical Ltd. Kernel Module Signing` |
+| GPU CC state | `CC status: ON`; `CC Environment: PRODUCTION` |
+| GPU attestation | `GPU Attestation is Successful.`; certificate, nonce, signature, RIM, and runtime measurements passed |
+| CPU attestation | `x-ms-attestation-type=sevsnpvm`; `x-ms-compliance-status=azure-compliant-cvm`; issuer `https://sharedweu.weu.attest.azure.net` |
+
+The successful GPU verifier output ended with:
+
+```text
+GPU is in expected state.
+GPU 0 ... verified successfully.
+GPU Attestation is Successful.
+CC status: ON
+CC Environment: PRODUCTION
+GPU_ATTEST_EXIT=0
+```
+
+The successful CPU attestation output ended with:
+
+```text
+Attestation Type: sevsnpvm
+Status: azure-compliant-cvm
+Attested Platform Successfully!!
+CPU_ATTEST_COMPLIANCE=azure-compliant-cvm
+```
 
 ## Quickstart
 

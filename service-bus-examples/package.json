@@ -1,0 +1,17 @@
+{
+  "name": "confidential-service-bus-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "demo": "node send-receive.mjs"
+  },
+  "dependencies": {
+    "@azure/identity": "4.14.0",
+    "@azure/service-bus": "7.10.0"
+  }
+}

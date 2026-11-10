@@ -21,7 +21,7 @@ urlFragment: confidential-computing-samples
 
 ![MIT license badge](https://img.shields.io/badge/license-MIT-green.svg)
 
-**Last Updated:** June 2026
+**Last Updated:** September 2026
 
 > **Heads up — this is the new home for Azure Confidential Computing samples.**
 > [`https://aka.ms/accsamples`](https://aka.ms/accsamples) now redirects here.
@@ -47,14 +47,20 @@ Confidential computing is the protection of data-in-use through isolating comput
   - Any data processed using these samples
 - **AI-Assisted Content:** Several samples in this repository were created with significant assistance from AI coding tools, primarily [GitHub Copilot](https://github.com/features/copilot) inside [Visual Studio Code](https://code.visualstudio.com/), to showcase modern AI-assisted development. While functional, AI-assisted code should always be reviewed by qualified security professionals before use in sensitive scenarios.
 
-## 🆕 What's New (June 2026)
+## 🆕 What's New (September 2026)
+
+| Addition | Description |
+|---|---|
+| **[NVIDIA H100 Confidential GPU VMs](/vm-samples/README.md#gpu-mode--h100-confidential-gpu-vm)** 🆕 | [`BuildRandomCVM.ps1`](/vm-samples/BuildRandomCVM.ps1) now deploys `Standard_NCC40ads_H100_v5` confidential GPU VMs with the checksum-pinned Azure CGPU onboarding V4.3.3 flow. It verifies production CC mode, requires successful NVIDIA H100 attestation, and then requires AMD SEV-SNP compliance from Microsoft Azure Attestation. The private, NAT-enabled flow was validated end to end in West Europe with NVIDIA driver `595.71.05`, Secure Boot, vTPM, a CMK-backed confidential OS disk, and automatic smoke-test cleanup. |
+
+### Previously (June 2026)
 
 | Addition | Description |
 |---|---|
 | **[Visual Attestation Demo v2 (ACI)](/aci-samples/visual-attestation-demo-v2/README.md)** 🆕 | Simplified ACI port of the AKS visual attestation sample. Flask app calls Microsoft Azure Attestation **directly** via the upstream `get-snp-report` tool — **no SKR sidecar**, single container. Side-by-side Confidential vs Standard SKU deployment demonstrates falsifiability: the same image fails deterministically on Standard (no `/dev/sev-guest`), proving the success case really came from AMD silicon. |
 | **[Sealed Container (ACI) — updated](aci-samples/sealed-container/README.md)** 🆕 | New sealed-container guidance and features: `-WelcomeSecret` encryption/decryption flow, artifact integrity verification walkthrough (checksums vs signatures), clearer UI section highlighting, and updated deployment defaults/documentation. |
 | **[Federated Multi-Party Demo](/multi-party-samples/advanced-app-federated/README.md)** ⭐ | New 4-party (Contoso, Fabrikam, Wingtip Toys, Woodgrove Bank) **federated** analytics demo. Each partner decrypts its own data inside its own AMD SEV-SNP TEE and returns only aggregates — no raw PII ever crosses the trust boundary. Includes a 3-minute [`DEMO-SCRIPT.md`](/multi-party-samples/advanced-app-federated/DEMO-SCRIPT.md). |
-| **[CVM samples now support Intel TDX](/vm-samples/README.md)** | [`BuildRandomCVM.ps1`](/vm-samples/BuildRandomCVM.ps1) auto-detects AMD SEV-SNP (`DCa*`/`ECa*`) vs Intel TDX (`DCe*`/`ECe*`, e.g. `Standard_DC2es_v6`) from the chosen VM SKU and runs the matching attestation config. The script now also enables outbound internet on the private VM subnet via NAT Gateway by default, with `-NoInternetAccess` available for fully isolated deployments. The June 2026 validation matrix now includes all four combinations: AMD v6 Windows, AMD v6 Linux, TDX v6 Windows, and TDX v6 Linux. See the [Intel TDX examples](/vm-samples/README.md#intel-tdx-examples) in the VM samples README. |
+| **[CVM samples now support Intel TDX](/vm-samples/README.md)** | [`BuildRandomCVM.ps1`](/vm-samples/BuildRandomCVM.ps1) auto-detects AMD SEV-SNP (`DCa*`/`ECa*`) vs Intel TDX (`DCe*`/`ECe*`, e.g. `Standard_DC2es_v6`) from the chosen VM SKU and runs the matching attestation config. It also now supports an optional `-GPU` mode for NVIDIA H100 confidential GPU VMs (`Standard_NCC40ads_H100_v5`) with NVIDIA driver install + GPU CC-mode attestation. The script now also enables outbound internet on the private VM subnet via NAT Gateway by default, with `-NoInternetAccess` available for fully isolated deployments. The June 2026 validation matrix now includes all four combinations: AMD v6 Windows, AMD v6 Linux, TDX v6 Windows, and TDX v6 Linux. See the [Intel TDX examples](/vm-samples/README.md#intel-tdx-examples) in the VM samples README. |
 | **Validation workflow update** 🆕 | Local `pre-push` performs validation only (no PR commenting). Use `./scripts/post-validation-comment.ps1` to run the 4-way CVM matrix and auto-post results as a **comment on the active PR** (use `-NoPostToPr` to skip posting). Commit-message annotation is removed. GitHub Actions is temporarily running **secret scan + syntax/parameter validation only** until service principal secrets are available. See [Validation Automation](docs/VALIDATION-AUTOMATION.md). |
 | **Updated in-VM attestation tooling** | The CVM build script now runs the latest pre-built `attest` binary from [Azure/cvm-attestation-tools](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the VM (Linux + Windows), then **decodes the returned MAA JWT** (header, payload and key claims like `x-ms-attestation-type` and `x-ms-compliance-status`) using `jq` on Linux and built-in `ConvertFrom-Json` on Windows. Linux extraction now supports `unzip`, `python3`, or `bsdtar` fallback paths to avoid image-specific package gaps. When `-NoInternetAccess` is used, this attestation step is skipped because the VM cannot reach GitHub to download the tooling. The legacy [`WindowsAttest.ps1`](/vm-samples/WindowsAttest.ps1) is kept for reference but is **no longer recommended**. |
 | **Repo redirect** | [`https://aka.ms/accsamples`](https://aka.ms/accsamples) now points to this repo. The legacy [`confidential-container-samples`](https://github.com/Azure-Samples/confidential-container-samples) repo remains read-only / archived for reference. |
@@ -154,8 +160,9 @@ Simpler 2-container demonstration (Contoso, Fabrikam Fashion) without partner an
 
 ### [VM Samples](/vm-samples/README.md)
 Confidential Virtual Machine (CVM) deployment scripts:
-- **BuildRandomCVM.ps1** 🆕 *Updated June 2026* — Deploy CVMs with **Confidential OS disk encryption bound to a Customer Managed Key (CMK)** and automated in-VM attestation. The OS disk and VM Guest State (vTPM + Secure Boot) are encrypted with an HSM-backed RSA-3072 key in your Key Vault Premium; the key is only released after Microsoft Azure Attestation (MAA) verifies the VM is a genuine SEV-SNP / TDX CVM, so even the Azure host fabric cannot read the disk. See [What is Confidential OS disk encryption with CMK?](/vm-samples/README.md#what-is-confidential-os-disk-encryption-with-cmk) and [`https://aka.ms/accdocs`](https://aka.ms/accdocs).
-  - **AMD SEV-SNP** (`DCa*` / `ECa*`, e.g. `Standard_DC2as_v5`) **and Intel TDX** (`DCe*` / `ECe*`, e.g. `Standard_DC2es_v6`) — auto-detected from the chosen VM SKU, with the matching attestation config selected automatically
+- **BuildRandomCVM.ps1** 🆕 *Updated September 2026* — Deploy CVMs with **Confidential OS disk encryption bound to a Customer Managed Key (CMK)** and automated in-VM attestation. The OS disk and VM Guest State (vTPM + Secure Boot) are encrypted with an HSM-backed RSA-3072 key in your Key Vault Premium; the key is only released after Microsoft Azure Attestation (MAA) verifies the VM is a genuine SEV-SNP / TDX CVM, so even the Azure host fabric cannot read the disk. See [What is Confidential OS disk encryption with CMK?](/vm-samples/README.md#what-is-confidential-os-disk-encryption-with-cmk) and [`https://aka.ms/accdocs`](https://aka.ms/accdocs).
+  - **AMD SEV-SNP** (`DCa*` / `ECa*`, default `Standard_DC2as_v6`) **and Intel TDX** (`DCe*` / `ECe*`, e.g. `Standard_DC2es_v6`) — auto-detected from the chosen VM SKU, with the matching attestation config selected automatically
+  - **NVIDIA H100 `-GPU` mode** (`Standard_NCC40ads_H100_v5`) — runs checksum-pinned Azure CGPU onboarding V4.3.3, verifies `CC status: ON` and `CC Environment: PRODUCTION`, and requires successful GPU and AMD SEV-SNP CPU attestations
   - Windows Server 2022 Datacenter, Windows Server 2019, Windows 11 Enterprise 24H2, Ubuntu 24.04 LTS, RHEL 9.5 — all confidential-VM images
   - **New attestation flow** — runs the latest pre-built `attest` binary from [`Azure/cvm-attestation-tools`](https://github.com/Azure/cvm-attestation-tools/releases/latest) inside the freshly deployed VM (Linux + Windows) and decodes the returned MAA JWT (header, payload, key claims like `x-ms-attestation-type`, `x-ms-compliance-status`, `secure-boot`, `tpm-enabled`) using `jq` on Linux / built-in `ConvertFrom-Json` on Windows
   - **Pre-flight checks** before any resources are created: rejects Intel SGX SKUs (different isolation model), validates the chosen SKU is offered in the target region, and confirms there is enough vCPU quota in the VM family
@@ -170,6 +177,12 @@ Azure Kubernetes Service with AMD SEV-SNP confidential computing:
 ### [Attestation Samples](/attestation-samples/README.md)
 Microsoft Azure Attestation (MAA) provider management:
 - **createPrivateMAA.ps1** - Create private Azure Attestation provider for custom attestation policies
+
+### [Service Bus Examples](service-bus-examples/README.md)
+Deploy a confidential-computing-enabled Azure Service Bus Premium namespace, send
+three sample JSON messages, and verify them on read-back using passwordless Entra
+authentication. Tries Korea Central first, then UAE North on regional
+availability failures.
 
 ### Utility Snippets
 Reusable PowerShell snippets for common confidential computing tasks:
