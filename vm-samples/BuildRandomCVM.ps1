@@ -10,10 +10,10 @@
 # 
 # Clone this repo to a folder (relies on the WindowsAttest.ps1 script being in the same folder as this script)
 #
-# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion] [-NoInternetAccess] [-SkipSkuPreflight]
+# Usage: ./BuildRandomCVM.ps1 -subsID <YOUR SUBSCRIPTION ID> -basename <YOUR BASENAME> -osType <Windows|Windows11|Windows2019|Ubuntu|Ubuntu2604|RHEL> [-description <OPTIONAL DESCRIPTION>] [-smoketest] [-region <AZURE REGION>] [-policyFilePath <PATH TO POLICY FILE>] [-DisableBastion] [-NoInternetAccess] [-SkipSkuPreflight]
 #
 # Basename is a prefix for all resources created, it's used to create unique names for the resources
-# osType specifies which OS to deploy: Windows (Server 2022), Windows11 (Windows 11 Enterprise), Ubuntu (24.04), or RHEL (9.5)
+# osType specifies which OS to deploy: Windows (Server 2022), Windows11 (Windows 11 Enterprise), Windows2019 (Server 2019), Ubuntu (24.04), Ubuntu2604 (26.04), or RHEL (9.5)
 # description is an optional parameter that will be added as a tag to the resource group
 # smoketest is an optional switch that automatically removes all resources after completion (useful for testing)
 # region is an optional parameter that specifies the Azure region (defaults to northeurope)
@@ -32,7 +32,7 @@ param (
     [Parameter(Mandatory)]$subsID,
     [Parameter(Mandatory)]$basename,
     [Parameter(Mandatory)]
-    [ValidateSet("Windows", "Windows11", "Windows2019", "Ubuntu", "RHEL")]
+    [ValidateSet("Windows", "Windows11", "Windows2019", "Ubuntu", "Ubuntu2604", "RHEL")]
     $osType,
     [Parameter(Mandatory=$false)]$description = "",
     [Parameter(Mandatory=$false)][switch]$smoketest,
@@ -45,7 +45,7 @@ param (
 )
 
 if ($subsID -eq "" -or $basename -eq "" -or $osType -eq "") {
-    write-host "You must enter a subscription ID, basename, and OS type (Windows, Windows11, Ubuntu, or RHEL)"
+    write-host "You must enter a subscription ID, basename, and OS type (Windows, Windows11, Windows2019, Ubuntu, Ubuntu2604, or RHEL)"
     exit
 }# exit if any of the parameters are empty
 
@@ -421,6 +421,11 @@ switch ($osType) {
         $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer 'ubuntu-24_04-lts' -Skus 'cvm' -Version "latest";
         $VMIsLinux = $true
     }
+    "Ubuntu2604" {
+        $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Linux -ComputerName $vmname -Credential $cred;
+        $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'Canonical' -Offer 'ubuntu-26_04-lts' -Skus 'server-cvm' -Version "latest";
+        $VMIsLinux = $true
+    }
     "RHEL" {
         $VirtualMachine = Set-AzVMOperatingSystem -VM $VirtualMachine -Linux -ComputerName $vmname -Credential $cred;
         $VirtualMachine = Set-AzVMSourceImage -VM $VirtualMachine -PublisherName 'redhat' -Offer 'rhel-cvm' -Skus '9_5_cvm' -Version "latest";
@@ -440,9 +445,11 @@ else {
     write-host "Configuring NAT Gateway egress so the private CVM can access internet without a public IP..." -ForegroundColor Cyan
     $natPublicIp = New-AzPublicIpAddress -ResourceGroupName $resgrp -Name $natPublicIpName -Location $region -AllocationMethod Static -Sku Standard
     $natGateway = New-AzNatGateway -ResourceGroupName $resgrp -Name $natGatewayName -Location $region -IdleTimeoutInMinutes 10 -Sku Standard -PublicIpAddress $natPublicIp
-    # Some Az.Network module versions do not persist NAT association via Set-AzVirtualNetworkSubnetConfig.
-    # Try native cmdlet first, then verify; if missing, fall back to Azure CLI subnet update.
-    Set-AzVirtualNetworkSubnetConfig -Name ($vmsubnetName) -VirtualNetwork $vnet -AddressPrefix "10.0.0.0/24" -DefaultOutboundAccess $false -InputObject $natGateway | Set-AzVirtualNetwork | Out-Null
+    # Set the resource reference directly; some Az.Network versions drop the -InputObject association.
+    $vmSubnet = $vnet.Subnets | Where-Object { $_.Name -eq $vmsubnetName } | Select-Object -First 1
+    $vmSubnet.NatGateway = New-Object Microsoft.Azure.Commands.Network.Models.PSResourceId
+    $vmSubnet.NatGateway.Id = $natGateway.Id
+    $vnet | Set-AzVirtualNetwork -ErrorAction Stop | Out-Null
     $vnet = Get-AzVirtualNetwork -Name ($vnetname) -ResourceGroupName $resgrp
     $vmSubnet = $vnet.Subnets | Where-Object { $_.Name -eq $vmsubnetName } | Select-Object -First 1
 
