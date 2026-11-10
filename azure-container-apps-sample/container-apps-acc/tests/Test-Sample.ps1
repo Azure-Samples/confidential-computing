@@ -26,7 +26,7 @@ function New-Fixture {
     @{
         Environment = @{
             id = '/subscriptions/test/resourceGroups/test/providers/Microsoft.App/managedEnvironments/test'
-            location = 'uaenorth'
+            location = $state.fixtureLocation ?? 'uaenorth'
             properties = @{
                 provisioningState = 'Succeeded'
                 workloadProfiles = @(@{ name = 'confidential'; workloadProfileType = 'DC4'; minimumCount = 1; maximumCount = 1 })
@@ -34,7 +34,7 @@ function New-Fixture {
         }
         App = @{
             id = '/subscriptions/test/resourceGroups/test/providers/Microsoft.App/containerApps/test'
-            location = 'uaenorth'
+            location = $state.fixtureLocation ?? 'uaenorth'
             properties = @{
                 provisioningState = 'Succeeded'
                 environmentId = '/subscriptions/test/resourceGroups/test/providers/Microsoft.App/managedEnvironments/test'
@@ -54,12 +54,14 @@ function Get-AzResourceGroup {
     if ($state.existing) { @{ ResourceGroupName = 'rg-offline'; Tags = @{ sample = 'container-apps-acc' } } }
 }
 function Get-AzResource { if ($state.populated) { @{ Name = 'unrelated' } } }
-function New-AzResourceGroup { $state.groupCreates++ }
+function New-AzResourceGroup { param($Location) $state.groupCreates++; $state.groupLocation = $Location }
 function Test-AzResourceGroupDeployment {
     if ($state.invalid) { @{ Code = 'InvalidTemplate'; Message = 'test rejection' } }
     elseif ($state.validationEmptyString) { '' }
 }
 function New-AzResourceGroupDeployment {
+    param($TemplateParameterObject)
+    $state.templateLocation = $TemplateParameterObject.location
     $state.deployments++
     if ($state.deployFails) { throw 'Mock capacity rejection' }
     @{ ProvisioningState = 'Succeeded' }
@@ -69,6 +71,7 @@ function Invoke-AzRestMethod {
     if ($state.restFails) { return @{ StatusCode = 403; Content = 'Forbidden' } }
     $data = switch -Wildcard ($Path) {
         '*availableManagedEnvironmentsWorkloadProfileTypes*' {
+            $state.profilePath = $Path
             if ($state.noProfile) { @{ value = @() } }
             else { @{ value = @(@{ name = 'DC4' }) } }
         }
@@ -94,6 +97,10 @@ function Invoke-WebRequest {
 }
 function Start-Sleep {}
 function Reset-Mocks {
+    $state.fixtureLocation = 'uaenorth'
+    $state.groupLocation = $null
+    $state.templateLocation = $null
+    $state.profilePath = $null
     $state.existing = $false
     $state.populated = $false
     $state.groupCreates = 0
@@ -128,7 +135,8 @@ Case 'ARM template binds DC4, HTTPS and bounded scaling' {
     $envResource = $template.resources | Where-Object type -eq 'Microsoft.App/managedEnvironments'
     $appResource = $template.resources | Where-Object type -eq 'Microsoft.App/containerApps'
     Assert ($template.resources.Count -eq 4) 'Unexpected supporting resources.'
-    Assert ($template.parameters.location.allowedValues.Count -eq 1 -and $template.parameters.location.allowedValues[0] -eq 'uaenorth') 'Region fallback allowed.'
+    Assert ($template.parameters.location.defaultValue -eq 'uaenorth') 'Default region changed.'
+    Assert (($template.parameters.location.allowedValues -join ',') -eq 'uaenorth,westeurope') 'Unexpected region allowed.'
     Assert ($envResource.properties.workloadProfiles.Count -eq 1) 'Unexpected additional profiles.'
     Assert ($envResource.properties.appLogsConfiguration.destination -ceq '') 'Expected disabled centralized logging via empty ARM destination.'
     $profile = $envResource.properties.workloadProfiles[0]
@@ -147,6 +155,15 @@ Case 'ARM template binds DC4, HTTPS and bounded scaling' {
 Case 'Accept valid Azure-reported confidential placement' {
     $f = New-Fixture
     Assert ((Assert-ConfidentialContainerApp -App $f.App -Environment $f.Environment) -eq 'https://test.example.com') 'Wrong URL.'
+}
+Case 'Accept explicitly selected West Europe and reject region mismatch' {
+    $f = New-Fixture
+    $f.App.location = 'West Europe'
+    $f.Environment.location = 'westeurope'
+    Assert ((Assert-ConfidentialContainerApp -App $f.App -Environment $f.Environment -Location westeurope) -eq 'https://test.example.com') 'West Europe rejected.'
+    Expect-Failure { Assert-ConfidentialContainerApp -App $f.App -Environment $f.Environment } 'Expected the app and environment'
+    $f.Environment.location = 'uaenorth'
+    Expect-Failure { Assert-ConfidentialContainerApp -App $f.App -Environment $f.Environment -Location westeurope } 'Expected the app and environment'
 }
 Case 'Accept UAE North display name returned by the live API' {
     $f = New-Fixture
@@ -177,7 +194,7 @@ foreach ($change in @(
     @{ Name = 'unready revision'; Edit = { param($f) $f.App.properties.latestReadyRevisionName = 'old' }; Pattern = 'not ready' },
     @{ Name = 'insecure ingress'; Edit = { param($f) $f.App.properties.configuration.ingress.allowInsecure = $true }; Pattern = 'HTTPS-only' },
     @{ Name = 'failed provisioning'; Edit = { param($f) $f.Environment.properties.provisioningState = 'Failed' }; Pattern = 'Succeeded' },
-    @{ Name = 'wrong region'; Edit = { param($f) $f.App.location = 'eastus' }; Pattern = 'UAE North' },
+    @{ Name = 'wrong region'; Edit = { param($f) $f.App.location = 'eastus' }; Pattern = 'Expected the app and environment in uaenorth' },
     @{ Name = 'malformed FQDN'; Edit = { param($f) $f.App.properties.configuration.ingress.fqdn = 'example.com/other' }; Pattern = 'FQDN' }
 )) {
     Case "Reject $($change.Name)" {
@@ -247,5 +264,12 @@ Case 'Successful deployment returns verified result and retains resources' {
 Case 'HTTP verification failure propagates from deployment' {
     Reset-Mocks; $state.content = 'wrong app'
     Expect-Failure { & $deployScript @deployArgs } 'signature'
+}
+Case 'Explicit West Europe flows through discovery, deployment and verification' {
+    Reset-Mocks; $state.fixtureLocation = 'westeurope'
+    $result = & $deployScript @deployArgs -Location westeurope
+    Assert ($state.profilePath -match '/locations/westeurope/') 'Discovery used the wrong region.'
+    Assert ($state.groupLocation -eq 'westeurope' -and $state.templateLocation -eq 'westeurope') 'Deployment used the wrong region.'
+    Assert ($result.Location -eq 'westeurope' -and $result.WorkloadProfileType -eq 'DC4') 'Verification used the wrong region.'
 }
 Write-Host "$script:passed offline tests passed."

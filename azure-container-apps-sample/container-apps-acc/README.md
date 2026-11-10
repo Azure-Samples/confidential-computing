@@ -3,7 +3,8 @@
 [All Container Apps samples](../README.md) | [Repository overview](../../README.md)
 
 Deploy Microsoft's hello-world container to **Azure Container Apps** in **UAE
-North**, using a dedicated **DC4 confidential workload profile**. Then verify the
+North** by default, using a dedicated **DC4 confidential workload profile**. An
+explicit **experimental West Europe** option is also available. Then verify the
 app's Azure-reported placement and open its public HTTPS page.
 
 This example follows [Confidential compute in Azure Container Apps](https://learn.microsoft.com/azure/container-apps/confidential-compute)
@@ -14,6 +15,16 @@ and uses the public image and port from the
 DC4 binding and ready revision were verified, and the public endpoint returned
 HTTP 200 with the hello-world page. Availability, quota and organizational
 policies still need checking in your own subscription.
+
+**West Europe experiment:** 10 November 2026. The same template deployed
+successfully and passed live DC4 placement, revision-health and HTTPS checks.
+See [observed results](#west-europe-observed-results-10-november-2026).
+
+> **Experimental regional option:** Public documentation currently lists only
+> UAE North and warns that advertised DC-series profiles do not establish
+> confidential-compute support. Selecting `-Location westeurope` is a regional
+> experiment, not a claim of supported availability. There is no fallback to
+> another region or ordinary compute.
 
 For an application-code example, continue with
 [Functions on Azure Container Apps](../functions-on-azure-container-apps/README.md).
@@ -56,7 +67,7 @@ Secure Key Release, application authentication, or protection of external storag
 ## Resources and cost
 
 ```text
-New dedicated resource group (UAE North)
+New dedicated resource group (UAE North by default; West Europe explicitly)
   Virtual network (10.42.0.0/16)
     Delegated infrastructure subnet (10.42.0.0/23), with NSG
   Container Apps environment
@@ -91,7 +102,8 @@ New dedicated resource group (UAE North)
 
 - An Azure public-cloud subscription authorized for confidential Container Apps.
   The linked documentation currently lists **UAE North**. Availability and capacity
-  can change; this sample intentionally permits only `uaenorth`.
+  can change; this sample permits `uaenorth` (default) and the explicitly
+  experimental `westeurope` option.
 - Permission to create a resource group, VNet, NSG, managed environment and container app
   (for example Contributor at subscription scope). **Owner is not required**;
   this example does not activate PIM roles or create role assignments. Activate
@@ -157,6 +169,64 @@ and Network API `2024-05-01`. Default names are
 `cae-acc-hello` and `ca-acc-hello`. Optional `-EnvironmentName` and `-AppName`
 parameters customize those names; use the same names for verification.
 
+### Explicit West Europe experiment
+
+Use the same sign-in prerequisites and a new dedicated group. Pass the region
+to **both** deployment and verification; omitting it selects UAE North.
+
+```powershell
+$resourceGroup = "rg-container-apps-acc-weu-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+.\Deploy-ContainerApp.ps1 -SubscriptionId $subscriptionId `
+    -ResourceGroupName $resourceGroup -Location westeurope -ValidateOnly
+$result = .\Deploy-ContainerApp.ps1 -SubscriptionId $subscriptionId `
+    -ResourceGroupName $resourceGroup -Location westeurope
+$result | Format-List
+.\Test-ContainerApp.ps1 -SubscriptionId $subscriptionId `
+    -ResourceGroupName $resourceGroup -Location westeurope | Format-List
+```
+
+The script checks profiles and quota in the selected region and emits an
+experimental-region warning for West Europe. Passing preflight does not
+guarantee that the service will accept a confidential environment there.
+
+### West Europe observed results (10 November 2026)
+
+Verified at **18:26:29 UTC**, using Container Apps API `2025-07-01`:
+
+| Check | Observed result |
+| --- | --- |
+| Regional discovery | West Europe advertised DC4; regional environment usage was 0 of 50 before deployment |
+| Preflight | 27 offline tests passed; ARM validation and what-if succeeded, with exactly four resource creates |
+| Deployment | `acc-hello-weu-20261110` succeeded in `rg-container-apps-acc-weu-20261110` |
+| Environment/app | `cae-acc-hello` and `ca-acc-hello` both reported `Succeeded` in West Europe |
+| Explicit placement | App selected `confidential`; matching profile type `DC4`, minimum 1 / maximum 1 node |
+| Revision | `ca-acc-hello--950ijs1`: active, `Healthy`, `RunningAtMaxScale`, one replica |
+| Public endpoint | HTTPS returned HTTP 200 and the `Azure Container Apps` page signature |
+| Identity/RBAC | App identity `None`; public Microsoft image, no application role assignment required |
+
+The template was deployed through the authenticated Azure CLI, with
+`location=westeurope environmentName=cae-acc-hello appName=ca-acc-hello`;
+the PowerShell Az context was not signed in. Live resources were read through
+`az rest`, then checked using this sample's shared placement and endpoint
+helpers. The offline suite separately verifies the PowerShell deployment
+workflow's regional parameter routing.
+
+The first immediate post-deployment check encountered environment state
+`Updating`, despite ARM reporting deployment success. Bounded readiness polling
+then observed `Succeeded`; no redeployment or configuration workaround was
+needed. `RunningAtMaxScale` is expected with the sample's maximum of one replica.
+Azure also added its default Consumption profile, but the app remained
+explicitly bound to DC4.
+
+No regional or ordinary-compute fallback, policy bypass, or AKS restart was
+performed. Resources were initially retained, then removed on request on
+10 November 2026. At 19:22 UTC, both the sample resource group and its
+service-managed infrastructure group were verified absent. The test endpoint
+is no longer a live demo. This successful
+subscription-level experiment does **not** resolve the discrepancy with the
+public UAE North-only support documentation, certify general West Europe
+availability, or provide independent cryptographic hardware attestation.
+
 Expect environment creation and DC4 provisioning to take several minutes.
 Success produces `AppUrl` and `PortalUrl`, both fully qualified HTTPS links, plus
 resource IDs and the verified profile. The page is Microsoft's Container Apps
@@ -185,7 +255,8 @@ Verification requires:
 - Provisioning and latest-revision readiness settle within a bounded wait of
   60 checks, 10 seconds apart. A temporarily `Updating` environment after ARM
   deployment is retried; failed or unexpected states terminate immediately.
-- Both resources report `Succeeded` in UAE North.
+- Both resources report `Succeeded` in the explicitly expected region (UAE North
+  by default; pass `-Location westeurope` for the experiment).
 - The app references the expected environment and its `confidential` DC4 profile,
   with exactly one dedicated node.
 - The latest revision is ready and ingress is public, HTTPS-only, on target port 80.
@@ -224,6 +295,9 @@ Use this deployment's subscription, resource group and environment name there.
 The Functions app explicitly selects the same `confidential` DC4 profile and
 can share its existing node with the quickstart app.
 
+The sibling Functions workflow remains **UAE North-specific**; do not reuse a
+West Europe experimental environment with it unchanged.
+
 The Functions guide adds a registry, user-assigned identity, scoped role
 assignments, host storage and private Blob networking. Unlike this quickstart,
 it requires permission to create role assignments. Its additional subnet
@@ -238,7 +312,7 @@ respective guides; a successful hello-world response alone is insufficient.
 | --- | --- |
 | Provider is not registered | Register the named provider in the selected subscription and wait for `Registered`. |
 | Authorization/PIM error | Confirm tenant/subscription and activate an appropriate role; retry after propagation. |
-| No DC4 profile, zero/exhausted quota, or insufficient capacity | Check UAE North support and request service access/quota/capacity through Azure support. Do not substitute ordinary compute. |
+| No DC4 profile, zero/exhausted quota, or insufficient capacity | Check support in the selected region and request service access/quota/capacity through Azure support. West Europe remains an experimental option. Do not substitute ordinary compute. |
 | ARM validation or deployment fails | Read the terminating error and the resource group's **Deployments** details. Inspect partial resources; they are retained. |
 | Organizational networking policy rejects deployment | The template includes VNet injection and a subnet NSG. Review any additional private-ingress, outbound connectivity, address-space or tagging requirements with your administrator; do not bypass policy. |
 | Deployment succeeded but verification failed | Inspect the revision and profile, then rerun the verification script. Do not treat this as a verified confidential deployment. |

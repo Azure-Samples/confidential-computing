@@ -13,7 +13,8 @@ function Assert-ConfidentialContainerApp {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][object]$App,
-        [Parameter(Mandatory)][object]$Environment
+        [Parameter(Mandatory)][object]$Environment,
+        [ValidateSet('uaenorth', 'westeurope')][string]$Location = 'uaenorth'
     )
 
     if ($App.properties.provisioningState -ne 'Succeeded' -or
@@ -30,9 +31,9 @@ function Assert-ConfidentialContainerApp {
         $profiles[0].minimumCount -ne 1 -or $profiles[0].maximumCount -ne 1) {
         throw 'Expected explicit binding to the confidential DC4 profile with exactly one node; refusing ordinary-compute fallback.'
     }
-    if ($App.location -notin @('uaenorth', 'UAE North') -or
-        $Environment.location -notin @('uaenorth', 'UAE North')) {
-        throw 'Expected the app and environment in UAE North.'
+    if (($App.location -replace '\s', '') -ne $Location -or
+        ($Environment.location -replace '\s', '') -ne $Location) {
+        throw "Expected the app and environment in $Location."
     }
     $ingress = $App.properties.configuration.ingress
     if ($ingress.external -ne $true -or $ingress.allowInsecure -ne $false -or
