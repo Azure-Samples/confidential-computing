@@ -3,6 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][guid]$SubscriptionId,
+    [ValidateSet('uaenorth', 'westeurope')][string]$Location = 'uaenorth',
     [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9._()-]{1,90}$')][string]$ResourceGroupName,
     [ValidatePattern('^[a-z][a-z0-9-]{0,30}[a-z0-9]$')][string]$EnvironmentName = 'cae-acc-hello',
     [ValidatePattern('^[a-z][a-z0-9-]{0,30}[a-z0-9]$')][string]$AppName = 'ca-acc-hello'
@@ -38,7 +39,7 @@ for ($attempt = 1; $attempt -le 60; $attempt++) {
     Write-Host "Waiting for provisioning and revision readiness ($attempt/60)."
     Start-Sleep -Seconds 10
 }
-$url = Assert-ConfidentialContainerApp -App $app -Environment $environment
+$url = Assert-ConfidentialContainerApp -App $app -Environment $environment -Location $Location
 Test-HelloWorldEndpoint -Uri $url
 
 [pscustomobject]@{
