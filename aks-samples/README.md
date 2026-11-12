@@ -6,8 +6,9 @@
 
 Deploy Azure Kubernetes Service clusters with AMD SEV-SNP confidential node pools and Customer Managed Keys (CMK).
 
-For a single confidential H100 GPU worker and an exact-kernel NVIDIA driver
-compatibility reproduction, see [AKS confidential H100 worker](aks-gpu-worker/README.md).
+For guide-only automation of a single confidential H100 GPU worker using the
+latest offered AKS node image, GPU workload validation and strict GPU attestation,
+see [AKS confidential H100 worker](aks-gpu-worker/README.md).
 
 ## Architecture
 

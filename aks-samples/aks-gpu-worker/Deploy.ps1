@@ -2,182 +2,290 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][guid]$SubscriptionId,
-    [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$ResourceGroup,
-    [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9-]+$')][string]$ClusterName,
+    [ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$ResourceGroup = "rg-aks-gpu-worker-$(Get-Date -Format yyyyMMddHHmmss)",
+    [ValidatePattern('^[a-zA-Z0-9-]+$')][string]$ClusterName = "aks-gpu-worker-$(Get-Date -Format yyyyMMddHHmmss)",
     [string]$Location = 'westeurope',
-    [string]$KubernetesVersion = '1.36.5',
-    [string]$SystemVmSize = 'Standard_D4ds_v6',
-    [ValidateSet('Ubuntu2404')][string]$SystemOsSku = 'Ubuntu2404',
-    [string]$GpuZone,
+    [string]$KubernetesVersion,
+    [string]$MinimumKernel = '6.8.0-1071-azure-fde',
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '.local'),
+    [switch]$StopExistingNcc,
     [switch]$PreflightOnly,
-    [switch]$RegisterPreview,
-    [switch]$UseCoreCli,
-    [switch]$Resume
+    [switch]$KeepRunning
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
-$previousExtensionDirectory = $env:AZURE_EXTENSION_DIR
-$previousDynamicInstall = $env:AZURE_EXTENSION_USE_DYNAMIC_INSTALL
-try {
-$az = Resolve-AzureCli
-$scope = @('--subscription', $SubscriptionId.ToString(), '--only-show-errors')
-New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-$OutputDirectory = (Resolve-Path $OutputDirectory).Path
-if ($UseCoreCli) {
-    $env:AZURE_EXTENSION_DIR = Join-Path $OutputDirectory 'cli-extensions-core'
-    New-Item -ItemType Directory -Path $env:AZURE_EXTENSION_DIR -Force | Out-Null
-    if (@(Get-ChildItem -LiteralPath $env:AZURE_EXTENSION_DIR -Force).Count) {
-        throw 'Core CLI extension directory must be empty; inspect it before continuing.'
-    }
-    $env:AZURE_EXTENSION_USE_DYNAMIC_INSTALL = 'no'
-}
-
-$account = Invoke-CheckedCommand $az (@('account', 'show', '-o', 'json') + $scope) | ConvertFrom-Json
-if ($account.state -ne 'Enabled') { throw 'The target subscription is not enabled.' }
-if ($UseCoreCli) {
-    $cliVersion = (Invoke-CheckedCommand $az @('version', '-o', 'json') | ConvertFrom-Json).'azure-cli'
-    Write-Host "Using built-in Azure CLI $cliVersion AKS commands in $Location (extensions isolated)."
-}
-else {
-    $extension = Invoke-CheckedCommand $az @('extension', 'show', '--name', 'aks-preview', '-o', 'json') | ConvertFrom-Json
-    Write-Host "Using Azure CLI aks-preview $($extension.version) in $Location."
-}
-$versions = Invoke-CheckedCommand $az (@('aks', 'get-versions', '--location', $Location, '-o', 'json') + $scope) | ConvertFrom-Json
-$patches = @($versions.values | ForEach-Object { $_.patchVersions.PSObject.Properties.Name })
-if ($KubernetesVersion -notin $patches) { throw "Kubernetes $KubernetesVersion is not offered in $Location." }
-
-$exists = Invoke-CheckedCommand $az (@('group', 'exists', '--name', $ResourceGroup, '-o', 'tsv') + $scope)
-$existingPools = @()
-$cluster = @()
-if ($exists -eq 'true') {
-    if (-not $Resume) { throw 'Resource group already exists. Use a new name, or -Resume for this sample.' }
-    $group = Invoke-CheckedCommand $az (@('group', 'show', '--name', $ResourceGroup, '-o', 'json') + $scope) | ConvertFrom-Json -AsHashtable
-    if ($group.tags.sample -ne 'aks-gpu-worker' -or $group.location -ne $Location) {
-        throw 'Existing resource group is not a matching sample group; nothing was modified.'
-    }
-    $clusters = @(Invoke-CheckedCommand $az (@('aks', 'list', '--resource-group', $ResourceGroup, '-o', 'json') + $scope) | ConvertFrom-Json -AsHashtable)
-    if (@($clusters | Where-Object name -NE $ClusterName).Count) { throw 'Resource group contains a different cluster.' }
-    $cluster = @($clusters | Where-Object name -EQ $ClusterName)
-    if ($cluster.Count) {
-        if ($cluster[0].tags.sample -ne 'aks-gpu-worker' -or $cluster[0].location -ne $Location -or
-            $cluster[0].kubernetesVersion -ne $KubernetesVersion -or $cluster[0].provisioningState -ne 'Succeeded' -or
-            $cluster[0].autoUpgradeProfile.upgradeChannel -ne 'none' -or
-            $cluster[0].autoUpgradeProfile.nodeOsUpgradeChannel -ne 'None') {
-            throw 'Existing cluster is not a successful matching sample cluster; inspect it before continuing.'
-        }
-        $existingPools = @(Invoke-CheckedCommand $az (@('aks', 'nodepool', 'list', '--resource-group', $ResourceGroup,
-            '--cluster-name', $ClusterName, '-o', 'json') + $scope) | ConvertFrom-Json -AsHashtable)
-        Assert-SamplePools -Pools $existingPools -SystemVmSize $SystemVmSize -AllowMissingGpu
-    }
-}
-
-$skus = @(Invoke-CheckedCommand $az (@('vm', 'list-skus', '--location', $Location,
-    '--resource-type', 'virtualMachines', '--all', '-o', 'json') + $scope) | ConvertFrom-Json)
-$usage = @(Invoke-CheckedCommand $az (@('vm', 'list-usage', '--location', $Location, '-o', 'json') + $scope) | ConvertFrom-Json)
-$required = @{}
-$skuEvidence = @(foreach ($size in @($SystemVmSize, 'Standard_NCC40ads_H100_v5')) {
-    $sku = @($skus | Where-Object name -EQ $size)
-    if ($sku.Count -ne 1) { throw "SKU $size was not found in $Location." }
-    $sku = $sku[0]
-    $regionBlocks = @($sku.restrictions | Where-Object type -EQ 'Location')
-    if ($regionBlocks.Count) { throw "SKU $size has a regional subscription restriction: $($regionBlocks | ConvertTo-Json -Depth 10 -Compress)" }
-    if ($size -eq 'Standard_NCC40ads_H100_v5' -and $GpuZone) {
-        if ($GpuZone -notin @($sku.locationInfo | ForEach-Object zones)) { throw "GPU zone $GpuZone is not offered." }
-        $zoneBlocks = @($sku.restrictions | Where-Object {
-            $_.type -eq 'Zone' -and $GpuZone -in $_.restrictionInfo.zones
-        })
-        if ($zoneBlocks.Count) { throw "GPU zone $GpuZone is restricted for this subscription." }
-    }
-    $cores = [int]($sku.capabilities | Where-Object name -EQ 'vCPUs').value
-    if (-not $required.ContainsKey($sku.family)) { $required[$sku.family] = 0 }
-    $poolName = if ($size -eq 'Standard_NCC40ads_H100_v5') { 'gpunp' } else { 'sysnp' }
-    if (-not @($existingPools | Where-Object name -EQ $poolName).Count) {
-        $required[$sku.family] += $cores
-    }
-    $sku
-})
-$total = 0
-foreach ($family in $required.Keys) {
-    $quota = @($usage | Where-Object { $_.name.value -eq $family })
-    if ($quota.Count -ne 1 -or ([int]$quota[0].limit - [int]$quota[0].currentValue) -lt $required[$family]) {
-        throw "Insufficient $family quota for $($required[$family]) new vCPUs."
-    }
-    $total += $required[$family]
-}
-$regional = $usage | Where-Object { $_.name.value -eq 'cores' }
-if (([int]$regional.limit - [int]$regional.currentValue) -lt $total) { throw "Insufficient regional vCPU quota for $total cores." }
-
-$featureArgs = @('feature', 'show', '--namespace', 'Microsoft.ContainerService', '--name', 'Ubuntu2404Preview')
-$feature = Invoke-CheckedCommand $az ($featureArgs + @('--query', 'properties.state', '-o', 'tsv') + $scope)
-if ($feature -ne 'Registered' -and $RegisterPreview -and -not $PreflightOnly) {
-    Invoke-CheckedCommand $az (@('feature', 'register', '--namespace', 'Microsoft.ContainerService',
-        '--name', 'Ubuntu2404Preview', '-o', 'none') + $scope)
-    $deadline = [DateTime]::UtcNow.AddMinutes(20)
-    do {
-        Start-Sleep -Seconds 20
-        $feature = Invoke-CheckedCommand $az ($featureArgs + @('--query', 'properties.state', '-o', 'tsv') + $scope)
-    } while ($feature -ne 'Registered' -and [DateTime]::UtcNow -lt $deadline)
-    if ($feature -eq 'Registered') {
-        Invoke-CheckedCommand $az (@('provider', 'register', '--namespace', 'Microsoft.ContainerService',
-            '--wait', '-o', 'none') + $scope)
-    }
-}
-$preflight = [ordered]@{
-    CheckedAtUtc = [DateTime]::UtcNow.ToString('o')
+$oldExtensions = $env:AZURE_EXTENSION_DIR
+$oldDynamicInstall = $env:AZURE_EXTENSION_USE_DYNAMIC_INSTALL
+$created = $false
+$result = [ordered]@{
+    StartedAtUtc = [DateTime]::UtcNow.ToString('o')
+    SubscriptionId = $SubscriptionId.ToString()
+    ResourceGroup = $ResourceGroup
+    ClusterName = $ClusterName
     Location = $Location
-    KubernetesVersion = $KubernetesVersion
-    PreviewState = "$feature"
-    Skus = $skuEvidence
-    Quota = @($usage | Where-Object { $_.name.value -in @($required.Keys) + @('cores') })
+    Status = 'Preparing'
+    VendorSupportValidated = $false
+    DriverPath = 'Guide GPU Operator v25.3.1, NVIDIA branch 580 only'
 }
-$preflight | ConvertTo-Json -Depth 20 | Set-Content (Join-Path $OutputDirectory 'preflight.json')
-if ($feature -ne 'Registered') { throw "Ubuntu2404Preview is $feature. Rerun with -RegisterPreview or arrange subscription registration." }
-if ($PreflightOnly) { Write-Host 'Preflight passed; no Azure resources were changed.'; return }
 
-if ($exists -ne 'true') {
-    Invoke-CheckedCommand $az (@('group', 'create', '--name', $ResourceGroup, '--location', $Location,
-        '--tags', 'sample=aks-gpu-worker', '-o', 'none') + $scope)
+function Invoke-Az {
+    param([string[]]$Arguments)
+    Invoke-CheckedCommand $az ($Arguments + $scope)
 }
-if ($cluster.Count -eq 0) {
-    Invoke-CheckedCommand $az (@('aks', 'create', '--resource-group', $ResourceGroup, '--name', $ClusterName,
-        '--location', $Location, '--kubernetes-version', $KubernetesVersion, '--tier', 'free',
-        '--nodepool-name', 'sysnp', '--node-count', '1', '--node-vm-size', $SystemVmSize,
-        '--os-sku', $SystemOsSku, '--node-osdisk-type', 'Managed', '--node-osdisk-size', '128',
-        '--enable-managed-identity', '--generate-ssh-keys', '--auto-upgrade-channel', 'none',
-        '--node-os-upgrade-channel', 'None', '--tags', 'sample=aks-gpu-worker', '-o', 'none') + $scope)
+
+function Invoke-Kube {
+    param([string[]]$Arguments)
+    Invoke-CheckedCommand kubectl (@('--kubeconfig', $kubeConfig) + $Arguments)
 }
-$pools = @(Invoke-CheckedCommand $az (@('aks', 'nodepool', 'list', '--resource-group', $ResourceGroup,
-    '--cluster-name', $ClusterName, '-o', 'json') + $scope) | ConvertFrom-Json -AsHashtable)
-Assert-SamplePools -Pools $pools -SystemVmSize $SystemVmSize -AllowMissingGpu
-$gpu = @($pools | Where-Object name -EQ 'gpunp')
-if ($gpu.Count -eq 0) {
-    $arguments = @('aks', 'nodepool', 'add', '--resource-group', $ResourceGroup, '--cluster-name', $ClusterName,
-        '--name', 'gpunp', '--mode', 'User', '--node-count', '1', '--node-vm-size', 'Standard_NCC40ads_H100_v5',
-        '--os-sku', 'Ubuntu2404', '--gpu-driver', 'None', '--node-osdisk-type', 'Managed',
-        '--node-osdisk-size', '128', '--node-taints', 'sku=gpu:NoSchedule', '-o', 'none')
-    if ($GpuZone) { $arguments += @('--zones', $GpuZone) }
-    Invoke-CheckedCommand $az ($arguments + $scope)
+
+function Wait-GpuJob {
+    param([string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 600)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $job = Invoke-Kube @('get', 'job', $Name, '-n', $Namespace, '-o', 'json') | ConvertFrom-Json
+        $property = $job.status.PSObject.Properties['conditions']
+        $conditions = @(if ($property) { $property.Value })
+        if (@($conditions | Where-Object { $_ -and $_.type -eq 'Failed' -and $_.status -eq 'True' }).Count) {
+            Save-GpuJobDiagnostics $Name $Namespace
+            throw "Job $Namespace/$Name failed. Inspect its pods using the dedicated kubeconfig."
+        }
+        if (@($conditions | Where-Object { $_ -and $_.type -eq 'Complete' -and $_.status -eq 'True' }).Count) { return }
+        Start-Sleep 10
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Save-GpuJobDiagnostics $Name $Namespace
+    throw "Job $Namespace/$Name did not complete within $TimeoutSeconds seconds."
 }
-$pools = Invoke-CheckedCommand $az (@('aks', 'nodepool', 'list', '--resource-group', $ResourceGroup,
-    '--cluster-name', $ClusterName, '-o', 'json') + $scope)
-$pools | Set-Content (Join-Path $OutputDirectory 'nodepools.json')
-Assert-SamplePools -Pools @($pools | ConvertFrom-Json -AsHashtable) -SystemVmSize $SystemVmSize
-$nodeGroup = Invoke-CheckedCommand $az (@('aks', 'show', '--resource-group', $ResourceGroup,
-    '--name', $ClusterName, '--query', 'nodeResourceGroup', '-o', 'tsv') + $scope)
-$scaleSets = Invoke-CheckedCommand $az (@('vmss', 'list', '--resource-group', "$nodeGroup", '-o', 'json') + $scope)
-$scaleSets | Set-Content (Join-Path $OutputDirectory 'scalesets.json')
-Assert-ConfidentialGpuScaleSet -ScaleSets @($scaleSets | ConvertFrom-Json -AsHashtable)
-$kubeconfig = Join-Path $OutputDirectory 'kubeconfig'
-Invoke-CheckedCommand $az (@('aks', 'get-credentials', '--resource-group', $ResourceGroup,
-    '--name', $ClusterName, '--file', $kubeconfig, '--overwrite-existing') + $scope)
-Invoke-CheckedCommand kubectl @('--kubeconfig', $kubeconfig, 'wait', '--for=condition=Ready',
-    'nodes', '-l', 'agentpool=gpunp', '--timeout=600s')
-$node = Get-GpuNode -KubeConfig $kubeconfig
-$node | ConvertTo-Json -Depth 30 | Set-Content (Join-Path $OutputDirectory 'gpu-node.json')
-& (Join-Path $PSScriptRoot 'Test-DriverCompatibility.ps1') -KubeConfig $kubeconfig `
-    -OutputPath (Join-Path $OutputDirectory 'driver-compatibility.json') -RequireAvailable
+
+function Save-GpuJobDiagnostics {
+    param([string]$Name, [string]$Namespace)
+    try {
+        $pods = Invoke-Kube @('get', 'pods', '-n', $Namespace, '-l', "job-name=$Name", '-o', 'json')
+        $pods | Set-Content (Join-Path $runDirectory "$Name-failed-pods.json")
+        $log = Invoke-Kube @('logs', '-n', $Namespace, "job/$Name", '--tail=200')
+        (($log -join "`n") -replace '(?s)Entity Attestation Token:.*', '[Attestation token omitted]') |
+            Set-Content (Join-Path $runDirectory "$Name-failed-log.txt")
+    }
+    catch { Write-Warning "Unable to capture complete diagnostics for ${Namespace}/${Name}: $($_.Exception.Message)" }
+}
+
+try {
+    Assert-MinimumKernel $MinimumKernel
+    $az = Resolve-AzureCli
+    foreach ($tool in @('kubectl', 'helm', 'ssh-keygen')) { Get-Command $tool -CommandType Application -ErrorAction Stop | Out-Null }
+    New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+    $OutputDirectory = (Resolve-Path $OutputDirectory).Path
+    $runDirectory = Join-Path $OutputDirectory "$ClusterName-$(Get-Date -Format yyyyMMddHHmmssfff)"
+    New-Item -ItemType Directory -Path $runDirectory | Out-Null
+    $kubeConfig = Join-Path $runDirectory 'kubeconfig'
+    $scope = @('--subscription', $SubscriptionId.ToString(), '--only-show-errors')
+    $env:AZURE_EXTENSION_DIR = Join-Path $runDirectory 'cli-extensions-core'
+    $env:AZURE_EXTENSION_USE_DYNAMIC_INSTALL = 'no'
+    New-Item -ItemType Directory -Path $env:AZURE_EXTENSION_DIR | Out-Null
+    $result.EvidenceDirectory = $runDirectory
+
+    $versions = Invoke-Az @('aks', 'get-versions', '-l', $Location, '-o', 'json') | ConvertFrom-Json
+    if (-not $KubernetesVersion) {
+        $default = @($versions.values | Where-Object { $_.isDefault -eq $true -and $_.isPreview -ne $true })
+        if ($default.Count -ne 1) { throw 'Expected exactly one non-preview default AKS minor version.' }
+        $KubernetesVersion = Get-LatestKubernetesPatch ([pscustomobject]@{ values = $default })
+    }
+    $stable = @($versions.values | Where-Object { $_.isPreview -ne $true } |
+        ForEach-Object { $_.patchVersions.PSObject.Properties.Name })
+    if ($KubernetesVersion -notin $stable) { throw "Non-preview Kubernetes $KubernetesVersion is not offered." }
+    $result.KubernetesVersion = $KubernetesVersion
+    $exists = Invoke-Az @('group', 'exists', '-n', $ResourceGroup, '-o', 'tsv')
+    if ($exists -ne 'false') { throw 'Use a new resource group; this script never adopts or overwrites existing resources.' }
+
+    if (-not $PreflightOnly) {
+        Stop-ExistingNccCompute -Az $az -Subscription $SubscriptionId -Location $Location -Stop:$StopExistingNcc
+    }
+    Test-SamplePreflight -Az $az -Subscription $SubscriptionId -Location $Location `
+        -KubernetesVersion $KubernetesVersion -OutputDirectory (Join-Path $runDirectory 'preflight')
+    Invoke-CheckedCommand helm @('pull', 'gpu-operator', '--repo', 'https://helm.ngc.nvidia.com/nvidia',
+        '--version', 'v25.3.1', '--destination', $runDirectory)
+    $chartPath = Join-Path $runDirectory 'gpu-operator-v25.3.1.tgz'
+    $result.ChartSha256 = (Get-FileHash $chartPath -Algorithm SHA256).Hash
+    if ($PreflightOnly) {
+        $result.Status = 'PreflightPassed'
+        return
+    }
+
+    $sshKey = Join-Path $runDirectory 'ssh-key'
+    New-SampleSshKey -Path $sshKey
+    Invoke-Az @('group', 'create', '-n', $ResourceGroup, '-l', $Location, '--tags', 'sample=aks-gpu-worker', '-o', 'none')
+    $created = $true
+    Invoke-Az @('aks', 'create', '-g', $ResourceGroup, '-n', $ClusterName, '-l', $Location,
+        '--kubernetes-version', $KubernetesVersion, '--nodepool-name', 'sysnp', '--node-count', '1',
+        '--node-vm-size', 'Standard_D4ds_v6', '--os-sku', 'Ubuntu2404', '--ssh-key-value', "$sshKey.pub",
+        '--enable-managed-identity', '--network-plugin', 'azure', '--network-plugin-mode', 'overlay',
+        '--auto-upgrade-channel', 'none', '--node-os-upgrade-channel', 'None',
+        '--tags', 'sample=aks-gpu-worker', '-o', 'none')
+    Wait-SampleAksReady $az $SubscriptionId $ResourceGroup $ClusterName
+    Invoke-Az @('aks', 'nodepool', 'add', '-g', $ResourceGroup, '--cluster-name', $ClusterName,
+        '-n', 'gpunp', '--node-count', '1', '--node-vm-size', 'Standard_NCC40ads_H100_v5',
+        '--os-sku', 'Ubuntu2404', '--gpu-driver', 'None', '--node-taints', 'sku=gpu:NoSchedule', '-o', 'none')
+    Wait-SampleAksReady $az $SubscriptionId $ResourceGroup $ClusterName
+
+    foreach ($poolName in @('sysnp', 'gpunp')) {
+        $pool = Invoke-Az @('aks', 'nodepool', 'show', '-g', $ResourceGroup, '--cluster-name', $ClusterName,
+            '-n', $poolName, '-o', 'json') | ConvertFrom-Json
+        $upgrades = Invoke-Az @('aks', 'nodepool', 'get-upgrades', '-g', $ResourceGroup,
+            '--cluster-name', $ClusterName, '-n', $poolName, '-o', 'json') | ConvertFrom-Json
+        if (-not $upgrades.latestNodeImageVersion) { throw "AKS did not report the latest image for $poolName." }
+        if ($pool.nodeImageVersion -ne $upgrades.latestNodeImageVersion) {
+            Invoke-Az @('aks', 'nodepool', 'upgrade', '-g', $ResourceGroup, '--cluster-name', $ClusterName,
+                '-n', $poolName, '--node-image-only', '--yes', '-o', 'none')
+            $pool = Invoke-Az @('aks', 'nodepool', 'show', '-g', $ResourceGroup, '--cluster-name', $ClusterName,
+                '-n', $poolName, '-o', 'json') | ConvertFrom-Json
+        }
+        if ($pool.nodeImageVersion -ne $upgrades.latestNodeImageVersion) { throw "$poolName is not on the latest offered image." }
+        $result["${poolName}Image"] = $pool.nodeImageVersion
+    }
+    $pools = @(Invoke-Az @('aks', 'nodepool', 'list', '-g', $ResourceGroup,
+        '--cluster-name', $ClusterName, '-o', 'json') | ConvertFrom-Json)
+    Assert-SamplePools -Pools $pools -SystemVmSize Standard_D4ds_v6
+    $cluster = Invoke-Az @('aks', 'show', '-g', $ResourceGroup, '-n', $ClusterName, '-o', 'json') | ConvertFrom-Json
+    $sets = @(Invoke-Az @('vmss', 'list', '-g', $cluster.nodeResourceGroup, '-o', 'json') | ConvertFrom-Json)
+    Assert-ConfidentialGpuScaleSet $sets
+    $sets | ConvertTo-Json -Depth 40 | Set-Content (Join-Path $runDirectory 'scale-sets.json')
+    Invoke-Az @('aks', 'get-credentials', '-g', $ResourceGroup, '-n', $ClusterName, '--file', $kubeConfig, '-o', 'none')
+    Invoke-Kube @('wait', 'node', '-l', 'agentpool=gpunp', '--for=condition=Ready', '--timeout=900s')
+    $node = Get-GpuNode -KubeConfig $kubeConfig
+    $result.Kernel = $node.status.nodeInfo.kernelVersion
+    $result.OsImage = $node.status.nodeInfo.osImage
+    if ($result.OsImage -notlike 'Ubuntu 24.04*') { throw "Unexpected GPU OS: $($result.OsImage)." }
+    Assert-MinimumKernel $result.Kernel $MinimumKernel
+    $node | ConvertTo-Json -Depth 30 | Set-Content (Join-Path $runDirectory 'gpu-node.json')
+
+    $images = @(Get-ExactDriverImages -Kernel $result.Kernel -Branches @('580'))
+    $images | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $runDirectory 'driver-images.json')
+    $image = @($images | Where-Object Available)
+    if ($image.Count -ne 1) {
+        $result.Status = 'BlockedMissingGuideDriver'
+        throw "The guide's image nvcr.io/nvidia/driver:580-$($result.Kernel)-ubuntu24.04 is absent (MANIFEST_UNKNOWN). No alternative driver or kernel will be installed."
+    }
+    $result.DriverImage = "nvcr.io/nvidia/driver:$($image[0].Tag)"
+    $result.DriverDigest = $image[0].Digest
+    $values = Get-GuideOperatorValues $result.Kernel
+    $valuesPath = Join-Path $runDirectory 'operator-values.yaml'
+    $values | Set-Content $valuesPath
+    Invoke-CheckedCommand helm @('install', 'gpu-operator', $chartPath, '--kubeconfig', $kubeConfig,
+        '--namespace', 'gpu-operator', '--create-namespace', '-f', $valuesPath, '--wait', '--timeout', '20m')
+    $deadline = [DateTime]::UtcNow.AddMinutes(10)
+    do {
+        $node = Get-GpuNode -KubeConfig $kubeConfig
+        $gpu = $node.status.allocatable.PSObject.Properties['nvidia.com/gpu']
+        if ($gpu -and $gpu.Value -eq '1') { break }
+        Start-Sleep 10
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $gpu -or $gpu.Value -ne '1') { throw 'The worker did not expose exactly one allocatable GPU.' }
+    $driverPods = (Invoke-Kube @('get', 'pods', '-n', 'gpu-operator', '-l', 'app=nvidia-driver-daemonset', '-o', 'json') |
+        ConvertFrom-Json).items
+    $driver = @($driverPods | Where-Object { $_.spec.nodeName -eq $node.metadata.name })
+    if ($driver.Count -ne 1) { throw 'Expected one GPU driver pod on the confidential worker.' }
+    $driverName = $driver[0].metadata.name
+    foreach ($operation in @('-f', '-e', '-srs', '-q')) {
+        $command = @('exec', '-n', 'gpu-operator', $driverName, '-c', 'nvidia-driver-ctr', '--', 'nvidia-smi', 'conf-compute', $operation)
+        if ($operation -eq '-srs') { $command += '1' }
+        $output = Invoke-Kube $command
+        $output | Set-Content (Join-Path $runDirectory "cc-$($operation.TrimStart('-')).txt")
+        if ($operation -eq '-f' -and "$output" -notmatch 'CC status: ON') { throw 'GPU confidential mode is not ON.' }
+        if ($operation -eq '-e' -and "$output" -notmatch 'CC Environment: PRODUCTION') { throw 'GPU is not in PRODUCTION mode.' }
+        if ($operation -eq '-q' -and "$output" -notmatch 'CC GPUs Ready State\s*: Ready') { throw 'GPU is not Ready.' }
+    }
+
+    $guideCommit = '136262ef00ad75b8e0bc789563f043006fb68f4c'
+    $manifestUrl = "https://raw.githubusercontent.com/Azure/az-cgpu-onboarding/$guideCommit/docs/cgpu-aks-attestation.yaml"
+    $attestation = (Invoke-WebRequest $manifestUrl).Content
+    if ($attestation -notmatch 'python3 -m verifier.cc_admin') { throw 'Upstream attestation manifest changed; review it before continuing.' }
+    $identity = Invoke-Kube @('exec', '-n', 'gpu-operator', $driverName, '-c', 'nvidia-driver-ctr',
+        '--', 'nvidia-smi', '--query-gpu=uuid', '--format=csv,noheader')
+    $uuid = ("$identity").Trim()
+    if ($uuid -notmatch '^GPU-[0-9a-fA-F-]+$') { throw 'Expected exactly one GPU UUID.' }
+    $result.GpuUuid = $uuid
+    $attestation = $attestation.Replace('./prodtest/bin/python3 -m verifier.cc_admin',
+        './prodtest/bin/python3 -m verifier.cc_admin --ocsp_attestation_settings strict')
+    # Pin scheduling and deadline while preserving the guide's verifier installation.
+    $attestation = $attestation.Replace('  backoffLimit: 0', "  backoffLimit: 0`n  activeDeadlineSeconds: 900")
+    $attestation = $attestation.Replace('      restartPolicy: Never', @"
+      restartPolicy: Never
+      nodeSelector:
+        agentpool: gpunp
+      tolerations:
+        - key: sku
+          operator: Equal
+          value: gpu
+          effect: NoSchedule
+"@)
+    $attestationPath = Join-Path $runDirectory 'attestation.yaml'
+    $attestation | Set-Content $attestationPath
+    foreach ($phase in @('before', 'after')) {
+        Invoke-Kube @('apply', '-f', $attestationPath)
+        Wait-GpuJob -Name local-gpu-attestation -Namespace attest -TimeoutSeconds 950
+        $log = Invoke-Kube @('logs', '-n', 'attest', 'job/local-gpu-attestation')
+        $text = $log -join "`n"
+        $redacted = $text -replace '(?s)Entity Attestation Token:.*', '[Attestation token omitted]'
+        $redacted | Set-Content (Join-Path $runDirectory "attestation-$phase.txt")
+        if ($text -notmatch 'GPU Attestation is Successful\.') { throw "GPU attestation $phase did not report success." }
+        if ($text -notmatch "(?i)$([regex]::Escape($uuid))") { throw "Attestation $phase did not identify this worker's GPU." }
+        $result["Attestation${phase}Passed"] = $true
+        Invoke-Kube @('delete', 'job', 'local-gpu-attestation', '-n', 'attest', '--wait=true')
+        if ($phase -eq 'before') {
+            $workloadUrl = "https://raw.githubusercontent.com/Azure/az-cgpu-onboarding/$guideCommit/docs/samples-tf-matmul-demo.yaml"
+            $smoke = Get-GuideWorkloadManifest (Invoke-WebRequest $workloadUrl).Content
+            $smokePath = Join-Path $runDirectory 'gpu-smoke-test.yaml'
+            $smoke | Set-Content $smokePath
+            Invoke-Kube @('apply', '-f', $smokePath)
+            Wait-GpuJob -Name tf-matmul-demo -Namespace default -TimeoutSeconds 950
+            $log = Invoke-Kube @('logs', 'job/tf-matmul-demo')
+            $log | Set-Content (Join-Path $runDirectory 'gpu-smoke-test.txt')
+            if (($log -join "`n") -notmatch 'GPU matmul device:.*GPU:0') { throw 'Guide TensorFlow workload did not report GPU execution.' }
+            $result.GpuWorkloadPassed = $true
+        }
+    }
+    $result.Status = 'Succeeded'
+}
+catch {
+    $result.Error = $_.Exception.Message
+    if ($result.Status -notlike 'Blocked*') { $result.Status = 'Failed' }
+    throw
 }
 finally {
-    $env:AZURE_EXTENSION_DIR = $previousExtensionDirectory
-    $env:AZURE_EXTENSION_USE_DYNAMIC_INSTALL = $previousDynamicInstall
+    try {
+        if ($created -and -not $KeepRunning) {
+            $clusters = @(Invoke-Az @('aks', 'list', '-g', $ResourceGroup, '-o', 'json') | ConvertFrom-Json)
+            if ($clusters.Count -eq 1) {
+                Wait-SampleAksReady $az $SubscriptionId $ResourceGroup $ClusterName
+                Stop-SampleAks $az $SubscriptionId $ResourceGroup $ClusterName
+                $state = Invoke-Az @('aks', 'show', '-g', $ResourceGroup, '-n', $ClusterName,
+                    '--query', 'powerState.code', '-o', 'tsv')
+                $result.FinalPowerState = "$state"
+                if ($state -ne 'Stopped') { throw 'Disposable AKS did not stop; inspect it immediately for ongoing NCC charges.' }
+                $nodeGroup = $clusters[0].nodeResourceGroup
+                $sets = @(Invoke-Az @('vmss', 'list', '-g', $nodeGroup, '-o', 'json') | ConvertFrom-Json)
+                foreach ($set in $sets) {
+                    $instances = @(Invoke-Az @('vmss', 'list-instances', '-g', $nodeGroup, '-n', $set.name,
+                        '--expand', 'instanceView', '-o', 'json') | ConvertFrom-Json)
+                    if (@($instances | Where-Object { 'PowerState/deallocated' -notin @($_.instanceView.statuses.code) }).Count) {
+                        throw "Scale set $($set.name) still has allocated instances after AKS stop."
+                    }
+                }
+                $result.ComputeDeallocated = $true
+            }
+        }
+        elseif ($created) { $result.FinalPowerState = 'KeptRunningByRequest' }
+    }
+    catch {
+        $result.CleanupError = $_.Exception.Message
+        $result.Status = 'CleanupFailed'
+        throw
+    }
+    finally {
+        $result.FinishedAtUtc = [DateTime]::UtcNow.ToString('o')
+        if ($result.Contains('EvidenceDirectory')) {
+            $result | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $runDirectory 'result.json')
+            Write-Host "Evidence: $runDirectory"
+        }
+        $env:AZURE_EXTENSION_DIR = $oldExtensions
+        $env:AZURE_EXTENSION_USE_DYNAMIC_INSTALL = $oldDynamicInstall
+    }
 }
