@@ -1,12 +1,38 @@
 # Azure Kubernetes Service (AKS) Confidential Computing Samples
 
-**Last Updated:** February 2026
+**Last Updated:** November 2026
 
 ## Overview
 
-Deploy Azure Kubernetes Service clusters with AMD SEV-SNP confidential node pools and Customer Managed Keys (CMK).
+Deploy Azure Kubernetes Service clusters with confidential CPU node pools or a
+confidential NVIDIA H100 GPU worker. The CPU sample includes Customer Managed
+Keys (CMK); the GPU sample follows the Azure confidential H100 onboarding guide.
+
+## Choose a sample
+
+| Sample | What it covers |
+|---|---|
+| [Confidential H100 GPU worker](aks-gpu-worker/README.md) | Single H100 worker on the latest offered AKS node image, guide-only GPU Operator installation, TensorFlow execution verified on GPU, and strict GPU attestation before and after the workload. |
+| [Confidential CPU node pools with CMK](#buildrandomaksps1) | AMD SEV-SNP confidential node pools, Key Vault, and customer-managed encryption keys. |
+| [AKS virtual nodes](virtual%20nodes/README.md) | Virtual nodes backed by ACI, hello-world scheduling validation, and a confidential ACI follow-on manifest. |
+
+### Start with the confidential H100 worker
+
+See the [H100 worker guide](aks-gpu-worker/README.md) for prerequisites,
+preflight and deployment commands, redacted attestation output, and cleanup.
+The sample was revalidated in West Europe using an Azure-FDE kernel at least
+`6.8.0-1071-azure-fde`. Successful execution on a newer AKS image is not
+Microsoft/NVIDIA support certification; the guide explains that boundary.
+GPU attestation is not a separate CPU/whole-VM attestation claim.
+
+The worker sample stops newly created compute automatically, but does **not**
+delete resources. Delete its resource group when finished to remove retained
+disks, IPs, and other potentially billable resources.
 
 ## Architecture
+
+The following architecture describes the confidential CPU node-pool/CMK sample.
+For the H100 configuration, use the [GPU worker guide](aks-gpu-worker/README.md).
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

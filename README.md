@@ -50,6 +50,7 @@ steps. Not every sample requires every tool listed below.
 | Send and receive messages through a confidential managed service | [Service Bus Premium](service-bus-examples/README.md) | New confidential-enabled namespace, passwordless messaging, and exact message read-back checks. |
 | Explore attestation in a container | [Visual attestation v2 on ACI](aci-samples/visual-attestation-demo-v2/README.md) | Direct Microsoft Azure Attestation calls and a Confidential-versus-Standard comparison. |
 | Deploy a confidential VM or H100 confidential GPU VM | [VM samples](vm-samples/README.md) | AMD SEV-SNP, Intel TDX, and H100 paths with sample-specific attestation and prerequisites. |
+| Run a confidential H100 GPU workload on Kubernetes | [AKS confidential H100 worker](aks-samples/aks-gpu-worker/README.md) | Guide-only GPU Operator automation on the latest offered AKS node image, TensorFlow GPU validation, and strict GPU attestation before and after the workload. Compute stops automatically; delete the resource group afterward. |
 | Keep partner datasets separate while computing shared results | [Federated multi-party analytics](multi-party-samples/advanced-app-federated/README.md) | Each partner processes its own data in its own TEE and returns aggregates. |
 | Explore confidential video processing | [Automotive machine vision](automotive-machine-vision/README.md) | Confidential ACI video redaction with HTTPS, CCE policy, and an attestation gate. |
 
@@ -80,6 +81,7 @@ must not be used to send sensitive data.
 
 | Addition | Description |
 |---|---|
+| **[Confidential H100 AKS worker](aks-samples/aks-gpu-worker/README.md)** | Deploy a single confidential H100 worker using the Azure onboarding guide's GPU Operator path and latest offered AKS image. Includes strict GPU attestation, a GPU-verified TensorFlow workload, redacted example output, and automatic compute shutdown. Revalidated in West Europe; successful execution on a newer image is not vendor-support certification. |
 | **[Confidential Container Apps hello world](azure-container-apps-sample/container-apps-acc/README.md#start-here)** | Deploy Microsoft's HTML quickstart using ARM and PowerShell, explicitly bound to a dedicated DC4 confidential workload profile in UAE North. |
 | **[Native Azure Functions on confidential Container Apps](azure-container-apps-sample/functions-on-azure-container-apps/README.md#start-here)** | Tested Node.js 24 `GET /api/hello` JSON endpoint with fresh ACR builds, immutable image deployment, managed identity, and private Blob host storage. Includes local Azurite testing, host-health checks, and portal/API access instructions. |
 | **[Explicit confidential-compute validation](azure-container-apps-sample/README.md#validate-confidential-compute-placement)** | Read live app/environment resources, match the selected profile to DC4, and check active/healthy revisions. Includes expected output and portal cross-checks, with a clear distinction from cryptographic attestation. |
@@ -244,6 +246,7 @@ Confidential Virtual Machine (CVM) deployment scripts:
 
 ### [AKS Samples](/aks-samples/README.md)
 Azure Kubernetes Service with AMD SEV-SNP confidential computing:
+- **[Confidential H100 GPU worker](aks-samples/aks-gpu-worker/README.md)** - Guide-only deployment on the latest offered AKS node image, strict GPU attestation before and after a TensorFlow GPU workload, and automatic compute shutdown. See the sample for quota, support boundaries, and resource deletion.
 - **BuildRandomAKS.ps1** - AKS cluster with Customer Managed Keys and confidential node pools
 - **[AKS Virtual Nodes on Confidential AKS](/aks-samples/virtual%20nodes/README.md)** - End-to-end sample that deploys AKS with virtual nodes backed by ACI, validates hello-world scheduling on the virtual node, and links to a confidential ACI follow-on manifest.
 
