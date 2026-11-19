@@ -4,6 +4,12 @@ This example deploys a single **Azure Confidential VM** (AMD SEV-SNP) and demons
 **Secure Key Release** — the ability for a VM to prove its hardware identity to Azure
 Key Vault and receive an encryption key that cannot be accessed any other way.
 
+> **Not using Confidential Computing?** Secure Key Release is a feature of Azure Key Vault
+> Premium / Managed HSM and works with **Trusted Launch** VMs (Gen2, Secure Boot + vTPM) too —
+> no confidential SKU or quota required. See
+> [**`README-trusted-launch.md`**](./README-trusted-launch.md) for a deployable, self-contained
+> Trusted Launch counterpart to this example.
+
 ## What It Does
 
 ```
